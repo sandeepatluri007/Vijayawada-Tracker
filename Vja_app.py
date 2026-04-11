@@ -1,3 +1,10 @@
+"""
+Smart Meter Field Tracker
+=========================
+Backend : streamlit-gsheets-connection  (Google Sheets)
+Author  : improved & bug-fixed version
+"""
+
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
@@ -5,260 +12,737 @@ from datetime import date
 import urllib.parse
 import math
 
-# ==========================================
-# UI Configuration
-# ==========================================
-st.set_page_config(page_title="Field Meter Tracker", page_icon="⚡", layout="centered")
+# ── Page config ───────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Field Meter Tracker",
+    page_icon="⚡",
+    layout="centered",
+    initial_sidebar_state="collapsed",
+)
 
+# ── CSS – mobile-first, field-grade ──────────────────────────────────────────
 st.markdown("""
-    <style>
-    [data-testid="stMetricValue"] { font-size: 24px; }
-    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #007bff; color: white; }
-    .save-btn>button { background-color: #28a745; }
-    </style>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+.stApp { background:#0f1117; color:#e8ecf0; }
+#MainMenu, footer, header { visibility:hidden; }
+
+/* ── top banner ── */
+.top-banner {
+    background: linear-gradient(135deg,#1a2744,#0d1b35);
+    border-bottom: 2px solid #2563eb;
+    padding: 12px 16px 10px;
+    margin: -1rem -1rem 1rem;
+    display:flex; align-items:center; gap:10px;
+}
+.top-banner .t { font-family:'Rajdhani',sans-serif; font-size:1.45rem;
+    font-weight:700; color:#f0f4ff; letter-spacing:.6px; margin:0; }
+.top-banner .s { font-size:.72rem; color:#7fb3f5; margin:0; }
+
+/* ── tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    background:#131720; border-radius:10px; padding:4px; gap:2px;
+    overflow-x:auto; white-space:nowrap;
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius:8px !important; padding:8px 13px !important;
+    font-family:'Rajdhani',sans-serif; font-size:.88rem !important;
+    font-weight:600 !important; color:#8a9bbf !important;
+    background:transparent !important; border:none !important;
+    min-width:auto !important; flex-shrink:0;
+}
+.stTabs [aria-selected="true"] { background:#2563eb !important; color:#fff !important; }
+
+/* ── metric cards ── */
+[data-testid="stMetric"] {
+    background: linear-gradient(145deg,#1a2540,#141c2e);
+    border: 1px solid #243050; border-radius:12px;
+    padding: 14px 12px !important;
+}
+[data-testid="stMetricLabel"]  { color:#6b7fa3 !important; font-size:.75rem !important; text-transform:uppercase; letter-spacing:.6px; }
+[data-testid="stMetricValue"]  { font-family:'Rajdhani',sans-serif; font-size:1.9rem !important; font-weight:700; color:#fff !important; }
+[data-testid="stMetricDelta"]  { font-size:.75rem !important; }
+
+/* ── section headers ── */
+.sec-hdr {
+    font-family:'Rajdhani',sans-serif; font-size:1.05rem; font-weight:700;
+    color:#7fb3f5; border-left:3px solid #2563eb; padding-left:9px;
+    margin: 1rem 0 .5rem;
+}
+
+/* ── buttons ── */
+.stButton>button {
+    background:#2563eb !important; color:#fff !important;
+    border:none !important; border-radius:8px !important;
+    font-family:'Rajdhani',sans-serif !important; font-weight:600 !important;
+    font-size:.93rem !important; padding:9px 18px !important;
+    width:100% !important; transition:background .2s;
+}
+.stButton>button:hover { background:#1d4ed8 !important; }
+
+/* ── inputs ── */
+.stSelectbox>div>div, .stNumberInput>div>div>input,
+.stTextInput>div>div>input, .stDateInput>div>div>input {
+    background:#1a2235 !important; border:1px solid #2a3a58 !important;
+    border-radius:8px !important; color:#e0e8f5 !important; font-size:.9rem !important;
+}
+.stSelectbox label, .stNumberInput label, .stTextInput label,
+.stDateInput label, .stMultiSelect label {
+    color:#8ca4c8 !important; font-size:.8rem !important; font-weight:500 !important;
+}
+
+/* ── forms ── */
+.stForm { background:#141c2e !important; border:1px solid #243050 !important;
+    border-radius:12px !important; padding:14px !important; }
+
+/* ── dataframe ── */
+.stDataFrame { border-radius:10px; overflow:hidden; }
+[data-testid="stDataFrameResizable"] th {
+    background:#1a2540 !important; color:#7fb3f5 !important;
+    font-family:'Rajdhani',sans-serif; font-weight:600 !important; font-size:.82rem !important;
+}
+[data-testid="stDataFrameResizable"] td { color:#ccd6e8 !important; font-size:.8rem !important; }
+
+/* ── warning / danger ── */
+.warn-box {
+    background:#2d1b0a; border:1px solid #d97706; border-radius:9px;
+    padding:9px 13px; color:#fbbf24; font-size:.83rem; margin-bottom:.6rem;
+}
+.danger-btn>button { background:#991b1b !important; }
+.success-btn>button { background:#065f46 !important; }
+
+/* ── whatsapp button ── */
+.wa-btn {
+    display:block; text-align:center; background:#25D366; color:#fff !important;
+    padding:11px; border-radius:9px; text-decoration:none; font-weight:700;
+    font-family:'Rajdhani',sans-serif; font-size:1rem; letter-spacing:.4px;
+    margin-top:.5rem;
+}
+.wa-btn:hover { background:#1ebe57; }
+
+hr { border-color:#1e2d47; }
+
+@media (max-width:600px){
+    .top-banner .t { font-size:1.15rem; }
+    [data-testid="stMetricValue"] { font-size:1.55rem !important; }
+    .stTabs [data-baseweb="tab"] { padding:6px 9px !important; font-size:.8rem !important; }
+}
+</style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Smart Meter Field Tracker")
+# ── Top banner ────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="top-banner">
+  <span style="font-size:1.7rem;">⚡</span>
+  <div>
+    <p class="t">SMART METER FIELD TRACKER</p>
+    <p class="s">Live via Google Sheets · Vijayawada</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-# Create Connection
+# ── Google Sheets connection ──────────────────────────────────────────────────
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def get_data(worksheet):
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def get_data(worksheet: str) -> pd.DataFrame:
+    """Read a worksheet. Returns empty DataFrame on any error."""
     try:
-        # Force all incoming data to be strings to prevent Pandas TypeErrors
-        return conn.read(worksheet=worksheet, ttl="0").astype(str).fillna("")
+        # BUG FIX: ttl must be int (seconds), not string "0"
+        df = conn.read(worksheet=worksheet, ttl=0)
+        return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
     except Exception:
         return pd.DataFrame()
 
-# ==========================================
-# Tabs
-# ==========================================
-tab_dash, tab_inst, tab_inv, tab_admin = st.tabs(["📊 Dashboard", "🛠️ Installation", "📦 Inventory", "⚙️ Admin"])
 
-# ------------------------------------------
-# 1. Dashboard Tab (Template 2 WhatsApp)
-# ------------------------------------------
+def safe_int(val, default: int = 0) -> int:
+    """
+    BUG FIX: convert string/float/nan safely to int.
+    int("5.0") raises ValueError — must go through float first.
+    """
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
+
+
+def safe_numeric_col(df: pd.DataFrame, col: str) -> pd.Series:
+    """Coerce a column to numeric, filling NaN/errors with 0."""
+    return pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+
+def has_col(df: pd.DataFrame, *cols) -> bool:
+    """True only if ALL given columns exist in df."""
+    return all(c in df.columns for c in cols)
+
+
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+tab_dash, tab_inst, tab_inv, tab_admin = st.tabs([
+    "📊 Dashboard", "🛠️ Installations", "📦 Inventory", "⚙️ Admin"
+])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DASHBOARD
+# ═══════════════════════════════════════════════════════════════════════════════
 with tab_dash:
-    df_inst = get_data("Installations")
-    df_inv = get_data("Inventory")
-    
-    if df_inst.empty or df_inv.empty:
-        st.info("Awaiting initial data. Please add Admin data and Inventory first.")
-    else:
-        st.subheader("Inventory Status")
-        total_in_1ph = pd.to_numeric(df_inv[df_inv['type'] == '1 PH']['qty'], errors='coerce').sum()
-        total_in_3ph = pd.to_numeric(df_inv[df_inv['type'] == '3 PH']['qty'], errors='coerce').sum()
-        total_out_1ph = pd.to_numeric(df_inst['qty_1ph'], errors='coerce').sum()
-        total_out_3ph = pd.to_numeric(df_inst['qty_3ph'], errors='coerce').sum()
 
-        c1, c2 = st.columns(2)
-        c1.metric("Pending 1PH", int(total_in_1ph - total_out_1ph))
-        c2.metric("Pending 3PH", int(total_in_3ph - total_out_3ph))
-        
-        st.divider()
-        st.subheader("Installation Summary & Filters")
-        
-        f_col1, f_col2 = st.columns(2)
-        with f_col1:
+    df_inst = get_data("Installations")
+    df_inv  = get_data("Inventory")
+
+    # ── Inventory stock cards ─────────────────────────────────────
+    st.markdown('<div class="sec-hdr">📦 Inventory Stock</div>', unsafe_allow_html=True)
+
+    if not df_inv.empty and has_col(df_inv, "type", "qty"):
+        total_in_1ph = safe_numeric_col(df_inv[df_inv["type"] == "1 PH"], "qty").sum()
+        total_in_3ph = safe_numeric_col(df_inv[df_inv["type"] == "3 PH"], "qty").sum()
+    else:
+        total_in_1ph = total_in_3ph = 0
+
+    if not df_inst.empty and has_col(df_inst, "qty_1ph", "qty_3ph"):
+        total_out_1ph = safe_numeric_col(df_inst, "qty_1ph").sum()
+        total_out_3ph = safe_numeric_col(df_inst, "qty_3ph").sum()
+    else:
+        total_out_1ph = total_out_3ph = 0
+
+    pending_1ph = int(total_in_1ph - total_out_1ph)
+    pending_3ph = int(total_in_3ph - total_out_3ph)
+
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    sc1.metric("Received 1PH",  int(total_in_1ph))
+    sc2.metric("Received 3PH",  int(total_in_3ph))
+    sc3.metric("Pending 1PH",   pending_1ph,
+               delta="⚠️ Deficit!" if pending_1ph < 0 else None,
+               delta_color="inverse")
+    sc4.metric("Pending 3PH",   pending_3ph,
+               delta="⚠️ Deficit!" if pending_3ph < 0 else None,
+               delta_color="inverse")
+
+    st.divider()
+
+    # ── Installation filters ──────────────────────────────────────
+    st.markdown('<div class="sec-hdr">🔌 Installation Summary</div>', unsafe_allow_html=True)
+
+    # BUG FIX: guard KeyError when df_inst is empty or missing columns
+    if df_inst.empty or not has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
+        st.info("No installation data yet. Add entries in the Installations tab.")
+    else:
+        f1, f2 = st.columns(2)
+        with f1:
+            # BUG FIX: date_input with list default returns tuple; handle len==1
             date_range = st.date_input("Date Range", [date.today(), date.today()])
-        with f_col2:
+        with f2:
             meter_filter = st.multiselect("Meter Type", ["1 PH", "3 PH"], default=["1 PH", "3 PH"])
-        
-        loc_list = [loc for loc in df_inst['location'].unique().tolist() if loc.strip() != ""]
-        tech_list = [tech for tech in df_inst['tech_name'].unique().tolist() if tech.strip() != ""]
-        
-        f_col3, f_col4 = st.columns(2)
-        with f_col3:
-            loc_filter = st.multiselect("Locations", loc_list, default=loc_list)
-        with f_col4:
+
+        loc_list  = sorted([l for l in df_inst["location"].unique() if l.strip()])
+        tech_list = sorted([t for t in df_inst["tech_name"].unique() if t.strip()])
+
+        f3, f4 = st.columns(2)
+        with f3:
+            loc_filter  = st.multiselect("Locations",   loc_list,  default=loc_list)
+        with f4:
             tech_filter = st.multiselect("Technicians", tech_list, default=tech_list)
 
-        filtered_df = df_inst.copy()
-        if len(date_range) == 2:
-            filtered_df['date_obj'] = pd.to_datetime(filtered_df['date']).dt.date
-            filtered_df = filtered_df[(filtered_df['date_obj'] >= date_range[0]) & (filtered_df['date_obj'] <= date_range[1])]
-        
+        # ── Apply filters ─────────────────────────────────────────
+        filtered = df_inst.copy()
+
+        # BUG FIX: date_range may be a single date (tuple len==1) if user
+        # clicks only the start date on mobile; guard both cases
+        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+            d_start, d_end = date_range[0], date_range[1]
+        elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
+            d_start = d_end = date_range[0]
+        else:
+            d_start = d_end = date_range   # single date object
+
+        filtered["_date"] = pd.to_datetime(filtered["date"], errors="coerce").dt.date
+        filtered = filtered[
+            (filtered["_date"] >= d_start) &
+            (filtered["_date"] <= d_end)
+        ]
         if loc_filter:
-            filtered_df = filtered_df[filtered_df['location'].isin(loc_filter)]
+            filtered = filtered[filtered["location"].isin(loc_filter)]
         if tech_filter:
-            filtered_df = filtered_df[filtered_df['tech_name'].isin(tech_filter)]
+            filtered = filtered[filtered["tech_name"].isin(tech_filter)]
+
+        filtered["qty_1ph"] = safe_numeric_col(filtered, "qty_1ph")
+        filtered["qty_3ph"] = safe_numeric_col(filtered, "qty_3ph")
 
         show_1ph = "1 PH" in meter_filter
         show_3ph = "3 PH" in meter_filter
-        
-        filtered_df['qty_1ph'] = pd.to_numeric(filtered_df['qty_1ph'], errors='coerce').fillna(0)
-        filtered_df['qty_3ph'] = pd.to_numeric(filtered_df['qty_3ph'], errors='coerce').fillna(0)
+        sum_1ph  = int(filtered["qty_1ph"].sum()) if show_1ph else 0
+        sum_3ph  = int(filtered["qty_3ph"].sum()) if show_3ph else 0
 
-        m1, m2 = st.columns(2)
-        sum_1ph = int(filtered_df['qty_1ph'].sum()) if show_1ph else 0
-        sum_3ph = int(filtered_df['qty_3ph'].sum()) if show_3ph else 0
-        m1.metric("Filtered 1PH Installed", sum_1ph)
-        m2.metric("Filtered 3PH Installed", sum_3ph)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Filtered 1PH", sum_1ph)
+        m2.metric("Filtered 3PH", sum_3ph)
+        m3.metric("Grand Total",  sum_1ph + sum_3ph)
 
-        if not filtered_df.empty:
-            st.subheader("Technician Breakdown")
-            group_df = filtered_df.groupby(['tech_name', 'location'])[['qty_1ph', 'qty_3ph']].sum().reset_index()
-            group_df['Total'] = group_df['qty_1ph'] + group_df['qty_3ph']
-            st.dataframe(group_df, use_container_width=True)
+        # ── Technician breakdown ──────────────────────────────────
+        if not filtered.empty:
+            st.markdown('<div class="sec-hdr">👷 Technician Breakdown</div>', unsafe_allow_html=True)
+            group_df = (
+                filtered
+                .groupby(["tech_name", "location"])[["qty_1ph", "qty_3ph"]]
+                .sum()
+                .reset_index()
+            )
+            group_df["Total"] = group_df["qty_1ph"] + group_df["qty_3ph"]
+            group_df.columns = ["Technician", "Location", "1PH", "3PH", "Total"]
+            st.dataframe(group_df, use_container_width=True, hide_index=True)
 
-            st.subheader("Export & Share")
-            csv_data = group_df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Download Summary as CSV (Print to PDF from Excel)", data=csv_data, file_name="Installation_Summary.csv", mime="text/csv")
+            # ── Export & WhatsApp ─────────────────────────────────
+            st.markdown('<div class="sec-hdr">📤 Export & Share</div>', unsafe_allow_html=True)
+            csv_data = group_df.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Download CSV", data=csv_data,
+                               file_name="Installation_Summary.csv", mime="text/csv",
+                               use_container_width=True)
 
-            # WhatsApp Template 2
-            date_string = f"{date_range[0]} to {date_range[1]}" if len(date_range) == 2 else str(date_range[0])
-            loc_string = ", ".join(loc_filter) if loc_filter else "Vijayawada"
-            
-            wa_text = f"📅 *Date:* {date_string} | *{loc_string}*\n\n"
-            for index, row in group_df.iterrows():
-                wa_text += f"*{row['tech_name']}* ({row['location']}) -> 1PH: {int(row['qty_1ph']) if show_1ph else 0}, 3PH: {int(row['qty_3ph']) if show_3ph else 0}\n"
-            
-            wa_text += f"\n*Total 1PH:* {sum_1ph} | *Total 3PH:* {sum_3ph} | *Grand Total:* {sum_1ph + sum_3ph}"
-            
-            wa_url = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
-            st.markdown(f'<a href="{wa_url}" target="_blank" style="display: block; text-align: center; background-color: #25D366; color: white; padding: 10px; border-radius: 5px; text-decoration: none; font-weight: bold;">💬 Share to WhatsApp</a>', unsafe_allow_html=True)
+            # BUG FIX: always build a valid date string — handle len==1 safely
+            date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
+            loc_str  = ", ".join(loc_filter) if loc_filter else "All Locations"
 
-# ------------------------------------------
-# 2. Installations Tab
-# ------------------------------------------
+            wa_lines = [f"📅 *Date:* {date_str} | *{loc_str}*\n"]
+            for _, row in group_df.iterrows():
+                q1_str = str(int(row["1PH"])) if show_1ph else "—"
+                q3_str = str(int(row["3PH"])) if show_3ph else "—"
+                wa_lines.append(f"*{row['Technician']}* ({row['Location']}) → 1PH: {q1_str}, 3PH: {q3_str}")
+            wa_lines.append(f"\n*Total 1PH:* {sum_1ph} | *Total 3PH:* {sum_3ph} | *Grand Total:* {sum_1ph + sum_3ph}")
+
+            wa_text = "\n".join(wa_lines)
+            wa_url  = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
+            st.markdown(
+                f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Share Summary via WhatsApp</a>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("No records match the selected filters.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  INSTALLATIONS
+# ═══════════════════════════════════════════════════════════════════════════════
 with tab_inst:
-    st.header("Daily Entry")
+
+    # ── load reference data ───────────────────────────────────────
     df_techs = get_data("Technicians")
-    df_locs = get_data("Locations")
-    
-    active_techs = df_techs[df_techs['is_active'] == "1"]['name'].tolist() if not df_techs.empty and 'is_active' in df_techs.columns else []
-    active_locs = df_locs['location_name'].dropna().tolist() if not df_locs.empty else []
+    df_locs  = get_data("Locations")
+
+    active_techs = (
+        df_techs[df_techs["is_active"] == "1"]["name"].tolist()
+        if not df_techs.empty and has_col(df_techs, "is_active", "name") else []
+    )
+    active_locs = (
+        df_locs["location_name"].dropna().tolist()
+        if not df_locs.empty and "location_name" in df_locs.columns else []
+    )
+    # filter out blank strings
+    active_techs = [t for t in active_techs if t.strip()]
+    active_locs  = [l for l in active_locs  if l.strip()]
+
+    # ── Entry form ────────────────────────────────────────────────
+    st.markdown('<div class="sec-hdr">➕ Daily Entry</div>', unsafe_allow_html=True)
 
     if not active_techs or not active_locs:
-        st.warning("Please add Active Technicians and Locations in the Admin tab first.")
+        st.warning("⚠️ Please add active Technicians and Locations in the **Admin** tab first.")
     else:
-        with st.form("inst_form"):
-            entry_date = st.date_input("Installation Date", date.today())
-            tech = st.selectbox("Technician", active_techs)
-            loc = st.selectbox("Location", active_locs)
-            c1, c2 = st.columns(2)
-            q1 = c1.number_input("1 PH Qty", min_value=0, step=1)
-            q3 = c2.number_input("3 PH Qty", min_value=0, step=1)
-            
-            if st.form_submit_button("Submit Data"):
+        with st.form("inst_form", clear_on_submit=True):
+            fi1, fi2 = st.columns(2)
+            with fi1:
+                entry_date = st.date_input("Installation Date", date.today())
+            with fi2:
+                tech = st.selectbox("Technician", active_techs)
+            loc  = st.selectbox("Location", active_locs)
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=0)
+            with fc2:
+                q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=0)
+            f_sub = st.form_submit_button("💾 Submit Entry")
+
+        if f_sub:
+            if q1 == 0 and q3 == 0:
+                st.error("❌ Both quantities are 0. Enter at least one.")
+            else:
                 df_existing = get_data("Installations")
-                is_dup = not df_existing[(df_existing['date'] == str(entry_date)) & (df_existing['tech_name'] == str(tech))].empty
+                is_dup = False
+                if not df_existing.empty and has_col(df_existing, "date", "tech_name"):
+                    is_dup = not df_existing[
+                        (df_existing["date"]      == str(entry_date)) &
+                        (df_existing["tech_name"] == str(tech))
+                    ].empty
                 if is_dup:
-                    st.error(f"Entry already exists for {tech} on {entry_date}. Edit below.")
+                    st.error(f"❌ Entry for **{tech}** on **{entry_date}** already exists. Edit it below.")
                 else:
-                    new_row = pd.DataFrame([{"date": str(entry_date), "tech_name": str(tech), "location": str(loc), "qty_1ph": str(q1), "qty_3ph": str(q3)}])
-                    updated_df = pd.concat([df_existing, new_row], ignore_index=True)
-                    conn.update(worksheet="Installations", data=updated_df.astype(str))
-                    st.success("Entry Saved!")
+                    new_row = pd.DataFrame([{
+                        "date"     : str(entry_date),
+                        "tech_name": str(tech),
+                        "location" : str(loc),
+                        "qty_1ph"  : str(q1),
+                        "qty_3ph"  : str(q3),
+                    }])
+                    updated = pd.concat([df_existing, new_row], ignore_index=True)
+                    conn.update(worksheet="Installations", data=updated.astype(str))
+                    st.success(f"✅ Entry saved for {tech} on {entry_date}.")
                     st.rerun()
 
-    st.divider()
-    st.subheader("Recent Logs & Edits")
-    
+    # ── Log ───────────────────────────────────────────────────────
+    st.markdown('<div class="sec-hdr">📋 Installation Log</div>', unsafe_allow_html=True)
     log_data = get_data("Installations")
-    if not log_data.empty:
-        log_data_sorted = log_data.iloc[::-1].reset_index(drop=True)
-        items_per_page = 10
-        total_pages = max(1, math.ceil(len(log_data_sorted) / items_per_page))
-        page = st.number_input("Page", min_value=1, max_value=total_pages, step=1)
-        
-        start_idx = (page - 1) * items_per_page
-        end_idx = start_idx + items_per_page
-        st.dataframe(log_data_sorted.iloc[start_idx:end_idx], use_container_width=True)
 
-        st.caption("To edit or delete an entry, select it below:")
-        log_options = [f"{row['date']} | {row['tech_name']}" for index, row in log_data_sorted.iterrows()]
-        target_log = st.selectbox("Select Record", ["-- Select --"] + log_options)
+    if log_data.empty:
+        st.info("No installation entries yet.")
+    else:
+        log_sorted = log_data.iloc[::-1].reset_index(drop=True)
 
-        if target_log != "-- Select --":
-            t_date, t_tech = target_log.split(" | ")
-            curr_row = log_data[(log_data['date'] == t_date) & (log_data['tech_name'] == t_tech)].iloc[0]
-            
-            with st.form("edit_log"):
-                e_loc = st.selectbox("Location", active_locs, index=active_locs.index(curr_row['location']) if curr_row['location'] in active_locs else 0)
-                e_q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=int(curr_row['qty_1ph']) if curr_row['qty_1ph'] else 0)
-                e_q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=int(curr_row['qty_3ph']) if curr_row['qty_3ph'] else 0)
-                
-                col_up, col_del = st.columns(2)
-                with col_up:
-                    if st.form_submit_button("Update Entry"):
-                        mask = (log_data['date'] == t_date) & (log_data['tech_name'] == t_tech)
-                        log_data.loc[mask, ['location', 'qty_1ph', 'qty_3ph']] = [str(e_loc), str(e_q1), str(e_q3)]
-                        conn.update(worksheet="Installations", data=log_data.astype(str))
-                        st.success("Updated!")
-                        st.rerun()
-                with col_del:
-                    if st.form_submit_button("🗑️ Delete Entry", type="primary"):
-                        mask = (log_data['date'] == t_date) & (log_data['tech_name'] == t_tech)
-                        log_data = log_data[~mask]
-                        conn.update(worksheet="Installations", data=log_data.astype(str))
-                        st.success("Deleted!")
-                        st.rerun()
+        # pagination
+        ITEMS = 10
+        total_pages = max(1, math.ceil(len(log_sorted) / ITEMS))
+        page = st.number_input(f"Page (1 – {total_pages})", min_value=1, max_value=total_pages, step=1, value=1)
+        s, e = (page - 1) * ITEMS, page * ITEMS
 
-# ------------------------------------------
-# 3. Inventory Tab
-# ------------------------------------------
+        disp_log = log_sorted.iloc[s:e].copy()
+        if has_col(disp_log, "qty_1ph", "qty_3ph"):
+            disp_log["qty_1ph"] = disp_log["qty_1ph"].apply(lambda x: safe_int(x))
+            disp_log["qty_3ph"] = disp_log["qty_3ph"].apply(lambda x: safe_int(x))
+            disp_log["Total"]   = disp_log["qty_1ph"] + disp_log["qty_3ph"]
+        st.dataframe(disp_log, use_container_width=True, hide_index=True)
+
+        # ── Edit / Delete selector ────────────────────────────────
+        st.caption("Select a record to edit or delete:")
+
+        # BUG FIX: use index prefix to handle duplicate "date | tech" combos
+        # and avoid split() breaking on names containing " | "
+        log_options_map = {}
+        for idx, row in log_sorted.iterrows():
+            label = f"#{idx+1}  {row['date']} | {row['tech_name']}"
+            log_options_map[label] = idx
+
+        target_label = st.selectbox(
+            "Select Record",
+            ["-- Select --"] + list(log_options_map.keys()),
+            key="inst_sel",
+        )
+
+        if target_label != "-- Select --":
+            sel_idx  = log_options_map[target_label]
+            curr_row = log_sorted.iloc[sel_idx]
+
+            # BUG FIX: safe_int handles "5.0"-style float-strings from Sheets
+            curr_q1 = safe_int(curr_row.get("qty_1ph", 0))
+            curr_q3 = safe_int(curr_row.get("qty_3ph", 0))
+            # BUG FIX: loc index — default 0 if location missing from active list
+            curr_loc = curr_row.get("location", "")
+            loc_idx  = active_locs.index(curr_loc) if curr_loc in active_locs and active_locs else 0
+
+            st.markdown(
+                f'<div class="warn-box">⚠️ Editing / deleting: <b>{curr_row["tech_name"]}</b>'
+                f' on <b>{curr_row["date"]}</b></div>',
+                unsafe_allow_html=True,
+            )
+
+            with st.form("edit_log_form"):
+                # Show location selector only if options available
+                if active_locs:
+                    e_loc = st.selectbox("Location", active_locs, index=loc_idx)
+                else:
+                    e_loc = st.text_input("Location", value=curr_loc)
+
+                ec1, ec2 = st.columns(2)
+                with ec1:
+                    e_q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=curr_q1)
+                with ec2:
+                    e_q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=curr_q3)
+
+                btn_update, btn_delete = st.columns(2)
+                with btn_update:
+                    do_update = st.form_submit_button("✏️ Update Entry")
+                with btn_delete:
+                    do_delete = st.form_submit_button("🗑️ Delete Entry")
+
+            if do_update:
+                if e_q1 == 0 and e_q3 == 0:
+                    st.error("❌ Both quantities cannot be 0.")
+                else:
+                    # Match original (non-reversed) log_data by date + tech
+                    mask = (
+                        (log_data["date"]      == curr_row["date"]) &
+                        (log_data["tech_name"] == curr_row["tech_name"])
+                    )
+                    log_data.loc[mask, ["location", "qty_1ph", "qty_3ph"]] = [
+                        str(e_loc), str(e_q1), str(e_q3)
+                    ]
+                    conn.update(worksheet="Installations", data=log_data.astype(str))
+                    st.success("✅ Entry updated.")
+                    st.rerun()
+
+            if do_delete:
+                # Require explicit confirmation via session_state flag
+                st.session_state["pending_inst_del"] = curr_row["date"] + "||" + curr_row["tech_name"]
+
+        # Confirmation step — outside the form so the button works independently
+        if "pending_inst_del" in st.session_state:
+            del_key  = st.session_state["pending_inst_del"]
+            del_date, del_tech = del_key.split("||", 1)
+            st.markdown(
+                f'<div class="warn-box">⚠️ Confirm delete for <b>{del_tech}</b>'
+                f' on <b>{del_date}</b>? This cannot be undone.</div>',
+                unsafe_allow_html=True,
+            )
+            cy, cn = st.columns(2)
+            with cy:
+                if st.button("✅ Yes, Delete", key="conf_del_inst"):
+                    mask = (
+                        (log_data["date"]      == del_date) &
+                        (log_data["tech_name"] == del_tech)
+                    )
+                    log_data = log_data[~mask]
+                    conn.update(worksheet="Installations", data=log_data.astype(str))
+                    del st.session_state["pending_inst_del"]
+                    st.success("Deleted.")
+                    st.rerun()
+            with cn:
+                if st.button("❌ Cancel", key="cancel_del_inst"):
+                    del st.session_state["pending_inst_del"]
+                    st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  INVENTORY
+# ═══════════════════════════════════════════════════════════════════════════════
 with tab_inv:
-    st.header("Material Inward")
-    with st.form("inv_form"):
-        idate = st.date_input("Received Date", date.today())
-        itype = st.selectbox("Type", ["1 PH", "3 PH"])
-        iqty = st.number_input("Quantity", min_value=1)
-        imrn = st.text_input("MRN No")
-        imake = st.selectbox("Make", ["Schneider", "Genus"])
-        if st.form_submit_button("Add to Stock"):
+
+    # ── Inward form ───────────────────────────────────────────────
+    st.markdown('<div class="sec-hdr">📥 Inward Material from Store</div>', unsafe_allow_html=True)
+
+    with st.form("inv_form", clear_on_submit=True):
+        iv1, iv2 = st.columns(2)
+        with iv1:
+            idate = st.date_input("Received Date", date.today())
+            itype = st.selectbox("Type", ["1 PH", "3 PH"])
+        with iv2:
+            iqty  = st.number_input("Quantity", min_value=1, step=1, value=1)
+            imrn  = st.text_input("MRN No.")
+        imake = st.selectbox("Make", ["Schneider", "Genus", "Other"])
+        iv_sub = st.form_submit_button("📥 Add to Stock")
+
+    if iv_sub:
+        if not imrn.strip():
+            st.error("❌ MRN No. is required.")
+        else:
             df_inv_exist = get_data("Inventory")
-            new_inv = pd.DataFrame([{"date": str(idate), "type": str(itype), "qty": str(iqty), "mrn": str(imrn), "make": str(imake)}])
-            conn.update(worksheet="Inventory", data=pd.concat([df_inv_exist, new_inv]).astype(str))
-            st.success("Stock Inwarded!")
+            new_inv = pd.DataFrame([{
+                "date" : str(idate),
+                "type" : str(itype),
+                "qty"  : str(iqty),
+                "mrn"  : imrn.strip(),
+                "make" : str(imake),
+            }])
+            # BUG FIX: ignore_index=True to avoid index column being written to sheet
+            updated_inv = pd.concat([df_inv_exist, new_inv], ignore_index=True)
+            conn.update(worksheet="Inventory", data=updated_inv.astype(str))
+            st.success(f"✅ Inwarded {iqty} × {itype} ({imake}) — MRN {imrn.strip()}")
             st.rerun()
 
-# ------------------------------------------
-# 4. Admin Tab (Simplified Editor)
-# ------------------------------------------
+    # ── Stock summary cards ───────────────────────────────────────
+    st.markdown('<div class="sec-hdr">📊 Stock Summary</div>', unsafe_allow_html=True)
+    df_inv_t  = get_data("Inventory")
+    df_inst_s = get_data("Installations")
+
+    r_1ph = r_3ph = u_1ph = u_3ph = 0
+    if not df_inv_t.empty and has_col(df_inv_t, "type", "qty"):
+        r_1ph = int(safe_numeric_col(df_inv_t[df_inv_t["type"] == "1 PH"], "qty").sum())
+        r_3ph = int(safe_numeric_col(df_inv_t[df_inv_t["type"] == "3 PH"], "qty").sum())
+    if not df_inst_s.empty and has_col(df_inst_s, "qty_1ph", "qty_3ph"):
+        u_1ph = int(safe_numeric_col(df_inst_s, "qty_1ph").sum())
+        u_3ph = int(safe_numeric_col(df_inst_s, "qty_3ph").sum())
+
+    sm1, sm2, sm3, sm4 = st.columns(4)
+    sm1.metric("1PH Received",      r_1ph)
+    sm2.metric("3PH Received",      r_3ph)
+    sm3.metric("1PH Pending Stock", max(r_1ph - u_1ph, 0))
+    sm4.metric("3PH Pending Stock", max(r_3ph - u_3ph, 0))
+
+    # ── Inventory log with edit/delete ────────────────────────────
+    st.markdown('<div class="sec-hdr">📋 Inventory Log</div>', unsafe_allow_html=True)
+
+    if df_inv_t.empty:
+        st.info("No inventory entries yet.")
+    else:
+        inv_sorted = df_inv_t.iloc[::-1].reset_index(drop=True)
+
+        # Export
+        inv_exp = inv_sorted.rename(columns={
+            "date":"Date","type":"Type","qty":"Qty","mrn":"MRN No","make":"Make"
+        })
+        st.download_button(
+            "⬇ Export Inventory CSV",
+            inv_exp.to_csv(index=False).encode(),
+            "inventory.csv", "text/csv",
+            use_container_width=True,
+        )
+
+        # Pagination
+        ITEMS_INV   = 10
+        total_inv_p = max(1, math.ceil(len(inv_sorted) / ITEMS_INV))
+        inv_page    = st.number_input(f"Page (1–{total_inv_p})", min_value=1,
+                                      max_value=total_inv_p, step=1, value=1, key="inv_page")
+        si, ei = (inv_page - 1) * ITEMS_INV, inv_page * ITEMS_INV
+        st.dataframe(inv_sorted.iloc[si:ei], use_container_width=True, hide_index=True)
+
+        st.caption("Select an inventory entry to edit or delete:")
+
+        inv_options_map = {}
+        for idx, row in inv_sorted.iterrows():
+            label = f"#{idx+1}  {row.get('date','')} | {row.get('type','')} | MRN:{row.get('mrn','')}"
+            inv_options_map[label] = idx
+
+        inv_target = st.selectbox(
+            "Select Inventory Record",
+            ["-- Select --"] + list(inv_options_map.keys()),
+            key="inv_sel",
+        )
+
+        if inv_target != "-- Select --":
+            inv_idx = inv_options_map[inv_target]
+            inv_row = inv_sorted.iloc[inv_idx]
+
+            st.markdown(
+                f'<div class="warn-box">⚠️ Editing / deleting: MRN <b>{inv_row.get("mrn","")}</b>'
+                f' — {inv_row.get("type","")} ({inv_row.get("make","")})</div>',
+                unsafe_allow_html=True,
+            )
+
+            with st.form("edit_inv_form"):
+                ei1, ei2, ei3 = st.columns(3)
+                with ei1:
+                    e_qty  = st.number_input("Quantity", min_value=1, step=1,
+                                             value=safe_int(inv_row.get("qty", 1), 1))
+                with ei2:
+                    e_mrn  = st.text_input("MRN No.", value=str(inv_row.get("mrn", "")))
+                with ei3:
+                    make_opts = ["Schneider", "Genus", "Other"]
+                    curr_make = inv_row.get("make", "Schneider")
+                    mk_idx    = make_opts.index(curr_make) if curr_make in make_opts else 0
+                    e_make    = st.selectbox("Make", make_opts, index=mk_idx)
+
+                ib1, ib2 = st.columns(2)
+                with ib1:
+                    inv_do_update = st.form_submit_button("✏️ Update")
+                with ib2:
+                    inv_do_delete = st.form_submit_button("🗑️ Delete")
+
+            if inv_do_update:
+                if not e_mrn.strip():
+                    st.error("❌ MRN No. cannot be empty.")
+                else:
+                    # Match by original position in df_inv_t (non-reversed)
+                    orig_df = df_inv_t.copy()
+                    orig_inv_idx = len(orig_df) - 1 - inv_idx
+                    orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("qty")]  = str(e_qty)
+                    orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("mrn")]  = e_mrn.strip()
+                    orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("make")] = e_make
+                    conn.update(worksheet="Inventory", data=orig_df.astype(str))
+                    st.success("✅ Inventory entry updated.")
+                    st.rerun()
+
+            if inv_do_delete:
+                st.session_state["pending_inv_del"] = inv_idx
+
+        # Inventory delete confirmation
+        if "pending_inv_del" in st.session_state:
+            del_inv_idx = st.session_state["pending_inv_del"]
+            st.markdown(
+                '<div class="warn-box">⚠️ Confirm delete? This will affect stock totals.</div>',
+                unsafe_allow_html=True,
+            )
+            iy, inv_n = st.columns(2)
+            with iy:
+                if st.button("✅ Yes, Delete", key="conf_del_inv"):
+                    orig_df     = df_inv_t.copy()
+                    orig_inv_ri = len(orig_df) - 1 - del_inv_idx
+                    orig_df     = orig_df.drop(index=orig_inv_ri).reset_index(drop=True)
+                    conn.update(worksheet="Inventory", data=orig_df.astype(str))
+                    del st.session_state["pending_inv_del"]
+                    st.success("Deleted.")
+                    st.rerun()
+            with inv_n:
+                if st.button("❌ Cancel", key="cancel_del_inv"):
+                    del st.session_state["pending_inv_del"]
+                    st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ADMIN
+# ═══════════════════════════════════════════════════════════════════════════════
 with tab_admin:
-    st.caption("✨ **Pro Tip:** You can edit these tables directly. Tap a cell to type, click the '+' at the bottom to add a row, or select a row to delete it.")
+
+    st.markdown("""
+    <div class="warn-box" style="background:#0d1f35;border-color:#2563eb;color:#7fb3f5;">
+    💡 <b>Tip:</b> Tap a cell to type, tap <b>+</b> at the bottom to add a row.
+    Set <b>Active?</b> to <code>0</code> to hide a technician from entry forms without deleting them.
+    </div>
+    """, unsafe_allow_html=True)
+
     subtab_tech, subtab_loc = st.tabs(["👷 Technicians", "📍 Locations"])
-    
-    # --- TECHNICIANS SUBTAB ---
+
+    # ── Technicians ───────────────────────────────────────────────
     with subtab_tech:
-        st.subheader("Manage Technicians")
+        st.markdown('<div class="sec-hdr">Manage Technicians</div>', unsafe_allow_html=True)
         df_t = get_data("Technicians")
-        
-        # If empty, create an empty structure
         if df_t.empty:
             df_t = pd.DataFrame(columns=["name", "phone", "aadhar", "is_active"])
-            
+
         edited_techs = st.data_editor(
-            df_t, 
-            num_rows="dynamic", 
-            use_container_width=True, 
+            df_t,
+            num_rows="dynamic",
+            use_container_width=True,
             hide_index=True,
             column_config={
-                "is_active": st.column_config.SelectboxColumn("Active?", options=["1", "0"], required=True)
-            }
+                "name"     : st.column_config.TextColumn("Name",       required=True),
+                "phone"    : st.column_config.TextColumn("Phone",      required=True),
+                "aadhar"   : st.column_config.TextColumn("Aadhar No.", required=True),
+                "is_active": st.column_config.SelectboxColumn(
+                    "Active?", options=["1", "0"], required=True
+                ),
+            },
         )
-        
-        st.markdown('<div class="save-btn">', unsafe_allow_html=True)
-        if st.button("💾 Save Technician Changes", use_container_width=True):
-            conn.update(worksheet="Technicians", data=edited_techs.astype(str))
-            st.success("Technicians updated successfully!")
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- LOCATIONS SUBTAB ---
+        if st.button("💾 Save Technician Changes", key="save_techs"):
+            # Validate: no blank names
+            blank_names = edited_techs[edited_techs["name"].astype(str).str.strip() == ""]
+            if not blank_names.empty:
+                st.error("❌ All technicians must have a name.")
+            else:
+                conn.update(worksheet="Technicians", data=edited_techs.astype(str))
+                st.success("✅ Technicians saved.")
+                st.rerun()
+
+    # ── Locations ─────────────────────────────────────────────────
     with subtab_loc:
-        st.subheader("Manage Locations")
+        st.markdown('<div class="sec-hdr">Manage Locations</div>', unsafe_allow_html=True)
         df_l = get_data("Locations")
-        
         if df_l.empty:
-             df_l = pd.DataFrame(columns=["location_name"])
-             
-        edited_locs = st.data_editor(df_l, num_rows="dynamic", use_container_width=True, hide_index=True)
-        
-        st.markdown('<div class="save-btn">', unsafe_allow_html=True)
-        if st.button("💾 Save Location Changes", use_container_width=True):
-            conn.update(worksheet="Locations", data=edited_locs.astype(str))
-            st.success("Locations updated successfully!")
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+            df_l = pd.DataFrame(columns=["location_name"])
+
+        edited_locs = st.data_editor(
+            df_l,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "location_name": st.column_config.TextColumn("Location Name", required=True),
+            },
+        )
+
+        if st.button("💾 Save Location Changes", key="save_locs"):
+            blank_locs = edited_locs[edited_locs["location_name"].astype(str).str.strip() == ""]
+            if not blank_locs.empty:
+                st.error("❌ Location names cannot be blank.")
+            else:
+                conn.update(worksheet="Locations", data=edited_locs.astype(str))
+                st.success("✅ Locations saved.")
+                st.rerun()
