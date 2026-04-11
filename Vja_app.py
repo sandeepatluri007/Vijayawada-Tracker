@@ -308,11 +308,22 @@ with tab_dash:
             st.dataframe(group_df, use_container_width=True, hide_index=True)
 
             st.markdown('<div class="sec-hdr">📤 Export & Share</div>', unsafe_allow_html=True)
-            csv_data = group_df.to_csv(index=False).encode("utf-8")
+            
+            # ── CSV Export Preparation (Including Stock) ──
+            export_df = group_df.copy()
+            # Add blank divider row
+            export_df.loc[len(export_df)] = ["---", "---", "---", "---", "---"]
+            # Add Grand Total row
+            export_df.loc[len(export_df)] = ["GRAND TOTAL", "", sum_1ph, sum_3ph, sum_1ph + sum_3ph]
+            # Add Pending Stock row
+            export_df.loc[len(export_df)] = ["PENDING STOCK", "", pending_1ph, pending_3ph, ""]
+            
+            csv_data = export_df.to_csv(index=False).encode("utf-8")
             st.download_button("📥 Download CSV Report", data=csv_data,
                                file_name="Installation_Summary.csv", mime="text/csv",
                                use_container_width=True)
 
+            # ── WhatsApp Export Preparation (Including Stock) ──
             date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
             loc_str  = ", ".join(loc_filter) if loc_filter else "All Locations"
 
@@ -321,7 +332,9 @@ with tab_dash:
                 q1_str = str(int(row["1PH"])) if show_1ph else "—"
                 q3_str = str(int(row["3PH"])) if show_3ph else "—"
                 wa_lines.append(f"*{row['Technician']}* ({row['Location']}) → 1PH: {q1_str}, 3PH: {q3_str}")
-            wa_lines.append(f"\n*Total 1PH:* {sum_1ph} | *Total 3PH:* {sum_3ph} | *Grand Total:* {sum_1ph + sum_3ph}")
+                
+            wa_lines.append(f"\n📊 *Total 1PH:* {sum_1ph} | *Total 3PH:* {sum_3ph} | *Grand Total:* {sum_1ph + sum_3ph}")
+            wa_lines.append(f"📦 *Pending Stock:* 1PH: {pending_1ph} | 3PH: {pending_3ph}")
 
             wa_text = "\n".join(wa_lines)
             wa_url  = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
