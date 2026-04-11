@@ -657,31 +657,35 @@ with tab_admin:
 
     # --- BULLETPROOF SAVE FUNCTION ---
     def process_editor_save(edited_df, worksheet_name, mandatory_cols):
-        # 1. Fill NaNs and force strings
+        # 1. Protect against Streamlit returning a stripped DataFrame (KeyError prevention)
+        for m_col in mandatory_cols:
+            if m_col not in edited_df.columns:
+                return False, f"❌ Cannot save: Missing column '{m_col}'. If the table is empty, please add a row using the '+' button."
+
+        # 2. Fill NaNs and force to strict strings
         df_clean = edited_df.fillna("").astype(str)
 
-        # 2. Clean up "nan" strings and whitespace
+        # 3. Clean up "nan" artifacts and invisible spaces
         for col in df_clean.columns:
             df_clean[col] = df_clean[col].str.strip()
             df_clean[col] = df_clean[col].replace(["nan", "NaN", "None", "<NA>"], "")
 
-        # 3. Identify and drop completely empty ghost rows (user clicked '+' but typed nothing)
-        is_empty_row = df_clean.apply(lambda x: all(v == "" for v in x), axis=1)
-        df_clean = df_clean[~is_empty_row]
+        # 4. Safely drop completely empty "ghost rows" (Rows where every column is "")
+        df_clean = df_clean[df_clean.astype(bool).any(axis=1)]
 
-        # 4. Strictly validate mandatory columns (Blocks silent deletions)
+        # 5. Prevent catastrophic wiping of the entire Google Sheet
+        if df_clean.empty:
+            return False, "❌ Cannot save: Table is completely empty. Leave at least one valid row."
+
+        # 6. Strictly validate mandatory columns (Blocks silent deletions)
         for m_col in mandatory_cols:
             if not df_clean[df_clean[m_col] == ""].empty:
                 return False, f"❌ Validation Error: '{m_col}' cannot be blank in any row."
 
-        # 5. Reset index so Google Sheets API doesn't crash on jumbled row numbers
+        # 7. Reset index so Google Sheets API doesn't crash on scrambled row numbers
         df_clean = df_clean.reset_index(drop=True)
 
-        # 6. Prevent catastrophic wiping of the entire sheet
-        if df_clean.empty:
-            return False, "❌ Cannot save: Table is completely empty. Leave at least one valid row."
-
-        # 7. Execute save
+        # 8. Execute save to Cloud
         try:
             conn.update(worksheet=worksheet_name, data=df_clean)
             st.cache_data.clear()
@@ -696,9 +700,14 @@ with tab_admin:
     with subtab_tech:
         st.markdown('<div class="sec-hdr">Manage Technicians</div>', unsafe_allow_html=True)
         df_t = get_data("Technicians")
-
-        # Force strict column structure
         expected_cols_t = ["name", "phone", "aadhar", "is_active"]
+
+        # FIX: Standardize existing Google Sheet columns so data doesn't disappear if capitalized
+        if not df_t.empty:
+            col_map_t = {c: str(c).strip().lower() for c in df_t.columns}
+            df_t = df_t.rename(columns=col_map_t)
+
+        # Force strict structure
         if df_t.empty:
             df_t = pd.DataFrame(columns=expected_cols_t)
         else:
@@ -712,7 +721,7 @@ with tab_admin:
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
-            key="editor_techs", # CRITICAL: Prevents Streamlit from dropping state on rerun
+            key="editor_techs", # CRITICAL: Prevents Streamlit from dropping state
             column_config={
                 "name": st.column_config.TextColumn("Name", required=True),
                 "phone": st.column_config.TextColumn("Phone", required=True),
@@ -724,7 +733,6 @@ with tab_admin:
         )
 
         if st.button("💾 Save Technician Changes", key="save_techs"):
-            # Aadhar is optional, Name and Phone are mandatory
             success, message = process_editor_save(edited_techs, "Technicians", ["name", "phone"])
             if success:
                 st.success(message)
@@ -736,9 +744,14 @@ with tab_admin:
     with subtab_loc:
         st.markdown('<div class="sec-hdr">Manage Locations</div>', unsafe_allow_html=True)
         df_l = get_data("Locations")
-
-        # Force strict column structure
         expected_cols_l = ["location_name"]
+
+        # FIX: Standardize existing Google Sheet columns
+        if not df_l.empty:
+            col_map_l = {c: str(c).strip().lower() for c in df_l.columns}
+            df_l = df_l.rename(columns=col_map_l)
+
+        # Force strict structure
         if df_l.empty:
             df_l = pd.DataFrame(columns=expected_cols_l)
         else:
@@ -751,7 +764,7 @@ with tab_admin:
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
-            key="editor_locs", # CRITICAL: Prevents Streamlit from dropping state on rerun
+            key="editor_locs", # CRITICAL: Prevents Streamlit from dropping state
             column_config={
                 "location_name": st.column_config.TextColumn("Location Name", required=True),
             },
