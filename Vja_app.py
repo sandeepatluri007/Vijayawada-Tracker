@@ -655,87 +655,112 @@ with tab_admin:
     </div>
     """, unsafe_allow_html=True)
 
+    # --- BULLETPROOF SAVE FUNCTION ---
+    def process_editor_save(edited_df, worksheet_name, mandatory_cols):
+        # 1. Fill NaNs and force strings
+        df_clean = edited_df.fillna("").astype(str)
+
+        # 2. Clean up "nan" strings and whitespace
+        for col in df_clean.columns:
+            df_clean[col] = df_clean[col].str.strip()
+            df_clean[col] = df_clean[col].replace(["nan", "NaN", "None", "<NA>"], "")
+
+        # 3. Identify and drop completely empty ghost rows (user clicked '+' but typed nothing)
+        is_empty_row = df_clean.apply(lambda x: all(v == "" for v in x), axis=1)
+        df_clean = df_clean[~is_empty_row]
+
+        # 4. Strictly validate mandatory columns (Blocks silent deletions)
+        for m_col in mandatory_cols:
+            if not df_clean[df_clean[m_col] == ""].empty:
+                return False, f"❌ Validation Error: '{m_col}' cannot be blank in any row."
+
+        # 5. Reset index so Google Sheets API doesn't crash on jumbled row numbers
+        df_clean = df_clean.reset_index(drop=True)
+
+        # 6. Prevent catastrophic wiping of the entire sheet
+        if df_clean.empty:
+            return False, "❌ Cannot save: Table is completely empty. Leave at least one valid row."
+
+        # 7. Execute save
+        try:
+            conn.update(worksheet=worksheet_name, data=df_clean)
+            st.cache_data.clear()
+            return True, "✅ Saved successfully!"
+        except Exception as e:
+            return False, f"❌ Google API Error: {str(e)}"
+    # ---------------------------------
+
     subtab_tech, subtab_loc = st.tabs(["👷 Technicians", "📍 Locations"])
 
     # ── Technicians ───────────────────────────────────────────────
     with subtab_tech:
         st.markdown('<div class="sec-hdr">Manage Technicians</div>', unsafe_allow_html=True)
         df_t = get_data("Technicians")
+
+        # Force strict column structure
+        expected_cols_t = ["name", "phone", "aadhar", "is_active"]
         if df_t.empty:
-            df_t = pd.DataFrame(columns=["name", "phone", "aadhar", "is_active"])
+            df_t = pd.DataFrame(columns=expected_cols_t)
+        else:
+            for col in expected_cols_t:
+                if col not in df_t.columns:
+                    df_t[col] = ""
+            df_t = df_t[expected_cols_t]
 
         edited_techs = st.data_editor(
             df_t,
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
+            key="editor_techs", # CRITICAL: Prevents Streamlit from dropping state on rerun
             column_config={
-                "name"     : st.column_config.TextColumn("Name",       required=True),
-                "phone"    : st.column_config.TextColumn("Phone",      required=True),
-                "aadhar"   : st.column_config.TextColumn("Aadhar No.", required=True),
+                "name": st.column_config.TextColumn("Name", required=True),
+                "phone": st.column_config.TextColumn("Phone", required=True),
+                "aadhar": st.column_config.TextColumn("Aadhar No."),
                 "is_active": st.column_config.SelectboxColumn(
-                    "Active?", options=["1", "0"], required=True
+                    "Active?", options=["1", "0"], required=True, default="1"
                 ),
             },
         )
 
         if st.button("💾 Save Technician Changes", key="save_techs"):
-            # 1. Fresh copy
-            clean_techs = edited_techs.copy()
-            # 2. Fill invisible NaNs with blanks
-            clean_techs = clean_techs.fillna("")
-            # 3. Force entire table to pure strings
-            clean_techs = clean_techs.astype(str)
-            # 4. Strip invisible whitespace from names
-            clean_techs["name"] = clean_techs["name"].str.strip()
-            # 5. Drop completely empty names
-            clean_techs = clean_techs[clean_techs["name"] != ""]
-            # 6. Reset the Pandas index so Google Sheets can read it (CRITICAL FIX)
-            clean_techs = clean_techs.reset_index(drop=True)
-            
-            if clean_techs.empty:
-                st.error("❌ Cannot save an empty table. Add at least one technician.")
-            else:
-                conn.update(worksheet="Technicians", data=clean_techs)
-                st.cache_data.clear()
-                st.success("✅ Technicians saved.")
+            # Aadhar is optional, Name and Phone are mandatory
+            success, message = process_editor_save(edited_techs, "Technicians", ["name", "phone"])
+            if success:
+                st.success(message)
                 st.rerun()
+            else:
+                st.error(message)
 
     # ── Locations ─────────────────────────────────────────────────
     with subtab_loc:
         st.markdown('<div class="sec-hdr">Manage Locations</div>', unsafe_allow_html=True)
         df_l = get_data("Locations")
+
+        # Force strict column structure
+        expected_cols_l = ["location_name"]
         if df_l.empty:
-            df_l = pd.DataFrame(columns=["location_name"])
+            df_l = pd.DataFrame(columns=expected_cols_l)
+        else:
+            if "location_name" not in df_l.columns:
+                df_l["location_name"] = ""
+            df_l = df_l[expected_cols_l]
 
         edited_locs = st.data_editor(
             df_l,
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
+            key="editor_locs", # CRITICAL: Prevents Streamlit from dropping state on rerun
             column_config={
                 "location_name": st.column_config.TextColumn("Location Name", required=True),
             },
         )
 
         if st.button("💾 Save Location Changes", key="save_locs"):
-            # 1. Fresh copy
-            clean_locs = edited_locs.copy()
-            # 2. Fill invisible NaNs with blanks
-            clean_locs = clean_locs.fillna("")
-            # 3. Force entire table to pure strings
-            clean_locs = clean_locs.astype(str)
-            # 4. Strip invisible whitespace
-            clean_locs["location_name"] = clean_locs["location_name"].str.strip()
-            # 5. Drop completely empty names
-            clean_locs = clean_locs[clean_locs["location_name"] != ""]
-            # 6. Reset the Pandas index so Google Sheets can read it (CRITICAL FIX)
-            clean_locs = clean_locs.reset_index(drop=True)
-            
-            if clean_locs.empty:
-                st.error("❌ Cannot save an empty table. Add at least one location.")
-            else:
-                conn.update(worksheet="Locations", data=clean_locs)
-                st.cache_data.clear()
-                st.success("✅ Locations saved.")
+            success, message = process_editor_save(edited_locs, "Locations", ["location_name"])
+            if success:
+                st.success(message)
                 st.rerun()
+            else:
+                st.error(message)
