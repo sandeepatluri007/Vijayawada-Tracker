@@ -90,10 +90,10 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .stButton>button:hover { background:#f1f5f9 !important; border-color:#94a3b8 !important; }
 
 /* Primary CTA Override */
-button[kind="primary"] {
+button[data-testid="baseButton-primary"], .stButton>button[kind="primary"] {
     background:#0f172a !important; color:#ffffff !important; border-color:#0f172a !important;
 }
-button[kind="primary"]:hover {
+button[data-testid="baseButton-primary"]:hover {
     background:#334155 !important; border-color:#334155 !important;
 }
 
@@ -364,7 +364,7 @@ with tab_inst:
                 q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=0)
             with fc2:
                 q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=0)
-            f_sub = st.form_submit_button("💾 Save Entry", kind="primary")
+            f_sub = st.form_submit_button("💾 Save Entry", type="primary")
 
         if f_sub:
             if q1 == 0 and q3 == 0:
@@ -455,7 +455,7 @@ with tab_inst:
 
                 btn_update, btn_delete = st.columns(2)
                 with btn_update:
-                    do_update = st.form_submit_button("✏️ Update", kind="primary")
+                    do_update = st.form_submit_button("✏️ Update", type="primary")
                 with btn_delete:
                     do_delete = st.form_submit_button("🗑️ Delete")
 
@@ -521,7 +521,7 @@ with tab_inv:
             iqty  = st.number_input("Quantity", min_value=1, step=1, value=1)
             imrn  = st.text_input("MRN No.")
         imake = st.selectbox("Make", ["Schneider", "Genus", "Other"])
-        iv_sub = st.form_submit_button("📥 Save Stock", kind="primary")
+        iv_sub = st.form_submit_button("📥 Save Stock", type="primary")
 
     if iv_sub:
         if not imrn.strip():
@@ -621,7 +621,7 @@ with tab_inv:
 
                 ib1, ib2 = st.columns(2)
                 with ib1:
-                    inv_do_update = st.form_submit_button("✏️ Update", kind="primary")
+                    inv_do_update = st.form_submit_button("✏️ Update", type="primary")
                 with ib2:
                     inv_do_delete = st.form_submit_button("🗑️ Delete")
 
@@ -742,7 +742,7 @@ with tab_admin:
             },
         )
 
-        if st.button("💾 Save Technicians", key="save_techs", kind="primary"):
+        if st.button("💾 Save Technicians", key="save_techs", type="primary"):
             success, message = process_editor_save(edited_techs, "Technicians", ["name", "phone"])
             if success:
                 st.success(message)
@@ -778,7 +778,7 @@ with tab_admin:
             },
         )
 
-        if st.button("💾 Save Locations", key="save_locs", kind="primary"):
+        if st.button("💾 Save Locations", key="save_locs", type="primary"):
             success, message = process_editor_save(edited_locs, "Locations", ["location_name"])
             if success:
                 st.success(message)
