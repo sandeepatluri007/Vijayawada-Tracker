@@ -11,6 +11,7 @@ import pandas as pd
 from datetime import date
 import urllib.parse
 import math
+import time
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -90,7 +91,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .stButton>button:hover { background:#f1f5f9 !important; border-color:#94a3b8 !important; }
 
 /* Primary CTA Override */
-button[data-testid="baseButton-primary"], .stButton>button[kind="primary"] {
+button[data-testid="baseButton-primary"], .stButton>button[type="primary"] {
     background:#0f172a !important; color:#ffffff !important; border-color:#0f172a !important;
 }
 button[data-testid="baseButton-primary"]:hover {
@@ -170,12 +171,19 @@ st.write("") # Spacing before tabs
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def get_data(worksheet: str) -> pd.DataFrame:
-    try:
-        df = conn.read(worksheet=worksheet, ttl=0)
-        return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
-    except Exception:
-        return pd.DataFrame()
+def get_data(worksheet: str, retries=3) -> pd.DataFrame:
+    """Fetches data with built-in retries for spotty mobile networks."""
+    for attempt in range(retries):
+        try:
+            # ttl=10 caches the data for 10 seconds. Stops Google API timeouts.
+            df = conn.read(worksheet=worksheet, ttl=10)
+            return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(1) # Wait 1 second and try again
+            else:
+                st.toast(f"📡 Weak connection. Having trouble loading {worksheet}...", icon="⚠️")
+                return pd.DataFrame()
 
 def safe_int(val, default: int = 0) -> int:
     try:
