@@ -175,12 +175,11 @@ def get_data(worksheet: str, retries=3) -> pd.DataFrame:
     """Fetches data with built-in retries for spotty mobile networks."""
     for attempt in range(retries):
         try:
-            # ttl=10 caches the data for 10 seconds. Stops Google API timeouts.
             df = conn.read(worksheet=worksheet, ttl=10)
             return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
         except Exception as e:
             if attempt < retries - 1:
-                time.sleep(1) # Wait 1 second and try again
+                time.sleep(1)
             else:
                 st.toast(f"📡 Weak connection. Having trouble loading {worksheet}...", icon="⚠️")
                 return pd.DataFrame()
@@ -311,11 +310,8 @@ with tab_dash:
             
             # ── CSV Export Preparation (Including Stock) ──
             export_df = group_df.copy()
-            # Add blank divider row
             export_df.loc[len(export_df)] = ["---", "---", "---", "---", "---"]
-            # Add Grand Total row
             export_df.loc[len(export_df)] = ["GRAND TOTAL", "", sum_1ph, sum_3ph, sum_1ph + sum_3ph]
-            # Add Pending Stock row
             export_df.loc[len(export_df)] = ["PENDING STOCK", "", pending_1ph, pending_3ph, ""]
             
             csv_data = export_df.to_csv(index=False).encode("utf-8")
@@ -323,18 +319,21 @@ with tab_dash:
                                file_name="Installation_Summary.csv", mime="text/csv",
                                use_container_width=True)
 
-            # ── WhatsApp Export Preparation (Including Stock) ──
+            # ── WhatsApp Export Preparation (Sanitized & Included Header) ──
             date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
             loc_str  = ", ".join(loc_filter) if loc_filter else "All Locations"
 
-            wa_lines = [f"📅 *Date:* {date_str} | *{loc_str}*\n"]
+            wa_lines = [
+                "*DPR- Touchlight Infra*",
+                f"*Date:* {date_str} | *{loc_str}*\n"
+            ]
             for _, row in group_df.iterrows():
-                q1_str = str(int(row["1PH"])) if show_1ph else "—"
-                q3_str = str(int(row["3PH"])) if show_3ph else "—"
-                wa_lines.append(f"*{row['Technician']}* ({row['Location']}) → 1PH: {q1_str}, 3PH: {q3_str}")
+                q1_str = str(int(row["1PH"])) if show_1ph else "-"
+                q3_str = str(int(row["3PH"])) if show_3ph else "-"
+                wa_lines.append(f"*{row['Technician']}* ({row['Location']}) - 1PH: {q1_str}, 3PH: {q3_str}")
                 
-            wa_lines.append(f"\n📊 *Total 1PH:* {sum_1ph} | *Total 3PH:* {sum_3ph} | *Grand Total:* {sum_1ph + sum_3ph}")
-            wa_lines.append(f"📦 *Pending Stock:* 1PH: {pending_1ph} | 3PH: {pending_3ph}")
+            wa_lines.append(f"\n*Total 1PH:* {sum_1ph} | *Total 3PH:* {sum_3ph} | *Grand Total:* {sum_1ph + sum_3ph}")
+            wa_lines.append(f"*Pending Stock:* 1PH: {pending_1ph} | 3PH: {pending_3ph}")
 
             wa_text = "\n".join(wa_lines)
             wa_url  = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
