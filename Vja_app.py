@@ -16,7 +16,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Smart Meter Field Tracker")
+st.title("⚡ VIJAYAWADA TRACKER")
 
 # Create Connection
 conn = st.connection("gsheets", type=GSheetsConnection)
