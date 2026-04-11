@@ -325,7 +325,7 @@ with tab_dash:
 
             wa_lines = [
                 "*DPR- Touchlight Infra*",
-                f"*Date:* {date_str} | *{Vijayawada}*\n"
+                f"*Date:* {date_str} | *{loc_str}*\n"
             ]
             for _, row in group_df.iterrows():
                 q1_str = str(int(row["1PH"])) if show_1ph else "-"
