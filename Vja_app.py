@@ -167,6 +167,31 @@ with head_col2:
 
 st.write("") # Spacing before tabs
 
+# ── Authentication / PIN Protection ───────────────────────────────────────────
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.markdown('<div class="sec-hdr">🔒 Supervisor Login</div>', unsafe_allow_html=True)
+    
+    with st.form("login_form"):
+        st.info("Please enter the daily operations PIN to access the system.")
+        pin_entry = st.text_input("Enter PIN", type="password")
+        login_btn = st.form_submit_button("Unlock Tracker", type="primary")
+        
+        if login_btn:
+            # Change "1234" to whatever PIN you want to use
+            if pin_entry == "2333": 
+                st.session_state["authenticated"] = True
+                st.success("Access Granted!")
+                st.rerun()
+            else:
+                st.error("❌ Incorrect PIN. Access Denied.")
+                
+    # st.stop() prevents the rest of the code (the tabs and data) from loading
+    st.stop() 
+# ──────────────────────────────────────────────────────────────────────────────
+
 # ── Google Sheets connection ──────────────────────────────────────────────────
 conn = st.connection("gsheets", type=GSheetsConnection)
 
