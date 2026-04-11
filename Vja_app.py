@@ -680,16 +680,26 @@ with tab_admin:
         )
 
         if st.button("💾 Save Technician Changes", key="save_techs"):
-            # BUG FIX 3: True ghost-row eliminator
+            # 1. Fresh copy
             clean_techs = edited_techs.copy()
-            clean_techs["name"] = clean_techs["name"].astype(str).str.strip()
-            # Drop rows where the name is completely empty
+            # 2. Fill invisible NaNs with blanks
+            clean_techs = clean_techs.fillna("")
+            # 3. Force entire table to pure strings
+            clean_techs = clean_techs.astype(str)
+            # 4. Strip invisible whitespace from names
+            clean_techs["name"] = clean_techs["name"].str.strip()
+            # 5. Drop completely empty names
             clean_techs = clean_techs[clean_techs["name"] != ""]
+            # 6. Reset the Pandas index so Google Sheets can read it (CRITICAL FIX)
+            clean_techs = clean_techs.reset_index(drop=True)
             
-            conn.update(worksheet="Technicians", data=clean_techs.astype(str))
-            st.cache_data.clear()
-            st.success("✅ Technicians saved.")
-            st.rerun()
+            if clean_techs.empty:
+                st.error("❌ Cannot save an empty table. Add at least one technician.")
+            else:
+                conn.update(worksheet="Technicians", data=clean_techs)
+                st.cache_data.clear()
+                st.success("✅ Technicians saved.")
+                st.rerun()
 
     # ── Locations ─────────────────────────────────────────────────
     with subtab_loc:
@@ -709,13 +719,23 @@ with tab_admin:
         )
 
         if st.button("💾 Save Location Changes", key="save_locs"):
-            # BUG FIX 3: True ghost-row eliminator
+            # 1. Fresh copy
             clean_locs = edited_locs.copy()
-            clean_locs["location_name"] = clean_locs["location_name"].astype(str).str.strip()
-            # Drop rows where the location is completely empty
+            # 2. Fill invisible NaNs with blanks
+            clean_locs = clean_locs.fillna("")
+            # 3. Force entire table to pure strings
+            clean_locs = clean_locs.astype(str)
+            # 4. Strip invisible whitespace
+            clean_locs["location_name"] = clean_locs["location_name"].str.strip()
+            # 5. Drop completely empty names
             clean_locs = clean_locs[clean_locs["location_name"] != ""]
+            # 6. Reset the Pandas index so Google Sheets can read it (CRITICAL FIX)
+            clean_locs = clean_locs.reset_index(drop=True)
             
-            conn.update(worksheet="Locations", data=clean_locs.astype(str))
-            st.cache_data.clear()
-            st.success("✅ Locations saved.")
-            st.rerun()
+            if clean_locs.empty:
+                st.error("❌ Cannot save an empty table. Add at least one location.")
+            else:
+                conn.update(worksheet="Locations", data=clean_locs)
+                st.cache_data.clear()
+                st.success("✅ Locations saved.")
+                st.rerun()
