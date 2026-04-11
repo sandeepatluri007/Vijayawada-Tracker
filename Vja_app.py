@@ -712,12 +712,18 @@ with tab_admin:
         )
 
         if st.button("💾 Save Technician Changes", key="save_techs"):
-            # Validate: no blank names
-            blank_names = edited_techs[edited_techs["name"].astype(str).str.strip() == ""]
-            if not blank_names.empty:
+            # 1. Clean the data to remove "ghost rows" (empty clicks)
+            clean_techs = edited_techs.dropna(how="all").fillna("")
+            
+            # 2. Check for blanks
+            blank_names = clean_techs[clean_techs["name"].astype(str).str.strip() == ""]
+            
+            if clean_techs.empty:
+                st.error("❌ Cannot save an empty table. Please add at least one technician.")
+            elif not blank_names.empty:
                 st.error("❌ All technicians must have a name.")
             else:
-                conn.update(worksheet="Technicians", data=edited_techs.astype(str))
+                conn.update(worksheet="Technicians", data=clean_techs.astype(str))
                 st.success("✅ Technicians saved.")
                 st.rerun()
 
@@ -739,10 +745,17 @@ with tab_admin:
         )
 
         if st.button("💾 Save Location Changes", key="save_locs"):
-            blank_locs = edited_locs[edited_locs["location_name"].astype(str).str.strip() == ""]
-            if not blank_locs.empty:
+            # 1. Clean the data to remove "ghost rows" (empty clicks)
+            clean_locs = edited_locs.dropna(how="all").fillna("")
+            
+            # 2. Check for blanks
+            blank_locs = clean_locs[clean_locs["location_name"].astype(str).str.strip() == ""]
+            
+            if clean_locs.empty:
+                 st.error("❌ Cannot save an empty table. Please add at least one location.")
+            elif not blank_locs.empty:
                 st.error("❌ Location names cannot be blank.")
             else:
-                conn.update(worksheet="Locations", data=edited_locs.astype(str))
+                conn.update(worksheet="Locations", data=clean_locs.astype(str))
                 st.success("✅ Locations saved.")
                 st.rerun()
