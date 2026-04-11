@@ -1,8 +1,6 @@
 """
-Smart Meter Field Tracker
+VIJAYAWADA Field Tracker
 =========================
-Backend : streamlit-gsheets-connection  (Google Sheets)
-Author  : improved & bug-fixed version
 """
 
 import streamlit as st
@@ -149,33 +147,22 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def get_data(worksheet: str) -> pd.DataFrame:
-    """Read a worksheet. Returns empty DataFrame on any error."""
     try:
-        # BUG FIX: ttl must be int (seconds), not string "0"
         df = conn.read(worksheet=worksheet, ttl=0)
         return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
     except Exception:
         return pd.DataFrame()
 
-
 def safe_int(val, default: int = 0) -> int:
-    """
-    BUG FIX: convert string/float/nan safely to int.
-    int("5.0") raises ValueError — must go through float first.
-    """
     try:
         return int(float(val))
     except (ValueError, TypeError):
         return default
 
-
 def safe_numeric_col(df: pd.DataFrame, col: str) -> pd.Series:
-    """Coerce a column to numeric, filling NaN/errors with 0."""
     return pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-
 def has_col(df: pd.DataFrame, *cols) -> bool:
-    """True only if ALL given columns exist in df."""
     return all(c in df.columns for c in cols)
 
 
@@ -226,13 +213,11 @@ with tab_dash:
     # ── Installation filters ──────────────────────────────────────
     st.markdown('<div class="sec-hdr">🔌 Installation Summary</div>', unsafe_allow_html=True)
 
-    # BUG FIX: guard KeyError when df_inst is empty or missing columns
     if df_inst.empty or not has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
         st.info("No installation data yet. Add entries in the Installations tab.")
     else:
         f1, f2 = st.columns(2)
         with f1:
-            # BUG FIX: date_input with list default returns tuple; handle len==1
             date_range = st.date_input("Date Range", [date.today(), date.today()])
         with f2:
             meter_filter = st.multiselect("Meter Type", ["1 PH", "3 PH"], default=["1 PH", "3 PH"])
@@ -246,17 +231,14 @@ with tab_dash:
         with f4:
             tech_filter = st.multiselect("Technicians", tech_list, default=tech_list)
 
-        # ── Apply filters ─────────────────────────────────────────
         filtered = df_inst.copy()
 
-        # BUG FIX: date_range may be a single date (tuple len==1) if user
-        # clicks only the start date on mobile; guard both cases
         if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
             d_start, d_end = date_range[0], date_range[1]
         elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
             d_start = d_end = date_range[0]
         else:
-            d_start = d_end = date_range   # single date object
+            d_start = d_end = date_range
 
         filtered["_date"] = pd.to_datetime(filtered["date"], errors="coerce").dt.date
         filtered = filtered[
@@ -281,7 +263,6 @@ with tab_dash:
         m2.metric("Filtered 3PH", sum_3ph)
         m3.metric("Grand Total",  sum_1ph + sum_3ph)
 
-        # ── Technician breakdown ──────────────────────────────────
         if not filtered.empty:
             st.markdown('<div class="sec-hdr">👷 Technician Breakdown</div>', unsafe_allow_html=True)
             group_df = (
@@ -294,14 +275,12 @@ with tab_dash:
             group_df.columns = ["Technician", "Location", "1PH", "3PH", "Total"]
             st.dataframe(group_df, use_container_width=True, hide_index=True)
 
-            # ── Export & WhatsApp ─────────────────────────────────
             st.markdown('<div class="sec-hdr">📤 Export & Share</div>', unsafe_allow_html=True)
             csv_data = group_df.to_csv(index=False).encode("utf-8")
             st.download_button("📥 Download CSV", data=csv_data,
                                file_name="Installation_Summary.csv", mime="text/csv",
                                use_container_width=True)
 
-            # BUG FIX: always build a valid date string — handle len==1 safely
             date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
             loc_str  = ", ".join(loc_filter) if loc_filter else "All Locations"
 
@@ -327,23 +306,24 @@ with tab_dash:
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inst:
 
-    # ── load reference data ───────────────────────────────────────
     df_techs = get_data("Technicians")
     df_locs  = get_data("Locations")
 
-    active_techs = (
-        df_techs[df_techs["is_active"] == "1"]["name"].tolist()
-        if not df_techs.empty and has_col(df_techs, "is_active", "name") else []
-    )
-    active_locs = (
-        df_locs["location_name"].dropna().tolist()
-        if not df_locs.empty and "location_name" in df_locs.columns else []
-    )
-    # filter out blank strings
-    active_techs = [t for t in active_techs if t.strip()]
-    active_locs  = [l for l in active_locs  if l.strip()]
+    # BUG FIX 1: Safely handle "1", "1.0", "True" active states from Google Sheets
+    active_techs = []
+    if not df_techs.empty and has_col(df_techs, "is_active", "name"):
+        for _, r in df_techs.iterrows():
+            val = str(r["is_active"]).strip().lower()
+            if val in ["1", "1.0", "true", "yes"]:
+                n = str(r["name"]).strip()
+                if n: active_techs.append(n)
 
-    # ── Entry form ────────────────────────────────────────────────
+    active_locs = []
+    if not df_locs.empty and "location_name" in df_locs.columns:
+        for _, r in df_locs.iterrows():
+            l = str(r["location_name"]).strip()
+            if l: active_locs.append(l)
+
     st.markdown('<div class="sec-hdr">➕ Daily Entry</div>', unsafe_allow_html=True)
 
     if not active_techs or not active_locs:
@@ -386,10 +366,11 @@ with tab_inst:
                     }])
                     updated = pd.concat([df_existing, new_row], ignore_index=True)
                     conn.update(worksheet="Installations", data=updated.astype(str))
+                    # BUG FIX 2: Manually clear Streamlit cache after every update
+                    st.cache_data.clear() 
                     st.success(f"✅ Entry saved for {tech} on {entry_date}.")
                     st.rerun()
 
-    # ── Log ───────────────────────────────────────────────────────
     st.markdown('<div class="sec-hdr">📋 Installation Log</div>', unsafe_allow_html=True)
     log_data = get_data("Installations")
 
@@ -398,7 +379,6 @@ with tab_inst:
     else:
         log_sorted = log_data.iloc[::-1].reset_index(drop=True)
 
-        # pagination
         ITEMS = 10
         total_pages = max(1, math.ceil(len(log_sorted) / ITEMS))
         page = st.number_input(f"Page (1 – {total_pages})", min_value=1, max_value=total_pages, step=1, value=1)
@@ -411,11 +391,8 @@ with tab_inst:
             disp_log["Total"]   = disp_log["qty_1ph"] + disp_log["qty_3ph"]
         st.dataframe(disp_log, use_container_width=True, hide_index=True)
 
-        # ── Edit / Delete selector ────────────────────────────────
         st.caption("Select a record to edit or delete:")
 
-        # BUG FIX: use index prefix to handle duplicate "date | tech" combos
-        # and avoid split() breaking on names containing " | "
         log_options_map = {}
         for idx, row in log_sorted.iterrows():
             label = f"#{idx+1}  {row['date']} | {row['tech_name']}"
@@ -431,10 +408,8 @@ with tab_inst:
             sel_idx  = log_options_map[target_label]
             curr_row = log_sorted.iloc[sel_idx]
 
-            # BUG FIX: safe_int handles "5.0"-style float-strings from Sheets
             curr_q1 = safe_int(curr_row.get("qty_1ph", 0))
             curr_q3 = safe_int(curr_row.get("qty_3ph", 0))
-            # BUG FIX: loc index — default 0 if location missing from active list
             curr_loc = curr_row.get("location", "")
             loc_idx  = active_locs.index(curr_loc) if curr_loc in active_locs and active_locs else 0
 
@@ -445,7 +420,6 @@ with tab_inst:
             )
 
             with st.form("edit_log_form"):
-                # Show location selector only if options available
                 if active_locs:
                     e_loc = st.selectbox("Location", active_locs, index=loc_idx)
                 else:
@@ -467,7 +441,6 @@ with tab_inst:
                 if e_q1 == 0 and e_q3 == 0:
                     st.error("❌ Both quantities cannot be 0.")
                 else:
-                    # Match original (non-reversed) log_data by date + tech
                     mask = (
                         (log_data["date"]      == curr_row["date"]) &
                         (log_data["tech_name"] == curr_row["tech_name"])
@@ -476,14 +449,13 @@ with tab_inst:
                         str(e_loc), str(e_q1), str(e_q3)
                     ]
                     conn.update(worksheet="Installations", data=log_data.astype(str))
+                    st.cache_data.clear()
                     st.success("✅ Entry updated.")
                     st.rerun()
 
             if do_delete:
-                # Require explicit confirmation via session_state flag
                 st.session_state["pending_inst_del"] = curr_row["date"] + "||" + curr_row["tech_name"]
 
-        # Confirmation step — outside the form so the button works independently
         if "pending_inst_del" in st.session_state:
             del_key  = st.session_state["pending_inst_del"]
             del_date, del_tech = del_key.split("||", 1)
@@ -502,6 +474,7 @@ with tab_inst:
                     log_data = log_data[~mask]
                     conn.update(worksheet="Installations", data=log_data.astype(str))
                     del st.session_state["pending_inst_del"]
+                    st.cache_data.clear()
                     st.success("Deleted.")
                     st.rerun()
             with cn:
@@ -515,7 +488,6 @@ with tab_inst:
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inv:
 
-    # ── Inward form ───────────────────────────────────────────────
     st.markdown('<div class="sec-hdr">📥 Inward Material from Store</div>', unsafe_allow_html=True)
 
     with st.form("inv_form", clear_on_submit=True):
@@ -541,13 +513,12 @@ with tab_inv:
                 "mrn"  : imrn.strip(),
                 "make" : str(imake),
             }])
-            # BUG FIX: ignore_index=True to avoid index column being written to sheet
             updated_inv = pd.concat([df_inv_exist, new_inv], ignore_index=True)
             conn.update(worksheet="Inventory", data=updated_inv.astype(str))
+            st.cache_data.clear()
             st.success(f"✅ Inwarded {iqty} × {itype} ({imake}) — MRN {imrn.strip()}")
             st.rerun()
 
-    # ── Stock summary cards ───────────────────────────────────────
     st.markdown('<div class="sec-hdr">📊 Stock Summary</div>', unsafe_allow_html=True)
     df_inv_t  = get_data("Inventory")
     df_inst_s = get_data("Installations")
@@ -566,7 +537,6 @@ with tab_inv:
     sm3.metric("1PH Pending Stock", max(r_1ph - u_1ph, 0))
     sm4.metric("3PH Pending Stock", max(r_3ph - u_3ph, 0))
 
-    # ── Inventory log with edit/delete ────────────────────────────
     st.markdown('<div class="sec-hdr">📋 Inventory Log</div>', unsafe_allow_html=True)
 
     if df_inv_t.empty:
@@ -574,7 +544,6 @@ with tab_inv:
     else:
         inv_sorted = df_inv_t.iloc[::-1].reset_index(drop=True)
 
-        # Export
         inv_exp = inv_sorted.rename(columns={
             "date":"Date","type":"Type","qty":"Qty","mrn":"MRN No","make":"Make"
         })
@@ -585,7 +554,6 @@ with tab_inv:
             use_container_width=True,
         )
 
-        # Pagination
         ITEMS_INV   = 10
         total_inv_p = max(1, math.ceil(len(inv_sorted) / ITEMS_INV))
         inv_page    = st.number_input(f"Page (1–{total_inv_p})", min_value=1,
@@ -639,20 +607,19 @@ with tab_inv:
                 if not e_mrn.strip():
                     st.error("❌ MRN No. cannot be empty.")
                 else:
-                    # Match by original position in df_inv_t (non-reversed)
                     orig_df = df_inv_t.copy()
                     orig_inv_idx = len(orig_df) - 1 - inv_idx
                     orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("qty")]  = str(e_qty)
                     orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("mrn")]  = e_mrn.strip()
                     orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("make")] = e_make
                     conn.update(worksheet="Inventory", data=orig_df.astype(str))
+                    st.cache_data.clear()
                     st.success("✅ Inventory entry updated.")
                     st.rerun()
 
             if inv_do_delete:
                 st.session_state["pending_inv_del"] = inv_idx
 
-        # Inventory delete confirmation
         if "pending_inv_del" in st.session_state:
             del_inv_idx = st.session_state["pending_inv_del"]
             st.markdown(
@@ -667,6 +634,7 @@ with tab_inv:
                     orig_df     = orig_df.drop(index=orig_inv_ri).reset_index(drop=True)
                     conn.update(worksheet="Inventory", data=orig_df.astype(str))
                     del st.session_state["pending_inv_del"]
+                    st.cache_data.clear()
                     st.success("Deleted.")
                     st.rerun()
             with inv_n:
@@ -683,7 +651,7 @@ with tab_admin:
     st.markdown("""
     <div class="warn-box" style="background:#0d1f35;border-color:#2563eb;color:#7fb3f5;">
     💡 <b>Tip:</b> Tap a cell to type, tap <b>+</b> at the bottom to add a row.
-    Set <b>Active?</b> to <code>0</code> to hide a technician from entry forms without deleting them.
+    Set <b>Active?</b> to <code>0</code> to hide a technician from entry forms.
     </div>
     """, unsafe_allow_html=True)
 
@@ -712,20 +680,16 @@ with tab_admin:
         )
 
         if st.button("💾 Save Technician Changes", key="save_techs"):
-            # 1. Clean the data to remove "ghost rows" (empty clicks)
-            clean_techs = edited_techs.dropna(how="all").fillna("")
+            # BUG FIX 3: True ghost-row eliminator
+            clean_techs = edited_techs.copy()
+            clean_techs["name"] = clean_techs["name"].astype(str).str.strip()
+            # Drop rows where the name is completely empty
+            clean_techs = clean_techs[clean_techs["name"] != ""]
             
-            # 2. Check for blanks
-            blank_names = clean_techs[clean_techs["name"].astype(str).str.strip() == ""]
-            
-            if clean_techs.empty:
-                st.error("❌ Cannot save an empty table. Please add at least one technician.")
-            elif not blank_names.empty:
-                st.error("❌ All technicians must have a name.")
-            else:
-                conn.update(worksheet="Technicians", data=clean_techs.astype(str))
-                st.success("✅ Technicians saved.")
-                st.rerun()
+            conn.update(worksheet="Technicians", data=clean_techs.astype(str))
+            st.cache_data.clear()
+            st.success("✅ Technicians saved.")
+            st.rerun()
 
     # ── Locations ─────────────────────────────────────────────────
     with subtab_loc:
@@ -745,17 +709,13 @@ with tab_admin:
         )
 
         if st.button("💾 Save Location Changes", key="save_locs"):
-            # 1. Clean the data to remove "ghost rows" (empty clicks)
-            clean_locs = edited_locs.dropna(how="all").fillna("")
+            # BUG FIX 3: True ghost-row eliminator
+            clean_locs = edited_locs.copy()
+            clean_locs["location_name"] = clean_locs["location_name"].astype(str).str.strip()
+            # Drop rows where the location is completely empty
+            clean_locs = clean_locs[clean_locs["location_name"] != ""]
             
-            # 2. Check for blanks
-            blank_locs = clean_locs[clean_locs["location_name"].astype(str).str.strip() == ""]
-            
-            if clean_locs.empty:
-                 st.error("❌ Cannot save an empty table. Please add at least one location.")
-            elif not blank_locs.empty:
-                st.error("❌ Location names cannot be blank.")
-            else:
-                conn.update(worksheet="Locations", data=clean_locs.astype(str))
-                st.success("✅ Locations saved.")
-                st.rerun()
+            conn.update(worksheet="Locations", data=clean_locs.astype(str))
+            st.cache_data.clear()
+            st.success("✅ Locations saved.")
+            st.rerun()
