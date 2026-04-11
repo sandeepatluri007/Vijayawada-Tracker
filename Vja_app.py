@@ -1,6 +1,8 @@
 """
-VIJAYAWADA Field Tracker
+Smart Meter Field Tracker
 =========================
+Backend : streamlit-gsheets-connection  (Google Sheets)
+Theme   : Clean White & Light Greys (Field-Optimized)
 """
 
 import streamlit as st
@@ -18,109 +20,123 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── CSS – mobile-first, field-grade ──────────────────────────────────────────
+# ── CSS – Clean Light Theme ──────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
 
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-.stApp { background:#0f1117; color:#e8ecf0; }
+.stApp { background:#f8f9fa; color:#1e293b; }
 #MainMenu, footer, header { visibility:hidden; }
 
 /* ── top banner ── */
 .top-banner {
-    background: linear-gradient(135deg,#1a2744,#0d1b35);
-    border-bottom: 2px solid #2563eb;
-    padding: 12px 16px 10px;
-    margin: -1rem -1rem 1rem;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px 16px;
     display:flex; align-items:center; gap:10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 .top-banner .t { font-family:'Rajdhani',sans-serif; font-size:1.45rem;
-    font-weight:700; color:#f0f4ff; letter-spacing:.6px; margin:0; }
-.top-banner .s { font-size:.72rem; color:#7fb3f5; margin:0; }
+    font-weight:700; color:#0f172a; letter-spacing:.6px; margin:0; }
+.top-banner .s { font-size:.75rem; color:#64748b; margin:0; font-weight:500; }
 
 /* ── tabs ── */
 .stTabs [data-baseweb="tab-list"] {
-    background:#131720; border-radius:10px; padding:4px; gap:2px;
+    background:#e2e8f0; border-radius:10px; padding:4px; gap:4px;
     overflow-x:auto; white-space:nowrap;
 }
 .stTabs [data-baseweb="tab"] {
     border-radius:8px !important; padding:8px 13px !important;
     font-family:'Rajdhani',sans-serif; font-size:.88rem !important;
-    font-weight:600 !important; color:#8a9bbf !important;
+    font-weight:700 !important; color:#64748b !important;
     background:transparent !important; border:none !important;
     min-width:auto !important; flex-shrink:0;
 }
-.stTabs [aria-selected="true"] { background:#2563eb !important; color:#fff !important; }
+.stTabs [aria-selected="true"] { 
+    background:#ffffff !important; 
+    color:#0f172a !important; 
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
 
 /* ── metric cards ── */
 [data-testid="stMetric"] {
-    background: linear-gradient(145deg,#1a2540,#141c2e);
-    border: 1px solid #243050; border-radius:12px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0; border-radius:12px;
     padding: 14px 12px !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.02);
 }
-[data-testid="stMetricLabel"]  { color:#6b7fa3 !important; font-size:.75rem !important; text-transform:uppercase; letter-spacing:.6px; }
-[data-testid="stMetricValue"]  { font-family:'Rajdhani',sans-serif; font-size:1.9rem !important; font-weight:700; color:#fff !important; }
+[data-testid="stMetricLabel"]  { color:#64748b !important; font-size:.75rem !important; text-transform:uppercase; letter-spacing:.6px; font-weight:600; }
+[data-testid="stMetricValue"]  { font-family:'Rajdhani',sans-serif; font-size:1.9rem !important; font-weight:700; color:#0f172a !important; }
 [data-testid="stMetricDelta"]  { font-size:.75rem !important; }
 
 /* ── section headers ── */
 .sec-hdr {
-    font-family:'Rajdhani',sans-serif; font-size:1.05rem; font-weight:700;
-    color:#7fb3f5; border-left:3px solid #2563eb; padding-left:9px;
-    margin: 1rem 0 .5rem;
+    font-family:'Rajdhani',sans-serif; font-size:1.15rem; font-weight:700;
+    color:#334155; border-left:4px solid #cbd5e1; padding-left:10px;
+    margin: 1.5rem 0 1rem;
 }
 
 /* ── buttons ── */
 .stButton>button {
-    background:#2563eb !important; color:#fff !important;
-    border:none !important; border-radius:8px !important;
-    font-family:'Rajdhani',sans-serif !important; font-weight:600 !important;
-    font-size:.93rem !important; padding:9px 18px !important;
-    width:100% !important; transition:background .2s;
+    background:#ffffff !important; color:#334155 !important;
+    border:1px solid #cbd5e1 !important; border-radius:8px !important;
+    font-family:'Rajdhani',sans-serif !important; font-weight:700 !important;
+    font-size:.95rem !important; padding:9px 18px !important;
+    width:100% !important; transition:all .2s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }
-.stButton>button:hover { background:#1d4ed8 !important; }
+.stButton>button:hover { background:#f1f5f9 !important; border-color:#94a3b8 !important; }
+
+/* Primary CTA Override */
+button[kind="primary"] {
+    background:#0f172a !important; color:#ffffff !important; border-color:#0f172a !important;
+}
+button[kind="primary"]:hover {
+    background:#334155 !important; border-color:#334155 !important;
+}
 
 /* ── inputs ── */
 .stSelectbox>div>div, .stNumberInput>div>div>input,
-.stTextInput>div>div>input, .stDateInput>div>div>input {
-    background:#1a2235 !important; border:1px solid #2a3a58 !important;
-    border-radius:8px !important; color:#e0e8f5 !important; font-size:.9rem !important;
+.stTextInput>div>div>input, .stDateInput>div>div>input, .stMultiSelect>div>div {
+    background:#ffffff !important; border:1px solid #cbd5e1 !important;
+    border-radius:8px !important; color:#0f172a !important; font-size:.9rem !important;
 }
 .stSelectbox label, .stNumberInput label, .stTextInput label,
 .stDateInput label, .stMultiSelect label {
-    color:#8ca4c8 !important; font-size:.8rem !important; font-weight:500 !important;
+    color:#475569 !important; font-size:.85rem !important; font-weight:600 !important;
 }
 
 /* ── forms ── */
-.stForm { background:#141c2e !important; border:1px solid #243050 !important;
-    border-radius:12px !important; padding:14px !important; }
+.stForm { background:#ffffff !important; border:1px solid #e2e8f0 !important;
+    border-radius:12px !important; padding:16px !important; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
 
 /* ── dataframe ── */
-.stDataFrame { border-radius:10px; overflow:hidden; }
+.stDataFrame { border-radius:10px; border: 1px solid #e2e8f0; overflow:hidden; }
 [data-testid="stDataFrameResizable"] th {
-    background:#1a2540 !important; color:#7fb3f5 !important;
-    font-family:'Rajdhani',sans-serif; font-weight:600 !important; font-size:.82rem !important;
+    background:#f1f5f9 !important; color:#334155 !important;
+    font-family:'Rajdhani',sans-serif; font-weight:700 !important; font-size:.85rem !important;
+    border-bottom: 2px solid #e2e8f0 !important;
 }
-[data-testid="stDataFrameResizable"] td { color:#ccd6e8 !important; font-size:.8rem !important; }
+[data-testid="stDataFrameResizable"] td { color:#1e293b !important; font-size:.85rem !important; background:#ffffff !important; border-bottom:1px solid #f1f5f9 !important; }
 
 /* ── warning / danger ── */
 .warn-box {
-    background:#2d1b0a; border:1px solid #d97706; border-radius:9px;
-    padding:9px 13px; color:#fbbf24; font-size:.83rem; margin-bottom:.6rem;
+    background:#fffbeb; border:1px solid #fcd34d; border-radius:9px;
+    padding:10px 14px; color:#92400e; font-size:.85rem; margin-bottom:.8rem; font-weight:500;
 }
-.danger-btn>button { background:#991b1b !important; }
-.success-btn>button { background:#065f46 !important; }
 
 /* ── whatsapp button ── */
 .wa-btn {
-    display:block; text-align:center; background:#25D366; color:#fff !important;
-    padding:11px; border-radius:9px; text-decoration:none; font-weight:700;
-    font-family:'Rajdhani',sans-serif; font-size:1rem; letter-spacing:.4px;
-    margin-top:.5rem;
+    display:block; text-align:center; background:#10b981; color:#fff !important;
+    padding:12px; border-radius:9px; text-decoration:none; font-weight:700;
+    font-family:'Rajdhani',sans-serif; font-size:1.05rem; letter-spacing:.5px;
+    margin-top:1rem; transition: background 0.2s;
 }
-.wa-btn:hover { background:#1ebe57; }
+.wa-btn:hover { background:#059669; }
 
-hr { border-color:#1e2d47; }
+hr { border-color:#e2e8f0; }
 
 @media (max-width:600px){
     .top-banner .t { font-size:1.15rem; }
@@ -130,22 +146,30 @@ hr { border-color:#1e2d47; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Top banner ────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="top-banner">
-  <span style="font-size:1.7rem;">⚡</span>
-  <div>
-    <p class="t">SMART METER FIELD TRACKER</p>
-    <p class="s">Live via Google Sheets · Vijayawada</p>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+# ── Top banner & Refresh Button ───────────────────────────────────────────────
+head_col1, head_col2 = st.columns([3.5, 1.2])
+with head_col1:
+    st.markdown("""
+    <div class="top-banner">
+      <span style="font-size:1.8rem;">⚡</span>
+      <div>
+        <p class="t">METER TRACKER</p>
+        <p class="s">Vijayawada Field Ops</p>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+with head_col2:
+    st.write("") # slight vertical padding
+    if st.button("🔄 Refresh"):
+        st.cache_data.clear()
+        st.rerun()
+
+st.write("") # Spacing before tabs
 
 # ── Google Sheets connection ──────────────────────────────────────────────────
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
 def get_data(worksheet: str) -> pd.DataFrame:
     try:
         df = conn.read(worksheet=worksheet, ttl=0)
@@ -168,7 +192,7 @@ def has_col(df: pd.DataFrame, *cols) -> bool:
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 tab_dash, tab_inst, tab_inv, tab_admin = st.tabs([
-    "📊 Dashboard", "🛠️ Installations", "📦 Inventory", "⚙️ Admin"
+    "📊 Dashboard", "🛠️ Installs", "📦 Store", "⚙️ Admin"
 ])
 
 
@@ -181,7 +205,7 @@ with tab_dash:
     df_inv  = get_data("Inventory")
 
     # ── Inventory stock cards ─────────────────────────────────────
-    st.markdown('<div class="sec-hdr">📦 Inventory Stock</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-hdr">📦 Live Inventory Stock</div>', unsafe_allow_html=True)
 
     if not df_inv.empty and has_col(df_inv, "type", "qty"):
         total_in_1ph = safe_numeric_col(df_inv[df_inv["type"] == "1 PH"], "qty").sum()
@@ -277,7 +301,7 @@ with tab_dash:
 
             st.markdown('<div class="sec-hdr">📤 Export & Share</div>', unsafe_allow_html=True)
             csv_data = group_df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download CSV", data=csv_data,
+            st.download_button("📥 Download CSV Report", data=csv_data,
                                file_name="Installation_Summary.csv", mime="text/csv",
                                use_container_width=True)
 
@@ -294,7 +318,7 @@ with tab_dash:
             wa_text = "\n".join(wa_lines)
             wa_url  = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
             st.markdown(
-                f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Share Summary via WhatsApp</a>',
+                f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Send to WhatsApp</a>',
                 unsafe_allow_html=True,
             )
         else:
@@ -309,7 +333,6 @@ with tab_inst:
     df_techs = get_data("Technicians")
     df_locs  = get_data("Locations")
 
-    # BUG FIX 1: Safely handle "1", "1.0", "True" active states from Google Sheets
     active_techs = []
     if not df_techs.empty and has_col(df_techs, "is_active", "name"):
         for _, r in df_techs.iterrows():
@@ -341,7 +364,7 @@ with tab_inst:
                 q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=0)
             with fc2:
                 q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=0)
-            f_sub = st.form_submit_button("💾 Submit Entry")
+            f_sub = st.form_submit_button("💾 Save Entry", kind="primary")
 
         if f_sub:
             if q1 == 0 and q3 == 0:
@@ -366,7 +389,6 @@ with tab_inst:
                     }])
                     updated = pd.concat([df_existing, new_row], ignore_index=True)
                     conn.update(worksheet="Installations", data=updated.astype(str))
-                    # BUG FIX 2: Manually clear Streamlit cache after every update
                     st.cache_data.clear() 
                     st.success(f"✅ Entry saved for {tech} on {entry_date}.")
                     st.rerun()
@@ -414,7 +436,7 @@ with tab_inst:
             loc_idx  = active_locs.index(curr_loc) if curr_loc in active_locs and active_locs else 0
 
             st.markdown(
-                f'<div class="warn-box">⚠️ Editing / deleting: <b>{curr_row["tech_name"]}</b>'
+                f'<div class="warn-box">⚠️ Modifying: <b>{curr_row["tech_name"]}</b>'
                 f' on <b>{curr_row["date"]}</b></div>',
                 unsafe_allow_html=True,
             )
@@ -433,9 +455,9 @@ with tab_inst:
 
                 btn_update, btn_delete = st.columns(2)
                 with btn_update:
-                    do_update = st.form_submit_button("✏️ Update Entry")
+                    do_update = st.form_submit_button("✏️ Update", kind="primary")
                 with btn_delete:
-                    do_delete = st.form_submit_button("🗑️ Delete Entry")
+                    do_delete = st.form_submit_button("🗑️ Delete")
 
             if do_update:
                 if e_q1 == 0 and e_q3 == 0:
@@ -461,7 +483,7 @@ with tab_inst:
             del_date, del_tech = del_key.split("||", 1)
             st.markdown(
                 f'<div class="warn-box">⚠️ Confirm delete for <b>{del_tech}</b>'
-                f' on <b>{del_date}</b>? This cannot be undone.</div>',
+                f' on <b>{del_date}</b>?</div>',
                 unsafe_allow_html=True,
             )
             cy, cn = st.columns(2)
@@ -488,7 +510,7 @@ with tab_inst:
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inv:
 
-    st.markdown('<div class="sec-hdr">📥 Inward Material from Store</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-hdr">📥 Inward Store Material</div>', unsafe_allow_html=True)
 
     with st.form("inv_form", clear_on_submit=True):
         iv1, iv2 = st.columns(2)
@@ -499,7 +521,7 @@ with tab_inv:
             iqty  = st.number_input("Quantity", min_value=1, step=1, value=1)
             imrn  = st.text_input("MRN No.")
         imake = st.selectbox("Make", ["Schneider", "Genus", "Other"])
-        iv_sub = st.form_submit_button("📥 Add to Stock")
+        iv_sub = st.form_submit_button("📥 Save Stock", kind="primary")
 
     if iv_sub:
         if not imrn.strip():
@@ -519,7 +541,7 @@ with tab_inv:
             st.success(f"✅ Inwarded {iqty} × {itype} ({imake}) — MRN {imrn.strip()}")
             st.rerun()
 
-    st.markdown('<div class="sec-hdr">📊 Stock Summary</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-hdr">📊 Live Stock Summary</div>', unsafe_allow_html=True)
     df_inv_t  = get_data("Inventory")
     df_inst_s = get_data("Installations")
 
@@ -579,7 +601,7 @@ with tab_inv:
             inv_row = inv_sorted.iloc[inv_idx]
 
             st.markdown(
-                f'<div class="warn-box">⚠️ Editing / deleting: MRN <b>{inv_row.get("mrn","")}</b>'
+                f'<div class="warn-box">⚠️ Modifying: MRN <b>{inv_row.get("mrn","")}</b>'
                 f' — {inv_row.get("type","")} ({inv_row.get("make","")})</div>',
                 unsafe_allow_html=True,
             )
@@ -599,7 +621,7 @@ with tab_inv:
 
                 ib1, ib2 = st.columns(2)
                 with ib1:
-                    inv_do_update = st.form_submit_button("✏️ Update")
+                    inv_do_update = st.form_submit_button("✏️ Update", kind="primary")
                 with ib2:
                     inv_do_delete = st.form_submit_button("🗑️ Delete")
 
@@ -649,50 +671,40 @@ with tab_inv:
 with tab_admin:
 
     st.markdown("""
-    <div class="warn-box" style="background:#0d1f35;border-color:#2563eb;color:#7fb3f5;">
+    <div class="warn-box" style="background:#f8f9fa;border-color:#cbd5e1;color:#475569;">
     💡 <b>Tip:</b> Tap a cell to type, tap <b>+</b> at the bottom to add a row.
     Set <b>Active?</b> to <code>0</code> to hide a technician from entry forms.
     </div>
     """, unsafe_allow_html=True)
 
-    # --- BULLETPROOF SAVE FUNCTION ---
     def process_editor_save(edited_df, worksheet_name, mandatory_cols):
-        # 1. Protect against Streamlit returning a stripped DataFrame (KeyError prevention)
         for m_col in mandatory_cols:
             if m_col not in edited_df.columns:
-                return False, f"❌ Cannot save: Missing column '{m_col}'. If the table is empty, please add a row using the '+' button."
+                return False, f"❌ Missing column '{m_col}'. Add a row using the '+' button."
 
-        # 2. Fill NaNs and force to strict strings
         df_clean = edited_df.fillna("").astype(str)
 
-        # 3. Clean up "nan" artifacts and invisible spaces
         for col in df_clean.columns:
             df_clean[col] = df_clean[col].str.strip()
             df_clean[col] = df_clean[col].replace(["nan", "NaN", "None", "<NA>"], "")
 
-        # 4. Safely drop completely empty "ghost rows" (Rows where every column is "")
         df_clean = df_clean[df_clean.astype(bool).any(axis=1)]
 
-        # 5. Prevent catastrophic wiping of the entire Google Sheet
         if df_clean.empty:
             return False, "❌ Cannot save: Table is completely empty. Leave at least one valid row."
 
-        # 6. Strictly validate mandatory columns (Blocks silent deletions)
         for m_col in mandatory_cols:
             if not df_clean[df_clean[m_col] == ""].empty:
-                return False, f"❌ Validation Error: '{m_col}' cannot be blank in any row."
+                return False, f"❌ Validation Error: '{m_col}' cannot be blank."
 
-        # 7. Reset index so Google Sheets API doesn't crash on scrambled row numbers
         df_clean = df_clean.reset_index(drop=True)
 
-        # 8. Execute save to Cloud
         try:
             conn.update(worksheet=worksheet_name, data=df_clean)
             st.cache_data.clear()
             return True, "✅ Saved successfully!"
         except Exception as e:
             return False, f"❌ Google API Error: {str(e)}"
-    # ---------------------------------
 
     subtab_tech, subtab_loc = st.tabs(["👷 Technicians", "📍 Locations"])
 
@@ -702,12 +714,10 @@ with tab_admin:
         df_t = get_data("Technicians")
         expected_cols_t = ["name", "phone", "aadhar", "is_active"]
 
-        # FIX: Standardize existing Google Sheet columns so data doesn't disappear if capitalized
         if not df_t.empty:
             col_map_t = {c: str(c).strip().lower() for c in df_t.columns}
             df_t = df_t.rename(columns=col_map_t)
 
-        # Force strict structure
         if df_t.empty:
             df_t = pd.DataFrame(columns=expected_cols_t)
         else:
@@ -721,7 +731,7 @@ with tab_admin:
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
-            key="editor_techs", # CRITICAL: Prevents Streamlit from dropping state
+            key="editor_techs",
             column_config={
                 "name": st.column_config.TextColumn("Name", required=True),
                 "phone": st.column_config.TextColumn("Phone", required=True),
@@ -732,7 +742,7 @@ with tab_admin:
             },
         )
 
-        if st.button("💾 Save Technician Changes", key="save_techs"):
+        if st.button("💾 Save Technicians", key="save_techs", kind="primary"):
             success, message = process_editor_save(edited_techs, "Technicians", ["name", "phone"])
             if success:
                 st.success(message)
@@ -746,12 +756,10 @@ with tab_admin:
         df_l = get_data("Locations")
         expected_cols_l = ["location_name"]
 
-        # FIX: Standardize existing Google Sheet columns
         if not df_l.empty:
             col_map_l = {c: str(c).strip().lower() for c in df_l.columns}
             df_l = df_l.rename(columns=col_map_l)
 
-        # Force strict structure
         if df_l.empty:
             df_l = pd.DataFrame(columns=expected_cols_l)
         else:
@@ -764,13 +772,13 @@ with tab_admin:
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
-            key="editor_locs", # CRITICAL: Prevents Streamlit from dropping state
+            key="editor_locs",
             column_config={
                 "location_name": st.column_config.TextColumn("Location Name", required=True),
             },
         )
 
-        if st.button("💾 Save Location Changes", key="save_locs"):
+        if st.button("💾 Save Locations", key="save_locs", kind="primary"):
             success, message = process_editor_save(edited_locs, "Locations", ["location_name"])
             if success:
                 st.success(message)
