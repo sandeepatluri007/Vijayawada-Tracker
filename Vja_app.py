@@ -3,6 +3,7 @@ Smart Meter Field Tracker
 =========================
 Backend : streamlit-gsheets-connection  (Google Sheets)
 Theme   : Clean White & Light Greys (Field-Optimized)
+Security: PIN Protected
 """
 
 import streamlit as st
@@ -180,7 +181,7 @@ if not st.session_state["authenticated"]:
         login_btn = st.form_submit_button("Unlock Tracker", type="primary")
         
         if login_btn:
-            # Change "1234" to whatever PIN you want to use
+            # Change "2333" to whatever PIN you want to use
             if pin_entry == "2333": 
                 st.session_state["authenticated"] = True
                 st.success("Access Granted!")
@@ -335,8 +336,11 @@ with tab_dash:
             
             # ── CSV Export Preparation (Including Stock) ──
             export_df = group_df.copy()
+            # Add blank divider row
             export_df.loc[len(export_df)] = ["---", "---", "---", "---", "---"]
+            # Add Grand Total row
             export_df.loc[len(export_df)] = ["GRAND TOTAL", "", sum_1ph, sum_3ph, sum_1ph + sum_3ph]
+            # Add Pending Stock row
             export_df.loc[len(export_df)] = ["PENDING STOCK", "", pending_1ph, pending_3ph, ""]
             
             csv_data = export_df.to_csv(index=False).encode("utf-8")
@@ -344,21 +348,25 @@ with tab_dash:
                                file_name="Installation_Summary.csv", mime="text/csv",
                                use_container_width=True)
 
-            # ── WhatsApp Export Preparation (Sanitized & Included Header) ──
+            # ── WhatsApp Export Preparation (Location Only) ──
             date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
-            loc_str  = ", ".join(loc_filter) if loc_filter else "All Locations"
+            
+            # Create a separate dataframe aggregating ONLY by Location for the WhatsApp Message
+            wa_loc_df = filtered.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
 
             wa_lines = [
-                "*DPR- Touchlight Infra*",
-                f"*Date:* {date_str} | *{loc_str}*\n"
+                "DPR- Touchlight Infra",
+                f"Date: {date_str}\n"
             ]
-            for _, row in group_df.iterrows():
-                q1_str = str(int(row["1PH"])) if show_1ph else "-"
-                q3_str = str(int(row["3PH"])) if show_3ph else "-"
-                wa_lines.append(f"*{row['Technician']}* ({row['Location']}) - 1PH: {q1_str}, 3PH: {q3_str}")
+            
+            for _, row in wa_loc_df.iterrows():
+                q1_val = int(row["qty_1ph"]) if show_1ph else 0
+                q3_val = int(row["qty_3ph"]) if show_3ph else 0
+                wa_lines.append(f"{row['location']}:")
+                wa_lines.append(f"1PH: {q1_val}, 3PH: {q3_val}\n")
                 
-            wa_lines.append(f"\n*Total 1PH:* {sum_1ph} | *Total 3PH:* {sum_3ph} | *Grand Total:* {sum_1ph + sum_3ph}")
-            wa_lines.append(f"*Pending Stock:* 1PH: {pending_1ph} | 3PH: {pending_3ph}")
+            wa_lines.append(f"Total 1PH: {sum_1ph} | Total 3PH: {sum_3ph} | Grand Total: {sum_1ph + sum_3ph}")
+            wa_lines.append(f"Pending Stock: 1PH: {pending_1ph} | 3PH: {pending_3ph}")
 
             wa_text = "\n".join(wa_lines)
             wa_url  = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
