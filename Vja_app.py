@@ -181,8 +181,8 @@ if not st.session_state["authenticated"]:
         login_btn = st.form_submit_button("Unlock Tracker", type="primary")
         
         if login_btn:
-            # Change "2333" to whatever PIN you want to use
-            if pin_entry == "2333": 
+            # Change "1323" to whatever PIN you want to use
+            if pin_entry == "1323": 
                 st.session_state["authenticated"] = True
                 st.success("Access Granted!")
                 st.rerun()
