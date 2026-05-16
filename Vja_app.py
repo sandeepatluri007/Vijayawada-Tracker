@@ -30,7 +30,7 @@ st.set_page_config(
 # ── CSS – Clean Light Theme ──────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght=500;600;700&family=Inter:wght=400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght=500;600;700&family=Inter:wght@400;500;600&display=swap');
 
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .stApp { background:#f8f9fa; color:#1e293b; }
@@ -322,7 +322,8 @@ with tab_dash:
             wa_lines.append(f"Total 1PH: {sum_1ph} | Total 3PH: {sum_3ph} | Grand Total: {sum_1ph + sum_3ph}")
             wa_lines.append(f"Pending Stock: 1PH: {pending_1ph} | 3PH: {pending_3ph}")
 
-            wa_url  = f"https://wa.me/?text={urllib.parse.quote(top_banner=None, text=chr(10).join(wa_lines))}"
+            wa_text = "\n".join(wa_lines)
+            wa_url  = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
             st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Send to WhatsApp</a>', unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -537,7 +538,7 @@ with tab_planner:
                 dest_str = f"{computed_pts[-1]['lat']},{computed_pts[-1]['lng']}"
                 mid_waypoints = [f"{pt['lat']},{pt['lng']}" for pt in computed_pts[1:-1]]
                 
-                base_dir_url = "mymaps.google.com4"
+                base_dir_url = "https://www.google.com/maps/dir/?api=1"
                 optimized_gmaps_url = f"{base_dir_url}&origin={origin_str}&destination={dest_str}"
                 if mid_waypoints: optimized_gmaps_url += f"&waypoints={'|'.join(mid_waypoints)}"
                     
@@ -551,7 +552,7 @@ with tab_planner:
                 ]
                 for idx, pt in enumerate(computed_pts):
                     msg_body.append(f"{idx+1}. {pt['building_name']} (1PH:{pt['qty_1ph']}, 3PH:{pt['qty_3ph']})")
-                    msg_body.append(f"   ↳ Map Pin: mymaps.google.com5{pt['lat']},{pt['lng']}")
+                    msg_body.append(f"   ↳ Map Pin: https://www.google.com/maps/search/?api=1&query={pt['lat']},{pt['lng']}")
                     
                 final_wa_string = "\n".join(msg_body)
                 wa_dispatch_endpoint = f"https://wa.me/?text={urllib.parse.quote(final_wa_string)}"
