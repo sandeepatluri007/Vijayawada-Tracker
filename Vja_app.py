@@ -30,7 +30,7 @@ st.set_page_config(
 # ── CSS – Clean Light Theme ──────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght=500;600;700&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght=500;600;700&family=Inter:wght=400;500;600&display=swap');
 
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .stApp { background:#f8f9fa; color:#1e293b; }
@@ -217,10 +217,10 @@ def safe_numeric_col(df: pd.DataFrame, col: str) -> pd.Series:
 def has_col(df: pd.DataFrame, *cols) -> bool:
     return all(c in df.columns for c in cols)
 
-# ── Read URL Parameters for Geolocation Hooks ─────────────────────────────────
-url_params = st.query_params
-captured_lat = url_params.get("lat", "")
-captured_lng = url_params.get("lng", "")
+# ── Safe Extraction of Query Dictionary Parameters ──────────────────────────
+query_dict = st.query_params.to_dict()
+captured_lat = query_dict.get("lat", "")
+captured_lng = query_dict.get("lng", "")
 
 # ── Tabs Configuration ─────────────────────────────────────────────────────────
 tab_dash, tab_survey, tab_planner, tab_inst, tab_inv, tab_admin = st.tabs([
@@ -461,9 +461,7 @@ with tab_survey:
                 st.cache_data.clear()
                 st.rerun()
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  TAB: WORK PLANNER (DISTANCE CLUSTERING & SINGLE-INSTALLER ASSIGNMENT LOCKS)
-# ═══════════════════════════════════════════════════════════════════════════════
+# ── 🗂️ WORK PLANNER (DISTANCE CLUSTERING & GOOGLE ROUTING ENGINE APIS) ───────
 with tab_planner:
     st.markdown('<div class="sec-hdr">🗂️ Capacity Proximity Optimizer Hub</div>', unsafe_allow_html=True)
     df_srv = get_data("Surveys")
@@ -476,7 +474,6 @@ with tab_planner:
     elif not active_installers:
         st.warning("Please setup active installers inside Admin configuration matrices.")
     else:
-        # STRICT LOCKING CRITERIA: Isolate unassigned entries
         unassigned_pool = df_srv[
             (df_srv["status"] == "Pending") & 
             ((df_srv["assigned_to"] == "") | (df_srv["assigned_to"].isna()) | (df_srv["assigned_to"] == "None"))
@@ -538,9 +535,10 @@ with tab_planner:
                 dest_str = f"{computed_pts[-1]['lat']},{computed_pts[-1]['lng']}"
                 mid_waypoints = [f"{pt['lat']},{pt['lng']}" for pt in computed_pts[1:-1]]
                 
-                base_dir_url = "https://www.google.com/maps/dir/?api=1"
-                optimized_gmaps_url = f"{base_dir_url}&origin={origin_str}&destination={dest_str}"
-                if mid_waypoints: optimized_gmaps_url += f"&waypoints={'|'.join(mid_waypoints)}"
+                # Upgraded to Production Standard Google Maps Intent URL APIs
+                optimized_gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={origin_str}&destination={dest_str}"
+                if mid_waypoints: 
+                    optimized_gmaps_url += f"&waypoints={'|'.join(mid_waypoints)}"
                     
                 msg_body = [
                     f"⚡ *SMART METER DEPLOYMENT ROUTE* ⚡",
