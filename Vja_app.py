@@ -14,19 +14,11 @@ from datetime import date
 import urllib.parse
 import math
 import time
-import io
 import base64
-
-# Safe Import for Image Processing (Prevents "Oh No" Crash if missing in requirements.txt)
-try:
-    from PIL import Image
-    HAS_PILLOW = True
-except ImportError:
-    HAS_PILLOW = False
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Field Meter Tracker & Planner",
+    page_title="Field Meter Tracker",
     page_icon="⚡",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -158,24 +150,24 @@ hr { border-color:#e2e8f0; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Crash-Proof URL Parameter Retrieval ───────────────────────────────────────
+# ── Safe Version-Agnostic Query Params ────────────────────────────────────────
 captured_lat, captured_lng = "", ""
 try:
     if hasattr(st, "query_params"):
         captured_lat = st.query_params.get("lat", "")
         captured_lng = st.query_params.get("lng", "")
-    else:
+    elif hasattr(st, "experimental_get_query_params"):
         params = st.experimental_get_query_params()
-        captured_lat = params.get("lat", [""])[0]
-        captured_lng = params.get("lng", [""])[0]
+        captured_lat = params.get("lat", [""])[0] if "lat" in params else ""
+        captured_lng = params.get("lng", [""])[0] if "lng" in params else ""
 except Exception:
     pass
 
-def clear_gps_params():
+def clear_query_params():
     try:
         if hasattr(st, "query_params"):
             st.query_params.clear()
-        else:
+        elif hasattr(st, "experimental_set_query_params"):
             st.experimental_set_query_params()
     except Exception:
         pass
@@ -213,6 +205,7 @@ if not st.session_state["authenticated"]:
         login_btn = st.form_submit_button("Unlock Tracker", type="primary")
         
         if login_btn:
+            # Change "2333" to whatever PIN you want to use
             if pin_entry == "2333": 
                 st.session_state["authenticated"] = True
                 st.success("Access Granted!")
@@ -228,9 +221,10 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def get_data(worksheet: str, retries=3) -> pd.DataFrame:
+    """Fetches data with built-in retries for spotty mobile networks."""
     for attempt in range(retries):
         try:
-            df = conn.read(worksheet=worksheet, ttl=5)
+            df = conn.read(worksheet=worksheet, ttl=10)
             return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
         except Exception as e:
             if attempt < retries - 1:
@@ -240,8 +234,10 @@ def get_data(worksheet: str, retries=3) -> pd.DataFrame:
                 return pd.DataFrame()
 
 def safe_int(val, default: int = 0) -> int:
-    try: return int(float(val))
-    except (ValueError, TypeError): return default
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
 
 def safe_numeric_col(df: pd.DataFrame, col: str) -> pd.Series:
     return pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -249,13 +245,15 @@ def safe_numeric_col(df: pd.DataFrame, col: str) -> pd.Series:
 def has_col(df: pd.DataFrame, *cols) -> bool:
     return all(c in df.columns for c in cols)
 
-# ── Tabs (Now including Survey & Planner) ─────────────────────────────────────
+
+# ── Tabs Configuration ────────────────────────────────────────────────────────
 tab_dash, tab_survey, tab_planner, tab_inst, tab_inv, tab_admin = st.tabs([
-    "📊 Dashboard", "🏍️ Survey Session", "🗂️ Work Planner", "🛠️ Installs", "📦 Store", "⚙️ Admin"
+    "📊 Dashboard", "🏍️ Survey Run", "🗂️ Work Planner", "🛠️ Installs", "📦 Store", "⚙️ Admin"
 ])
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
-#  DASHBOARD (Original Code)
+#  DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_dash:
 
@@ -283,8 +281,12 @@ with tab_dash:
     sc1, sc2, sc3, sc4 = st.columns(4)
     sc1.metric("Received 1PH",  int(total_in_1ph))
     sc2.metric("Received 3PH",  int(total_in_3ph))
-    sc3.metric("Pending 1PH",   pending_1ph, delta="⚠️ Deficit!" if pending_1ph < 0 else None, delta_color="inverse")
-    sc4.metric("Pending 3PH",   pending_3ph, delta="⚠️ Deficit!" if pending_3ph < 0 else None, delta_color="inverse")
+    sc3.metric("Pending 1PH",   pending_1ph,
+               delta="⚠️ Deficit!" if pending_1ph < 0 else None,
+               delta_color="inverse")
+    sc4.metric("Pending 3PH",   pending_3ph,
+               delta="⚠️ Deficit!" if pending_3ph < 0 else None,
+               delta_color="inverse")
 
     st.divider()
 
@@ -319,7 +321,10 @@ with tab_dash:
             d_start = d_end = date_range
 
         filtered["_date"] = pd.to_datetime(filtered["date"], errors="coerce").dt.date
-        filtered = filtered[(filtered["_date"] >= d_start) & (filtered["_date"] <= d_end)]
+        filtered = filtered[
+            (filtered["_date"] >= d_start) &
+            (filtered["_date"] <= d_end)
+        ]
         if loc_filter:
             filtered = filtered[filtered["location"].isin(loc_filter)]
         if tech_filter:
@@ -340,24 +345,36 @@ with tab_dash:
 
         if not filtered.empty:
             st.markdown('<div class="sec-hdr">👷 Technician Breakdown</div>', unsafe_allow_html=True)
-            group_df = filtered.groupby(["tech_name", "location"])[["qty_1ph", "qty_3ph"]].sum().reset_index()
+            group_df = (
+                filtered
+                .groupby(["tech_name", "location"])[["qty_1ph", "qty_3ph"]]
+                .sum()
+                .reset_index()
+            )
             group_df["Total"] = group_df["qty_1ph"] + group_df["qty_3ph"]
             group_df.columns = ["Technician", "Location", "1PH", "3PH", "Total"]
             st.dataframe(group_df, use_container_width=True, hide_index=True)
 
             st.markdown('<div class="sec-hdr">📤 Export & Share</div>', unsafe_allow_html=True)
+            
             export_df = group_df.copy()
             export_df.loc[len(export_df)] = ["---", "---", "---", "---", "---"]
             export_df.loc[len(export_df)] = ["GRAND TOTAL", "", sum_1ph, sum_3ph, sum_1ph + sum_3ph]
             export_df.loc[len(export_df)] = ["PENDING STOCK", "", pending_1ph, pending_3ph, ""]
             
             csv_data = export_df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download CSV Report", data=csv_data, file_name="Installation_Summary.csv", mime="text/csv", use_container_width=True)
+            st.download_button("📥 Download CSV Report", data=csv_data,
+                               file_name="Installation_Summary.csv", mime="text/csv",
+                               use_container_width=True)
 
             date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
             wa_loc_df = filtered.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
 
-            wa_lines = ["DPR- Touchlight Infra", f"Date: {date_str}\n"]
+            wa_lines = [
+                "DPR- Touchlight Infra",
+                f"Date: {date_str}\n"
+            ]
+            
             for _, row in wa_loc_df.iterrows():
                 q1_val = int(row["qty_1ph"]) if show_1ph else 0
                 q3_val = int(row["qty_3ph"]) if show_3ph else 0
@@ -369,30 +386,31 @@ with tab_dash:
 
             wa_text = "\n".join(wa_lines)
             wa_url  = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
-            st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Send to WhatsApp</a>', unsafe_allow_html=True)
+            st.markdown(
+                f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Send to WhatsApp</a>',
+                unsafe_allow_html=True,
+            )
         else:
             st.info("No records match the selected filters.")
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
-#  SURVEY SESSION (RIDE-AND-PIN FAST CAPTURE)
+#  SURVEY SESSION (RIDE & PIN)
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_survey:
-    # Initialize session tracking variables
     if "survey_active" not in st.session_state: st.session_state["survey_active"] = False
     if "session_id" not in st.session_state: st.session_state["session_id"] = ""
     if "s_lineman" not in st.session_state: st.session_state["s_lineman"] = ""
     if "s_date" not in st.session_state: st.session_state["s_date"] = ""
 
-    # STATE 1: Start new session
     if not st.session_state["survey_active"]:
-        st.markdown('<div class="sec-hdr">🏁 Start Survey Route Session</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sec-hdr">🏁 Start Survey Route</div>', unsafe_allow_html=True)
         with st.form("start_session_form"):
-            input_lineman = st.text_input("Active Lineman Name", placeholder="e.g., Satish Kumar")
+            input_lineman = st.text_input("Active Lineman Name", placeholder="Who is navigating on the bike?")
             input_date = st.date_input("Survey Date", date.today())
-            
-            if st.form_submit_button("🏁 Start Route Session", type="primary"):
+            if st.form_submit_button("🏁 Begin Active Tracking", type="primary"):
                 if not input_lineman.strip():
-                    st.error("❌ Lineman name is mandatory to begin tracking.")
+                    st.error("❌ Lineman name is mandatory.")
                 else:
                     st.session_state["survey_active"] = True
                     st.session_state["session_id"] = f"SESS_{int(time.time())}"
@@ -400,50 +418,59 @@ with tab_survey:
                     st.session_state["s_date"] = str(input_date)
                     st.rerun()
 
-    # STATE 2: Active Session (On the Bike)
     else:
         st.markdown(f"""
-        <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:14px; border-radius:10px; margin-bottom:15px;">
-            <b style="color:#166534; font-size:1.1rem;">🟢 ROUTE SURVEY IN PROGRESS</b><br/>
-            <span style="font-size:13px; color:#334155;"><b>Lineman:</b> {st.session_state['s_lineman']} | <b>Date:</b> {st.session_state['s_date']}</span>
+        <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px; margin-bottom:15px;">
+            <b style="color:#166534;">🟢 ACTIVE SURVEY ROUTE</b><br/>
+            <span style="font-size:13px; color:#1e293b;"><b>Lineman:</b> {st.session_state['s_lineman']} | <b>Date:</b> {st.session_state['s_date']}</span>
         </div>
         """, unsafe_allow_html=True)
 
+        # Smart JS Geolocation that prevents infinite reload loops
         js_gps_locator = """
         <script>
         function captureLiveGPS() {
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(function(position) {
                     const currentUrl = new URL(window.parent.location.href);
-                    currentUrl.searchParams.set('lat', position.coords.latitude);
-                    currentUrl.searchParams.set('lng', position.coords.longitude);
-                    window.parent.location.href = currentUrl.toString();
+                    const newLat = position.coords.latitude.toString();
+                    const newLng = position.coords.longitude.toString();
+                    
+                    if (currentUrl.searchParams.get('lat') !== newLat || currentUrl.searchParams.get('lng') !== newLng) {
+                        currentUrl.searchParams.set('lat', newLat);
+                        currentUrl.searchParams.set('lng', newLng);
+                        window.parent.location.href = currentUrl.toString();
+                    } else {
+                        alert("Location is already up to date!");
+                    }
                 }, function(error) {
-                    alert("GPS Error: Ensure location permissions are active on this device.");
+                    alert("GPS Error. Ensure location permissions are active.");
                 }, {enableHighAccuracy: true});
-            } else { alert("GPS Geolocation is not supported by this mobile browser."); }
+            } else {
+                alert("Geolocation not supported on this browser.");
+            }
         }
         </script>
         <button onclick="captureLiveGPS()" style="
             width: 100%; background-color: #ff4b4b; color: #ffffff; padding: 14px; border: none; 
             border-radius: 8px; font-family: 'Inter', sans-serif; font-weight: 700; font-size: 15px;
-            cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 15px;
-        ">📍 STEP 1: AUTO-CAPTURE GPS LOCATION</button>
+            cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 12px;
+        ">📍 STEP 1: AUTO-CAPTURE GPS PIN</button>
         """
         components.html(js_gps_locator, height=55)
 
         if captured_lat and captured_lng:
-            st.success(f"🎯 Coordinates Locked: {captured_lat}, {captured_lng}")
+            st.success(f"🎯 GPS Locked: {captured_lat}, {captured_lng}")
         else:
-            st.warning("⚠️ GPS tracking uninitialized. Tap the red button above to lock position.")
+            st.warning("⚠️ GPS tracking uninitialized. Tap the red button to capture position.")
 
-        st.markdown('<div class="sec-hdr">📷 STEP 2: Capture Snapshot & Save</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sec-hdr">📷 STEP 2: Document & Log</div>', unsafe_allow_html=True)
         
         with st.form("quick_pin_form", clear_on_submit=True):
-            field_file = st.file_uploader("Upload Snapshot (Camera/File)", type=["jpg", "jpeg", "png"])
+            field_file = st.file_uploader("Capture Snapshot (Camera/File)", type=["jpg", "jpeg", "png"])
             
-            with st.expander("📝 Optional Details (Skip completely to save time)"):
-                field_bldg = st.text_input("Building Description/Door No.", value="")
+            with st.expander("📝 Optional Fields (Bypass to save time)"):
+                field_bldg = st.text_input("Structure Reference / Door No.", value="")
                 col_i1, col_i2 = st.columns(2)
                 with col_i1: field_q1 = st.number_input("Est 1 PH Qty", min_value=0, value=0, step=1)
                 with col_i2: field_q3 = st.number_input("Est 3 PH Qty", min_value=0, value=0, step=1)
@@ -458,14 +485,7 @@ with tab_survey:
             else:
                 encoded_img_str = ""
                 try:
-                    if HAS_PILLOW:
-                        img = Image.open(field_file)
-                        img.thumbnail((300, 300))
-                        img_buf = io.BytesIO()
-                        img.save(img_buf, format="JPEG", quality=65)
-                        encoded_img_str = base64.b64encode(img_buf.getvalue()).decode()
-                    else:
-                        encoded_img_str = base64.b64encode(field_file.getvalue()).decode()
+                    encoded_img_str = base64.b64encode(field_file.getvalue()).decode()
                 except Exception:
                     pass
 
@@ -474,7 +494,7 @@ with tab_survey:
                 if not df_current_surveys.empty and "session_id" in df_current_surveys.columns:
                     stop_idx = len(df_current_surveys[df_current_surveys["session_id"] == st.session_state["session_id"]]) + 1
 
-                # Zero Typing Bypass
+                # Zero Typing Auto-Name
                 final_bldg_name = field_bldg.strip() if field_bldg.strip() else f"Asset-Stop #{stop_idx}"
 
                 new_draft_row = pd.DataFrame([{
@@ -498,54 +518,57 @@ with tab_survey:
                     df_master = pd.concat([df_current_surveys, new_draft_row], ignore_index=True)
                 
                 conn.update(worksheet="Surveys", data=df_master.astype(str))
-                clear_gps_params()
+                clear_query_params()
                 st.cache_data.clear()
-                st.toast(f"✅ Saved {final_bldg_name} as Draft!", icon="💾")
+                st.toast(f"✅ Saved {final_bldg_name} to cloud!", icon="💾")
                 st.rerun()
 
-        # Session Overview / Ending
+        # Monitor local session volume indices
         df_view = get_data("Surveys")
         s_pins_count = len(df_view[df_view["session_id"] == st.session_state["session_id"]]) if not df_view.empty and "session_id" in df_view.columns else 0
-        st.write(f"📊 **Session Progress:** `{s_pins_count} Pins Saved to Cloud`")
+
+        st.write(f"📊 **Current Progress:** `{s_pins_count} Pins Captured on this Route`")
         
         st.divider()
         col_end1, col_end2 = st.columns(2)
         with col_end1:
             if st.button("💾 END & FINALIZE ROUTE", type="primary", use_container_width=True):
-                if s_pins_count == 0: 
-                    st.error("Cannot finalize an empty survey log.")
+                if s_pins_count == 0:
+                    st.error("Cannot finalize an empty tracking routine session.")
                 else:
                     df_view.loc[df_view["session_id"] == st.session_state["session_id"], "status"] = "Pending"
                     conn.update(worksheet="Surveys", data=df_view.astype(str))
+                    
                     st.session_state["survey_active"] = False
-                    clear_gps_params()
+                    clear_query_params()
                     st.cache_data.clear()
-                    st.success("🎉 Route compiled! Draft pins pushed to Work Planner.")
+                    st.success("🎉 Route compiled! Pins moved to Work Planner.")
                     st.rerun()
+                    
         with col_end2:
-            if st.button("🗑️ Cancel Session", use_container_width=True):
+            if st.button("🗑️ Abort Session", use_container_width=True):
                 if s_pins_count > 0:
                     df_view = df_view[df_view["session_id"] != st.session_state["session_id"]]
                     conn.update(worksheet="Surveys", data=df_view.astype(str))
                 st.session_state["survey_active"] = False
-                clear_gps_params()
+                clear_query_params()
                 st.cache_data.clear()
                 st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  WORK PLANNER (ASSIGNMENT & ROUTE CLUSTERING)
+#  WORK PLANNER
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_planner:
-    st.markdown('<div class="sec-hdr">🗂️ Work Assignment Planner</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-hdr">🗂️ Work Planner & Auto-Routing</div>', unsafe_allow_html=True)
     df_srv = get_data("Surveys")
     df_tchs = get_data("Technicians")
     
     active_installers = [str(r["name"]).strip() for _, r in df_tchs.iterrows() if str(r["is_active"]).strip() == "1"] if not df_tchs.empty else []
 
     if df_srv.empty or "status" not in df_srv.columns:
-        st.info("No field surveys available to cluster. Finish a Survey Session first.")
+        st.info("No field surveys available. Start a Survey Session first.")
     elif not active_installers:
-        st.warning("Please setup active installers inside the Admin tab.")
+        st.warning("Please setup active installers inside the Admin panel.")
     else:
         unassigned_pool = df_srv[
             (df_srv["status"] == "Pending") & 
@@ -553,13 +576,14 @@ with tab_planner:
         ].copy()
         
         if unassigned_pool.empty:
-            st.success("🏁 All pins are currently assigned and locked.")
+            st.success("🏁 All captured pins are securely assigned and locked!")
         else:
-            st.write(f"Unassigned targets awaiting dispatch: **{len(unassigned_pool)}**")
+            st.write(f"Unassigned structures awaiting dispatch: **{len(unassigned_pool)}**")
+            
             with st.form("cluster_computation_form"):
-                p_installer = st.selectbox("Assign Route to Installer", active_installers)
-                p_max_capacity = st.number_input("Max Meter Load (Qty) per route", min_value=1, value=15, step=1)
-                compute_cluster_btn = st.form_submit_button("⚡ Auto-Cluster Nearest Route", type="primary")
+                p_installer = st.selectbox("Assign Route To Installer:", active_installers)
+                p_max_capacity = st.number_input("Max Meter Load Limit for Route:", min_value=1, value=15, step=1)
+                compute_cluster_btn = st.form_submit_button("⚡ Generate Shortest Route Cluster", type="primary")
                 
             if compute_cluster_btn:
                 records = []
@@ -567,10 +591,10 @@ with tab_planner:
                     q1, q3 = safe_int(r["qty_1ph"]), safe_int(r["qty_3ph"])
                     load_weight = (q1 + q3) if (q1 + q3) > 0 else 1
                     try:
-                        lat_val = float(r["lat"])
-                        lng_val = float(r["lng"])
-                    except:
+                        lat_val, lng_val = float(r["lat"]), float(r["lng"])
+                    except Exception:
                         continue
+                        
                     records.append({
                         "id": str(r["id"]), "building_name": str(r["building_name"]),
                         "lat": lat_val, "lng": lng_val,
@@ -578,7 +602,6 @@ with tab_planner:
                         "image_b64": str(r["image_b64"]), "lineman": str(r["lineman"])
                     })
                 
-                # Nearest Neighbor Clustering Algorithm
                 clustered_route = []
                 running_load = 0
                 if records:
@@ -590,6 +613,7 @@ with tab_planner:
                         while records and (running_load < p_max_capacity):
                             clat, clng = pivot_node["lat"], pivot_node["lng"]
                             min_d, target_idx = float('inf'), 0
+                            
                             for i, cand in enumerate(records):
                                 d = math.sqrt((cand["lat"] - clat)**2 + (cand["lng"] - clng)**2)
                                 if d < min_d: min_d, target_idx = d, i
@@ -608,27 +632,28 @@ with tab_planner:
                 computed_pts = st.session_state["active_computed_route"]
                 inst_target = st.session_state["route_target_installer"]
                 
-                st.info(f"📍 Clustered **{len(computed_pts)}** locations closely into a route for **{inst_target}**.")
+                st.info(f"📍 Successfully clustered **{len(computed_pts)}** locations into an optimized route for **{inst_target}**.")
                 
                 origin_str = f"{computed_pts[0]['lat']},{computed_pts[0]['lng']}"
                 dest_str = f"{computed_pts[-1]['lat']},{computed_pts[-1]['lng']}"
                 mid_waypoints = [f"{pt['lat']},{pt['lng']}" for pt in computed_pts[1:-1]]
                 
-                optimized_gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={origin_str}&destination={dest_str}"
+                optimized_gmaps_url = f"https://www.google.com/maps/dir/?api=1?api=1&origin={origin_str}&destination={dest_str}"
                 if mid_waypoints: 
                     optimized_gmaps_url += f"&waypoints={'|'.join(mid_waypoints)}"
                     
                 msg_body = [
-                    f"⚡ *METER INSTALLATION ROUTE* ⚡",
+                    f"⚡ *METER DEPLOYMENT ROUTE* ⚡",
                     f"📅 *Date:* {date.today()}",
                     f"👷 *Installer:* {inst_target}\n",
-                    f"🗺️ *Click here for Navigation:*",
+                    f"🗺️ *Click here to open Navigation Map:*",
                     f"{optimized_gmaps_url}\n",
                     f"📋 *Building Sequence:*"
                 ]
+                
                 for idx, pt in enumerate(computed_pts):
                     msg_body.append(f"{idx+1}. {pt['building_name']} (1PH:{pt['qty_1ph']}, 3PH:{pt['qty_3ph']})")
-                    msg_body.append(f"   ↳ Map Pin: https://www.google.com/maps/search/?api=1&query={pt['lat']},{pt['lng']}")
+                    msg_body.append(f"   ↳ Map Pin: mymaps.google.com3?api=1&query={pt['lat']},{pt['lng']}")
                     
                 final_wa_string = "\n".join(msg_body)
                 wa_dispatch_endpoint = f"https://wa.me/?text={urllib.parse.quote(final_wa_string)}"
@@ -644,25 +669,18 @@ with tab_planner:
                     conn.update(worksheet="Surveys", data=df_srv.astype(str))
                     del st.session_state["active_computed_route"]
                     st.cache_data.clear()
-                    st.success(f"Pins securely locked for {inst_target}!")
+                    st.success(f"Assignment locked securely for {inst_target}!")
                     st.rerun()
 
-                st.markdown('<div class="sec-hdr">🔍 Cluster Details Preview</div>', unsafe_allow_html=True)
+                st.markdown('<div class="sec-hdr">🔍 Assignment Details Preview</div>', unsafe_allow_html=True)
                 for idx, pt in enumerate(computed_pts):
-                    col_t, col_i = st.columns([3, 1])
-                    with col_t:
-                        st.write(f"**Stop #{idx+1}: {pt['building_name']}**")
-                        st.caption(f"Surveyed by: {pt['lineman']} | GPS: {pt['lat']},{pt['lng']}")
-                        st.write(f"🔌 1PH: **{pt['qty_1ph']}** | 3PH: **{pt['qty_3ph']}**")
-                    with col_i:
-                        if pt["image_b64"]:
-                            try: st.image(io.BytesIO(base64.b64decode(pt["image_b64"])), use_container_width=True)
-                            except: st.caption("🖼️ Load Error")
-                        else: st.caption("No Photo")
+                    st.write(f"**Stop #{idx+1}: {pt['building_name']}**")
+                    st.caption(f"Surveyed by: {pt['lineman']} | GPS Core: {pt['lat']},{pt['lng']}")
+                    st.write(f"🔌 1PH: **{pt['qty_1ph']}** | 3PH: **{pt['qty_3ph']}**")
                     st.divider()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  INSTALLATIONS (Original Code)
+#  INSTALLATIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inst:
 
@@ -840,8 +858,9 @@ with tab_inst:
                     del st.session_state["pending_inst_del"]
                     st.rerun()
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
-#  INVENTORY (Original Code)
+#  INVENTORY
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inv:
 
@@ -999,8 +1018,9 @@ with tab_inv:
                     del st.session_state["pending_inv_del"]
                     st.rerun()
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
-#  ADMIN (Original Code)
+#  ADMIN
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_admin:
 
