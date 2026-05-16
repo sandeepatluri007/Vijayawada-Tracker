@@ -17,7 +17,13 @@ import time
 import io
 import base64
 import re
-from PIL import Image
+
+# ── Safe Import Wrapper for Pillow Dependency ─────────────────────────────────
+try:
+    from PIL import Image
+    HAS_PILLOW = True
+except ImportError:
+    HAS_PILLOW = False
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -204,7 +210,6 @@ def get_data(worksheet: str, retries=3) -> pd.DataFrame:
             if attempt < retries - 1:
                 time.sleep(1)
             else:
-                st.toast(f"📡 Weak connection. Having trouble loading {worksheet}...", icon="⚠️")
                 return pd.DataFrame()
 
 def safe_int(val, default: int = 0) -> int:
@@ -217,8 +222,19 @@ def safe_numeric_col(df: pd.DataFrame, col: str) -> pd.Series:
 def has_col(df: pd.DataFrame, *cols) -> bool:
     return all(c in df.columns for c in cols)
 
-# ── Safe Extraction of Query Dictionary Parameters ──────────────────────────
-query_dict = st.query_params.to_dict()
+# ── Safe Version-Agnostic Query Parameter Processor ──────────────────────────
+query_dict = {}
+if hasattr(st, "query_params"):
+    try: query_dict = st.query_params.to_dict()
+    except:
+        try: query_dict = dict(st.query_params)
+        except: pass
+if not query_dict:
+    try:
+        old_params = st.experimental_get_query_params()
+        query_dict = {k: v[0] if isinstance(v, list) and v else "" for k, v in old_params.items()}
+    except: pass
+
 captured_lat = query_dict.get("lat", "")
 captured_lng = query_dict.get("lng", "")
 
@@ -335,6 +351,9 @@ with tab_survey:
     if "s_lineman" not in st.session_state: st.session_state["s_lineman"] = ""
     if "s_date" not in st.session_state: st.session_state["s_date"] = ""
 
+    if not HAS_PILLOW:
+        st.warning("⚠️ Pillow extension package not loaded. Images will save uncompressed. Add 'Pillow' inside requirements.txt to solve.")
+
     if not st.session_state["survey_active"]:
         st.markdown('<div class="sec-hdr">🏁 Start Survey Route Session</div>', unsafe_allow_html=True)
         with st.form("start_session_form"):
@@ -400,13 +419,19 @@ with tab_survey:
             if not captured_lat or not captured_lng: st.error("❌ Location missing. Tap the red button first.")
             elif field_file is None: st.error("❌ Building Snapshot photo is mandatory.")
             else:
+                encoded_img_str = ""
                 try:
-                    img = Image.open(field_file)
-                    img.thumbnail((300, 300))
-                    img_buf = io.BytesIO()
-                    img.save(img_buf, format="JPEG", quality=65)
-                    encoded_img_str = base64.b64encode(img_buf.getvalue()).decode()
-                except: encoded_img_str = ""
+                    if HAS_PILLOW:
+                        img = Image.open(field_file)
+                        img.thumbnail((300, 300))
+                        img_buf = io.BytesIO()
+                        img.save(img_buf, format="JPEG", quality=65)
+                        encoded_img_str = base64.b64encode(img_buf.getvalue()).decode()
+                    else:
+                        encoded_img_str = base64.b64encode(field_file.getvalue()).decode()
+                        if len(encoded_img_str) > 45000:
+                            st.warning("⚠️ Large raw file size bypassed. Reduce camera resolution settings on mobile device.")
+                except: pass
 
                 df_current_surveys = get_data("Surveys")
                 stop_idx = 1
@@ -429,7 +454,13 @@ with tab_survey:
                     df_master = pd.concat([df_current_surveys, new_draft_row], ignore_index=True)
                 
                 conn.update(worksheet="Surveys", data=df_master.astype(str))
-                st.query_params.clear()
+                
+                if hasattr(st, "query_params"):
+                    try: st.query_params.clear()
+                    except: pass
+                try: st.experimental_set_query_params()
+                except: pass
+                
                 st.cache_data.clear()
                 st.toast(f"✅ Securely logged {final_bldg_name} to cloud!", icon="💾")
                 st.rerun()
@@ -447,7 +478,13 @@ with tab_survey:
                     df_view.loc[df_view["session_id"] == st.session_state["session_id"], "status"] = "Pending"
                     conn.update(worksheet="Surveys", data=df_view.astype(str))
                     st.session_state["survey_active"] = False
-                    st.query_params.clear()
+                    
+                    if hasattr(st, "query_params"):
+                        try: st.query_params.clear()
+                        except: pass
+                    try: st.experimental_set_query_params()
+                    except: pass
+                    
                     st.cache_data.clear()
                     st.success("🎉 Route compiled! All targets transferred to Work Planner.")
                     st.rerun()
@@ -457,11 +494,17 @@ with tab_survey:
                     df_view = df_view[df_view["session_id"] != st.session_state["session_id"]]
                     conn.update(worksheet="Surveys", data=df_view.astype(str))
                 st.session_state["survey_active"] = False
-                st.query_params.clear()
+                
+                if hasattr(st, "query_params"):
+                    try: st.query_params.clear()
+                    except: pass
+                try: st.experimental_set_query_params()
+                except: pass
+                
                 st.cache_data.clear()
                 st.rerun()
 
-# ── 🗂️ WORK PLANNER (DISTANCE CLUSTERING & GOOGLE ROUTING ENGINE APIS) ───────
+# ── 🗂️ WORK PLANNER (DISTANCE CLUSTERING & SINGLE-INSTALLER ASSIGNMENT LOCKS) ──
 with tab_planner:
     st.markdown('<div class="sec-hdr">🗂️ Capacity Proximity Optimizer Hub</div>', unsafe_allow_html=True)
     df_srv = get_data("Surveys")
@@ -493,9 +536,14 @@ with tab_planner:
                 for _, r in unassigned_pool.iterrows():
                     q1, q3 = safe_int(r["qty_1ph"]), safe_int(r["qty_3ph"])
                     load_weight = (q1 + q3) if (q1 + q3) > 0 else 1
+                    try:
+                        lat_val = float(r["lat"])
+                        lng_val = float(r["lng"])
+                    except:
+                        lat_val, lng_val = 0.0, 0.0
                     records.append({
                         "id": str(r["id"]), "building_name": str(r["building_name"]),
-                        "lat": float(r["lat"]), "lng": float(r["lng"]),
+                        "lat": lat_val, "lng": lng_val,
                         "qty_1ph": q1, "qty_3ph": q3, "total_meters": load_weight,
                         "image_b64": str(r["image_b64"]), "lineman": str(r["lineman"])
                     })
@@ -535,7 +583,7 @@ with tab_planner:
                 dest_str = f"{computed_pts[-1]['lat']},{computed_pts[-1]['lng']}"
                 mid_waypoints = [f"{pt['lat']},{pt['lng']}" for pt in computed_pts[1:-1]]
                 
-                # Upgraded to Production Standard Google Maps Intent URL APIs
+                # Upgraded to Standard Google Maps API Query Formats
                 optimized_gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={origin_str}&destination={dest_str}"
                 if mid_waypoints: 
                     optimized_gmaps_url += f"&waypoints={'|'.join(mid_waypoints)}"
@@ -564,7 +612,8 @@ with tab_planner:
                         df_srv.loc[df_srv["id"] == target_id, "status"] = "Assigned"
                         
                     conn.update(worksheet="Surveys", data=df_srv.astype(str))
-                    del st.session_state["active_computed_route"]
+                    if "active_computed_route" in st.session_state:
+                        del st.session_state["active_computed_route"]
                     st.cache_data.clear()
                     st.success(f"Assignment locked securely for {inst_target}!")
                     st.rerun()
@@ -615,7 +664,7 @@ with tab_inst:
                         new_row = pd.DataFrame([{"date": str(entry_date), "tech_name": str(tech), "location": str(loc), "qty_1ph": str(q1), "qty_3ph": str(q3)}])
                         updated = pd.concat([df_existing, new_row], ignore_index=True) if not df_existing.empty else new_row
                         conn.update(worksheet="Installations", data=updated.astype(str))
-                        st.cache_data.clear(); st.success("✅ Saved!"); st.rerun()
+                        st.cache_data.clear(); st.success("Updated!"); st.rerun()
 
     st.markdown('<div class="sec-hdr">📋 Installation Log</div>', unsafe_allow_html=True)
     log_data = get_data("Installations")
