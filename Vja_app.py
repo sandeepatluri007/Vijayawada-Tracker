@@ -161,7 +161,7 @@ if not st.session_state["authenticated"]:
         pin_entry = st.text_input("Enter PIN", type="password")
         login_btn = st.form_submit_button("Unlock Tracker", type="primary")
         if login_btn:
-            if pin_entry == "2333": 
+            if pin_entry == "1323": 
                 st.session_state["authenticated"] = True
                 st.success("Access Granted!")
                 st.rerun()
