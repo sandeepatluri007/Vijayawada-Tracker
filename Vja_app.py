@@ -237,26 +237,6 @@ def has_col(df: pd.DataFrame, *cols) -> bool:
     return all(c in df.columns for c in cols)
 
 
-def process_editor_save(edited_df, worksheet_name, mandatory_cols):
-    for m_col in mandatory_cols:
-        if m_col not in edited_df.columns:
-            return False, f"❌ Missing column '{m_col}'. Add a row using the '+' button."
-    df_clean = edited_df.fillna("").astype(str)
-    for col in df_clean.columns:
-        df_clean[col] = df_clean[col].str.strip()
-        df_clean[col] = df_clean[col].replace(["nan", "NaN", "None", "<NA>"], "")
-    df_clean = df_clean[df_clean.astype(bool).any(axis=1)]
-    if df_clean.empty:
-        return False, "❌ Cannot save: Table is completely empty. Leave at least one valid row."
-    for m_col in mandatory_cols:
-        if not df_clean[df_clean[m_col] == ""].empty:
-            return False, f"❌ Validation Error: '{m_col}' cannot be blank."
-    df_clean = df_clean.reset_index(drop=True)
-    if safe_update(worksheet_name, df_clean):
-        return True, "✅ Saved successfully!"
-    return False, "❌ Save failed — see message above."
-
-
 # ── Shared data fetched once per run (avoids repeat reads across tabs) ──────
 df_installations_master = get_data("Installations")
 df_inventory_master = get_data("Inventory")
@@ -432,69 +412,141 @@ with tab_inst:
     if not active_techs or not active_locs:
         st.warning("⚠️ Please add active Technicians and Locations in the **Admin** tab first.")
     else:
-        st.markdown(
-            '<div class="info-box">Add one row per technician/location for today\'s installs, then Save All. '
-            'Rows start blank — pick a date, technician and location for each.</div>',
-            unsafe_allow_html=True,
-        )
+        if "installs_batch" not in st.session_state:
+            st.session_state["installs_batch"] = []
+        if "qm_version" not in st.session_state:
+            st.session_state["qm_version"] = 0
+        v = st.session_state["qm_version"]
 
-        if "bulk_install_rows" not in st.session_state:
-            st.session_state["bulk_install_rows"] = pd.DataFrame(
-                [{"date": None, "tech_name": None, "location": None, "qty_1ph": 0, "qty_3ph": 0}]
-            )
+        # ── Quick Add: same day, same location, multiple technicians ────────
+        st.markdown('<div class="sub-hdr">⚡ Quick Add — Same Day &amp; Location, Multiple Technicians</div>', unsafe_allow_html=True)
+        qc1, qc2 = st.columns(2)
+        with qc1:
+            qm_date = st.date_input("Date", value=None, key="qm_date")
+        with qc2:
+            qm_loc = st.selectbox("Location", ["-- Select --"] + active_locs, key="qm_loc")
 
-        bulk_edit = st.data_editor(
-            st.session_state["bulk_install_rows"],
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            key="bulk_install_editor",
-            column_config={
-                "date": st.column_config.DateColumn("Date", required=True),
-                "tech_name": st.column_config.SelectboxColumn("Technician", options=active_techs, required=True),
-                "location": st.column_config.SelectboxColumn("Location", options=active_locs, required=True),
-                "qty_1ph": st.column_config.NumberColumn("1 PH Qty", min_value=0, step=1, default=0),
-                "qty_3ph": st.column_config.NumberColumn("3 PH Qty", min_value=0, step=1, default=0),
-            },
-        )
+        qm_techs = st.multiselect("Technicians who worked today", active_techs, key=f"qm_techs_{v}")
 
-        if st.button("💾 Save All Entries", type="primary", use_container_width=True):
-            work = bulk_edit.copy()
-            work = work.dropna(subset=["date", "tech_name", "location"])
-            work["qty_1ph"] = work["qty_1ph"].apply(lambda v: safe_int(v, 0))
-            work["qty_3ph"] = work["qty_3ph"].apply(lambda v: safe_int(v, 0))
-            work = work[(work["qty_1ph"] > 0) | (work["qty_3ph"] > 0)]
+        qty_map = {}
+        if qm_techs:
+            st.caption("Enter quantities for each technician:")
+            for t in qm_techs:
+                cc1, cc2, cc3 = st.columns([2, 1, 1])
+                with cc1:
+                    st.markdown(f"**{t}**")
+                with cc2:
+                    q1 = st.number_input("1PH", min_value=0, step=1, value=0, key=f"qm_q1_{v}_{t}", label_visibility="collapsed")
+                with cc3:
+                    q3 = st.number_input("3PH", min_value=0, step=1, value=0, key=f"qm_q3_{v}_{t}", label_visibility="collapsed")
+                qty_map[t] = (q1, q3)
 
-            if work.empty:
-                st.error("❌ No valid rows to save. Fill Date, Technician, Location and at least one quantity.")
+        if st.button("➕ Add These To Batch", type="primary", use_container_width=True, disabled=not qm_techs):
+            if qm_date is None:
+                st.error("❌ Pick a date first.")
+            elif qm_loc == "-- Select --":
+                st.error("❌ Pick a location first.")
             else:
+                added = 0
+                for t, (q1, q3) in qty_map.items():
+                    if q1 > 0 or q3 > 0:
+                        st.session_state["installs_batch"].append({
+                            "date": str(qm_date), "tech_name": t, "location": qm_loc,
+                            "qty_1ph": int(q1), "qty_3ph": int(q3),
+                        })
+                        added += 1
+                if added:
+                    st.session_state["qm_version"] += 1
+                    st.success(f"✅ Added {added} entr{'y' if added == 1 else 'ies'} to the batch below.")
+                    st.rerun()
+                else:
+                    st.warning("⚠️ Enter at least one quantity for a selected technician.")
+
+        # ── Single one-off entry (different date/location than the above) ───
+        with st.expander("➕ Add a single one-off entry (different date or location)"):
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                single_date = st.date_input("Date", value=None, key=f"single_date_{v}")
+            with sc2:
+                single_tech = st.selectbox("Technician", ["-- Select --"] + active_techs, key=f"single_tech_{v}")
+            single_loc = st.selectbox("Location", ["-- Select --"] + active_locs, key=f"single_loc_{v}")
+            sc3, sc4 = st.columns(2)
+            with sc3:
+                single_q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=0, key=f"single_q1_{v}")
+            with sc4:
+                single_q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=0, key=f"single_q3_{v}")
+            if st.button("➕ Add This Entry To Batch", use_container_width=True):
+                if single_date is None or single_tech == "-- Select --" or single_loc == "-- Select --":
+                    st.error("❌ Fill date, technician and location.")
+                elif single_q1 == 0 and single_q3 == 0:
+                    st.error("❌ Enter at least one quantity.")
+                else:
+                    st.session_state["installs_batch"].append({
+                        "date": str(single_date), "tech_name": single_tech, "location": single_loc,
+                        "qty_1ph": int(single_q1), "qty_3ph": int(single_q3),
+                    })
+                    st.session_state["qm_version"] += 1
+                    st.success("✅ Added to batch below.")
+                    st.rerun()
+
+        # ── Batch preview cards + Save All ───────────────────────────────────
+        st.markdown('<div class="sub-hdr">🧾 Batch Ready To Save</div>', unsafe_allow_html=True)
+        batch = st.session_state["installs_batch"]
+        if not batch:
+            st.info("No entries yet — add some above.")
+        else:
+            for i, entry in enumerate(batch):
+                card_col, del_col = st.columns([5, 1])
+                with card_col:
+                    st.markdown(f"""
+                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:9px;
+                        padding:10px 14px;margin-bottom:6px;">
+                        <b>{entry['tech_name']}</b> — {entry['location']}<br/>
+                        <span style="color:#64748b;font-size:.85rem;">
+                            {entry['date']} · 1PH: {entry['qty_1ph']} · 3PH: {entry['qty_3ph']}
+                        </span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with del_col:
+                    if st.button("🗑️", key=f"del_installs_batch_{i}"):
+                        st.session_state["installs_batch"].pop(i)
+                        st.rerun()
+
+            bcol1, bcol2 = st.columns(2)
+            with bcol1:
+                clear_batch = st.button("🗑️ Clear Batch", use_container_width=True)
+            with bcol2:
+                save_all = st.button(f"💾 Save All ({len(batch)}) To Sheet", type="primary", use_container_width=True)
+
+            if clear_batch:
+                st.session_state["installs_batch"] = []
+                st.rerun()
+
+            if save_all:
                 df_existing = get_data("Installations")
                 new_rows, skipped = [], []
-                for _, r in work.iterrows():
-                    d_str, t_str = str(r["date"]), str(r["tech_name"])
+                for entry in batch:
                     dup = False
                     if not df_existing.empty and has_col(df_existing, "date", "tech_name"):
-                        dup = not df_existing[(df_existing["date"] == d_str) & (df_existing["tech_name"] == t_str)].empty
+                        dup = not df_existing[(df_existing["date"] == entry["date"]) & (df_existing["tech_name"] == entry["tech_name"])].empty
                     if dup:
-                        skipped.append(f"{t_str} ({d_str})")
+                        skipped.append(f"{entry['tech_name']} ({entry['date']})")
                     else:
                         new_rows.append({
-                            "date": d_str, "tech_name": t_str, "location": str(r["location"]),
-                            "qty_1ph": str(r["qty_1ph"]), "qty_3ph": str(r["qty_3ph"]),
+                            "date": entry["date"], "tech_name": entry["tech_name"], "location": entry["location"],
+                            "qty_1ph": str(entry["qty_1ph"]), "qty_3ph": str(entry["qty_3ph"]),
                         })
 
                 if new_rows:
                     updated = pd.concat([df_existing, pd.DataFrame(new_rows)], ignore_index=True) if not df_existing.empty else pd.DataFrame(new_rows)
                     if safe_update("Installations", updated):
-                        st.success(f"✅ Saved {len(new_rows)} entr{'y' if len(new_rows)==1 else 'ies'}.")
+                        st.success(f"✅ Saved {len(new_rows)} entr{'y' if len(new_rows) == 1 else 'ies'}.")
                         if skipped:
                             st.warning(f"⚠️ Skipped (already exists for that tech/date): {', '.join(skipped)}")
-                        st.session_state["bulk_install_rows"] = pd.DataFrame(
-                            [{"date": None, "tech_name": None, "location": None, "qty_1ph": 0, "qty_3ph": 0}]
-                        )
+                        st.session_state["installs_batch"] = []
                         st.rerun()
                 else:
-                    st.error(f"❌ All rows were duplicates (already exist for that tech/date): {', '.join(skipped)}")
+                    st.error(f"❌ All entries were duplicates (already exist for that tech/date): {', '.join(skipped)}")
 
     st.markdown('<div class="sec-hdr">📋 Installation Log</div>', unsafe_allow_html=True)
     log_data = get_data("Installations")
@@ -703,10 +755,9 @@ with tab_inv:
 with tab_admin:
     st.markdown("""
     <div class="warn-box" style="background:#f8f9fa;border-color:#cbd5e1;color:#475569;">
-    💡 <b>Tip:</b> Use the quick-add form for a single new technician/location. To edit or remove
-    several at once, use the table below — toggle <b>Active?</b> to <code>0</code> to hide someone
-    from entry forms without deleting their history, or tap the trash icon on a row to delete it,
-    then hit Save.
+    💡 <b>Tip:</b> Add one or several at once below, review them as cards, then Save Batch.
+    Existing entries are listed further down as cards — tap ✏️ Edit to change details or toggle
+    Active/Inactive, or 🗑️ to delete.
     </div>
     """, unsafe_allow_html=True)
 
@@ -714,108 +765,268 @@ with tab_admin:
 
     # ── Technicians ───────────────────────────────────────────────────────────
     with subtab_tech:
-        st.markdown('<div class="sec-hdr">➕ Add New Technician</div>', unsafe_allow_html=True)
-        with st.form("add_tech_form", clear_on_submit=True):
-            new_t_name = st.text_input("Name*")
-            ac1, ac2 = st.columns(2)
-            with ac1:
-                new_t_phone = st.text_input("Phone (optional)")
-            with ac2:
-                new_t_aadhar = st.text_input("Aadhar No. (optional)")
-            add_tech_btn = st.form_submit_button("➕ Add Technician", type="primary")
+        if "tech_batch" not in st.session_state:
+            st.session_state["tech_batch"] = []
+        if "tech_form_version" not in st.session_state:
+            st.session_state["tech_form_version"] = 0
+        tv = st.session_state["tech_form_version"]
 
-        if add_tech_btn:
+        st.markdown('<div class="sub-hdr">➕ Add Technicians (one or several)</div>', unsafe_allow_html=True)
+        tc1, tc2, tc3 = st.columns([2, 1, 1])
+        with tc1:
+            new_t_name = st.text_input("Name", key=f"new_t_name_{tv}")
+        with tc2:
+            new_t_phone = st.text_input("Phone (optional)", key=f"new_t_phone_{tv}")
+        with tc3:
+            new_t_aadhar = st.text_input("Aadhar (optional)", key=f"new_t_aadhar_{tv}")
+
+        if st.button("➕ Add To Batch", key="add_tech_batch_btn", type="primary", use_container_width=True):
             if not new_t_name.strip():
                 st.error("❌ Name is required.")
+            elif any(b["name"] == new_t_name.strip() for b in st.session_state["tech_batch"]):
+                st.error("❌ Already added to this batch.")
             else:
-                df_t_exist = get_data("Technicians")
-                exists = not df_t_exist.empty and "name" in df_t_exist.columns and new_t_name.strip() in df_t_exist["name"].values
-                if exists:
-                    st.error("❌ A technician with this name already exists.")
-                else:
-                    new_row = pd.DataFrame([{
-                        "name": new_t_name.strip(),
-                        "phone": new_t_phone.strip(),
-                        "aadhar": new_t_aadhar.strip(),
-                        "is_active": "1",
-                    }])
-                    updated = pd.concat([df_t_exist, new_row], ignore_index=True) if not df_t_exist.empty else new_row
-                    if safe_update("Technicians", updated):
-                        st.success(f"✅ Added {new_t_name.strip()}.")
+                st.session_state["tech_batch"].append({
+                    "name": new_t_name.strip(), "phone": new_t_phone.strip(), "aadhar": new_t_aadhar.strip(),
+                })
+                st.session_state["tech_form_version"] += 1
+                st.rerun()
+
+        if st.session_state["tech_batch"]:
+            st.markdown('<div class="sub-hdr">🧾 Batch Ready To Save</div>', unsafe_allow_html=True)
+            for i, b in enumerate(st.session_state["tech_batch"]):
+                bcard, bdel = st.columns([5, 1])
+                with bcard:
+                    detail = " · ".join([x for x in [b["phone"], b["aadhar"]] if x]) or "no phone/aadhar given"
+                    st.markdown(f"""
+                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:9px;padding:10px 14px;margin-bottom:6px;">
+                        <b>{b['name']}</b><br/><span style="color:#64748b;font-size:.85rem;">{detail}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with bdel:
+                    if st.button("🗑️", key=f"del_tech_batch_{i}"):
+                        st.session_state["tech_batch"].pop(i)
                         st.rerun()
 
-        st.markdown('<div class="sec-hdr">👷 Manage Technicians</div>', unsafe_allow_html=True)
+            if st.button(f"💾 Save Batch ({len(st.session_state['tech_batch'])})", key="save_tech_batch", type="primary", use_container_width=True):
+                df_t_exist = get_data("Technicians")
+                existing_names = set(df_t_exist["name"].values) if (not df_t_exist.empty and "name" in df_t_exist.columns) else set()
+                new_rows, skipped = [], []
+                for b in st.session_state["tech_batch"]:
+                    if b["name"] in existing_names:
+                        skipped.append(b["name"])
+                    else:
+                        new_rows.append({"name": b["name"], "phone": b["phone"], "aadhar": b["aadhar"], "is_active": "1"})
+                if new_rows:
+                    updated = pd.concat([df_t_exist, pd.DataFrame(new_rows)], ignore_index=True) if not df_t_exist.empty else pd.DataFrame(new_rows)
+                    if safe_update("Technicians", updated):
+                        st.success(f"✅ Added {len(new_rows)} technician(s).")
+                        if skipped:
+                            st.warning(f"⚠️ Skipped (already exist): {', '.join(skipped)}")
+                        st.session_state["tech_batch"] = []
+                        st.rerun()
+                else:
+                    st.error(f"❌ All names already exist: {', '.join(skipped)}")
+
+        st.markdown('<div class="sec-hdr">👷 Existing Technicians</div>', unsafe_allow_html=True)
         df_t = df_technicians_master.copy()
-        expected_cols_t = ["name", "phone", "aadhar", "is_active"]
         if not df_t.empty:
             df_t = df_t.rename(columns={c: str(c).strip().lower() for c in df_t.columns})
-        if df_t.empty:
-            df_t = pd.DataFrame(columns=expected_cols_t)
-        else:
-            for col in expected_cols_t:
+            for col in ["name", "phone", "aadhar", "is_active"]:
                 if col not in df_t.columns:
                     df_t[col] = ""
-            df_t = df_t[expected_cols_t]
 
-        edited_techs = st.data_editor(
-            df_t, num_rows="dynamic", use_container_width=True, hide_index=True, key="editor_techs",
-            column_config={
-                "name": st.column_config.TextColumn("Name", required=True),
-                "phone": st.column_config.TextColumn("Phone (optional)"),
-                "aadhar": st.column_config.TextColumn("Aadhar No. (optional)"),
-                "is_active": st.column_config.SelectboxColumn("Active?", options=["1", "0"], required=True, default="1"),
-            },
-        )
-        if st.button("💾 Save Technicians", key="save_techs", type="primary"):
-            success, message = process_editor_save(edited_techs, "Technicians", ["name"])
-            if success:
-                st.success(message)
-                st.rerun()
-            else:
-                st.error(message)
+        if df_t.empty:
+            st.info("No technicians added yet.")
+        else:
+            for idx, row in df_t.iterrows():
+                is_active = str(row.get("is_active", "1")).strip() in ["1", "1.0", "true", "yes"]
+                pill_color = "#059669" if is_active else "#94a3b8"
+                pill_bg = "#ecfdf5" if is_active else "#f1f5f9"
+                pill_text = "Active" if is_active else "Inactive"
+
+                rc1, rc2 = st.columns([5, 2])
+                with rc1:
+                    detail = " · ".join([x for x in [str(row.get("phone", "")), str(row.get("aadhar", ""))] if x]) or "no phone/aadhar on file"
+                    st.markdown(f"""
+                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:9px;padding:10px 14px;margin-bottom:6px;">
+                        <b>{row.get('name','')}</b>
+                        <span style="background:{pill_bg};color:{pill_color};border-radius:20px;padding:2px 10px;
+                            font-size:.72rem;font-weight:700;margin-left:8px;">{pill_text}</span><br/>
+                        <span style="color:#64748b;font-size:.85rem;">{detail}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with rc2:
+                    ecol, dcol = st.columns(2)
+                    with ecol:
+                        edit_clicked = st.button("✏️", key=f"edit_tech_{idx}")
+                    with dcol:
+                        del_clicked = st.button("🗑️", key=f"del_tech_{idx}")
+
+                if edit_clicked:
+                    st.session_state["editing_tech_idx"] = idx
+                if del_clicked:
+                    st.session_state["deleting_tech_idx"] = idx
+
+                if st.session_state.get("editing_tech_idx") == idx:
+                    with st.form(f"edit_tech_form_{idx}"):
+                        e_name = st.text_input("Name", value=str(row.get("name", "")))
+                        e_phone = st.text_input("Phone (optional)", value=str(row.get("phone", "")))
+                        e_aadhar = st.text_input("Aadhar (optional)", value=str(row.get("aadhar", "")))
+                        e_active = st.selectbox("Status", ["Active", "Inactive"], index=0 if is_active else 1)
+                        sv, cn = st.columns(2)
+                        with sv:
+                            do_save = st.form_submit_button("💾 Save", type="primary")
+                        with cn:
+                            do_cancel = st.form_submit_button("Cancel")
+                    if do_save:
+                        if not e_name.strip():
+                            st.error("❌ Name cannot be empty.")
+                        else:
+                            df_t.loc[idx, ["name", "phone", "aadhar", "is_active"]] = [
+                                e_name.strip(), e_phone.strip(), e_aadhar.strip(), "1" if e_active == "Active" else "0"
+                            ]
+                            if safe_update("Technicians", df_t):
+                                del st.session_state["editing_tech_idx"]
+                                st.success("✅ Updated.")
+                                st.rerun()
+                    if do_cancel:
+                        del st.session_state["editing_tech_idx"]
+                        st.rerun()
+
+                if st.session_state.get("deleting_tech_idx") == idx:
+                    st.markdown(f'<div class="warn-box">⚠️ Delete <b>{row.get("name","")}</b>? This removes them from future entry forms.</div>', unsafe_allow_html=True)
+                    yc, ncol = st.columns(2)
+                    with yc:
+                        if st.button("✅ Yes, Delete", key=f"conf_del_tech_{idx}"):
+                            df_t_new = df_t.drop(index=idx).reset_index(drop=True)
+                            if safe_update("Technicians", df_t_new):
+                                del st.session_state["deleting_tech_idx"]
+                                st.success("Deleted.")
+                                st.rerun()
+                    with ncol:
+                        if st.button("❌ Cancel", key=f"cancel_del_tech_{idx}"):
+                            del st.session_state["deleting_tech_idx"]
+                            st.rerun()
 
     # ── Locations ─────────────────────────────────────────────────────────────
     with subtab_loc:
-        st.markdown('<div class="sec-hdr">➕ Add New Location</div>', unsafe_allow_html=True)
-        with st.form("add_loc_form", clear_on_submit=True):
-            new_loc_name = st.text_input("Location Name*")
-            add_loc_btn = st.form_submit_button("➕ Add Location", type="primary")
+        if "loc_batch" not in st.session_state:
+            st.session_state["loc_batch"] = []
+        if "loc_form_version" not in st.session_state:
+            st.session_state["loc_form_version"] = 0
+        lv = st.session_state["loc_form_version"]
 
-        if add_loc_btn:
+        st.markdown('<div class="sub-hdr">➕ Add Locations (one or several)</div>', unsafe_allow_html=True)
+        new_loc_name = st.text_input("Location Name", key=f"new_loc_name_{lv}")
+
+        if st.button("➕ Add To Batch", key="add_loc_batch_btn", type="primary", use_container_width=True):
             if not new_loc_name.strip():
                 st.error("❌ Location name is required.")
+            elif new_loc_name.strip() in st.session_state["loc_batch"]:
+                st.error("❌ Already added to this batch.")
             else:
-                df_l_exist = get_data("Locations")
-                exists = not df_l_exist.empty and "location_name" in df_l_exist.columns and new_loc_name.strip() in df_l_exist["location_name"].values
-                if exists:
-                    st.error("❌ This location already exists.")
-                else:
-                    new_row = pd.DataFrame([{"location_name": new_loc_name.strip()}])
-                    updated = pd.concat([df_l_exist, new_row], ignore_index=True) if not df_l_exist.empty else new_row
-                    if safe_update("Locations", updated):
-                        st.success(f"✅ Added {new_loc_name.strip()}.")
+                st.session_state["loc_batch"].append(new_loc_name.strip())
+                st.session_state["loc_form_version"] += 1
+                st.rerun()
+
+        if st.session_state["loc_batch"]:
+            st.markdown('<div class="sub-hdr">🧾 Batch Ready To Save</div>', unsafe_allow_html=True)
+            for i, l in enumerate(st.session_state["loc_batch"]):
+                bcard, bdel = st.columns([5, 1])
+                with bcard:
+                    st.markdown(f"""
+                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:9px;padding:10px 14px;margin-bottom:6px;">
+                        <b>{l}</b>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with bdel:
+                    if st.button("🗑️", key=f"del_loc_batch_{i}"):
+                        st.session_state["loc_batch"].pop(i)
                         st.rerun()
 
-        st.markdown('<div class="sec-hdr">📍 Manage Locations</div>', unsafe_allow_html=True)
+            if st.button(f"💾 Save Batch ({len(st.session_state['loc_batch'])})", key="save_loc_batch", type="primary", use_container_width=True):
+                df_l_exist = get_data("Locations")
+                existing_locs = set(df_l_exist["location_name"].values) if (not df_l_exist.empty and "location_name" in df_l_exist.columns) else set()
+                new_rows, skipped = [], []
+                for l in st.session_state["loc_batch"]:
+                    if l in existing_locs:
+                        skipped.append(l)
+                    else:
+                        new_rows.append({"location_name": l})
+                if new_rows:
+                    updated = pd.concat([df_l_exist, pd.DataFrame(new_rows)], ignore_index=True) if not df_l_exist.empty else pd.DataFrame(new_rows)
+                    if safe_update("Locations", updated):
+                        st.success(f"✅ Added {len(new_rows)} location(s).")
+                        if skipped:
+                            st.warning(f"⚠️ Skipped (already exist): {', '.join(skipped)}")
+                        st.session_state["loc_batch"] = []
+                        st.rerun()
+                else:
+                    st.error(f"❌ All locations already exist: {', '.join(skipped)}")
+
+        st.markdown('<div class="sec-hdr">📍 Existing Locations</div>', unsafe_allow_html=True)
         df_l = df_locations_master.copy()
-        expected_cols_l = ["location_name"]
         if not df_l.empty:
             df_l = df_l.rename(columns={c: str(c).strip().lower() for c in df_l.columns})
-        if df_l.empty:
-            df_l = pd.DataFrame(columns=expected_cols_l)
-        else:
             if "location_name" not in df_l.columns:
                 df_l["location_name"] = ""
-            df_l = df_l[expected_cols_l]
 
-        edited_locs = st.data_editor(
-            df_l, num_rows="dynamic", use_container_width=True, hide_index=True, key="editor_locs",
-            column_config={"location_name": st.column_config.TextColumn("Location Name", required=True)},
-        )
-        if st.button("💾 Save Locations", key="save_locs", type="primary"):
-            success, message = process_editor_save(edited_locs, "Locations", ["location_name"])
-            if success:
-                st.success(message)
-                st.rerun()
-            else:
-                st.error(message)
+        if df_l.empty:
+            st.info("No locations added yet.")
+        else:
+            for idx, row in df_l.iterrows():
+                rc1, rc2 = st.columns([5, 2])
+                with rc1:
+                    st.markdown(f"""
+                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:9px;padding:10px 14px;margin-bottom:6px;">
+                        <b>{row.get('location_name','')}</b>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with rc2:
+                    ecol, dcol = st.columns(2)
+                    with ecol:
+                        edit_loc_clicked = st.button("✏️", key=f"edit_loc_{idx}")
+                    with dcol:
+                        del_loc_clicked = st.button("🗑️", key=f"del_loc_{idx}")
+
+                if edit_loc_clicked:
+                    st.session_state["editing_loc_idx"] = idx
+                if del_loc_clicked:
+                    st.session_state["deleting_loc_idx"] = idx
+
+                if st.session_state.get("editing_loc_idx") == idx:
+                    with st.form(f"edit_loc_form_{idx}"):
+                        e_loc_name = st.text_input("Location Name", value=str(row.get("location_name", "")))
+                        sv, cn = st.columns(2)
+                        with sv:
+                            do_save_loc = st.form_submit_button("💾 Save", type="primary")
+                        with cn:
+                            do_cancel_loc = st.form_submit_button("Cancel")
+                    if do_save_loc:
+                        if not e_loc_name.strip():
+                            st.error("❌ Location name cannot be empty.")
+                        else:
+                            df_l.loc[idx, "location_name"] = e_loc_name.strip()
+                            if safe_update("Locations", df_l):
+                                del st.session_state["editing_loc_idx"]
+                                st.success("✅ Updated.")
+                                st.rerun()
+                    if do_cancel_loc:
+                        del st.session_state["editing_loc_idx"]
+                        st.rerun()
+
+                if st.session_state.get("deleting_loc_idx") == idx:
+                    st.markdown(f'<div class="warn-box">⚠️ Delete <b>{row.get("location_name","")}</b>?</div>', unsafe_allow_html=True)
+                    yc, ncol = st.columns(2)
+                    with yc:
+                        if st.button("✅ Yes, Delete", key=f"conf_del_loc_{idx}"):
+                            df_l_new = df_l.drop(index=idx).reset_index(drop=True)
+                            if safe_update("Locations", df_l_new):
+                                del st.session_state["deleting_loc_idx"]
+                                st.success("Deleted.")
+                                st.rerun()
+                    with ncol:
+                        if st.button("❌ Cancel", key=f"cancel_del_loc_{idx}"):
+                            del st.session_state["deleting_loc_idx"]
+                            st.rerun()
