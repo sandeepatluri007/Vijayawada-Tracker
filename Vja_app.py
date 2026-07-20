@@ -27,103 +27,128 @@ PIN_CODE = "1323"
 SESSION_TIMEOUT_SECONDS = 30 * 60  # 30 minutes inactivity
 READ_TTL = 30  # seconds — cuts down on redundant Sheets reads
 
-# ── CSS – Clean Light Theme ──────────────────────────────────────────────────
+# ── CSS – Fintech-Inspired Theme (single accent, segmented tabs) ────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+    --accent: #0E9F6E;
+    --accent-dark: #0B7A56;
+    --accent-soft: #E6F7F0;
+    --ink: #10151F;
+    --ink-soft: #64748B;
+    --bg: #F6F7F9;
+    --card-border: #E7E9EE;
+}
 
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-.stApp { background:#f8f9fa; color:#1e293b; }
+.stApp { background: var(--bg); color: var(--ink); }
 #MainMenu, footer, header { visibility:hidden; }
 
 .top-banner {
     background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 12px 16px;
-    display:flex; align-items:center; gap:10px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 14px 18px;
+    display:flex; align-items:center; gap:12px;
+    box-shadow: 0 1px 2px rgba(16,21,31,0.04);
 }
-.top-banner .t { font-family:'Rajdhani',sans-serif; font-size:1.45rem;
-    font-weight:700; color:#0f172a; letter-spacing:.6px; margin:0; }
-.top-banner .s { font-size:.75rem; color:#64748b; margin:0; font-weight:500; }
+.top-banner .icon-badge {
+    width:40px; height:40px; border-radius:12px; background:var(--accent-soft);
+    display:flex; align-items:center; justify-content:center; font-size:1.3rem; flex-shrink:0;
+}
+.top-banner .t { font-size:1.15rem; font-weight:800; color:var(--ink); letter-spacing:-.2px; margin:0; }
+.top-banner .s { font-size:.78rem; color:var(--ink-soft); margin:0; font-weight:500; }
 
+/* Segmented-control style tabs, closer to Groww/Kite bottom-nav feel */
 .stTabs [data-baseweb="tab-list"] {
-    background:#e2e8f0; border-radius:10px; padding:4px; gap:4px;
+    background:#EEF0F3; border-radius:12px; padding:4px; gap:2px;
     overflow-x:auto; white-space:nowrap;
 }
 .stTabs [data-baseweb="tab"] {
-    border-radius:8px !important; padding:8px 13px !important;
-    font-family:'Rajdhani',sans-serif; font-size:.88rem !important;
-    font-weight:700 !important; color:#64748b !important;
+    border-radius:9px !important; padding:9px 14px !important;
+    font-size:.86rem !important; font-weight:600 !important;
+    color:var(--ink-soft) !important;
     background:transparent !important; border:none !important;
 }
-.stTabs [aria-selected="true"] { 
-    background:#ffffff !important; 
-    color:#0f172a !important; 
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+.stTabs [aria-selected="true"] {
+    background:var(--ink) !important;
+    color:#ffffff !important;
+    box-shadow: 0 1px 3px rgba(16,21,31,0.15);
 }
 
 [data-testid="stMetric"] {
     background: #ffffff;
-    border: 1px solid #e2e8f0; border-radius:12px;
-    padding: 14px 12px !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+    border: 1px solid var(--card-border); border-radius:14px;
+    padding: 16px 14px !important;
+    box-shadow: 0 1px 2px rgba(16,21,31,0.03);
 }
-[data-testid="stMetricLabel"]  { color:#64748b !important; font-size:.75rem !important; font-weight:600; }
-[data-testid="stMetricValue"]  { font-family:'Rajdhani',sans-serif; font-size:1.9rem !important; font-weight:700; color:#0f172a !important; }
+[data-testid="stMetricLabel"] {
+    color:var(--ink-soft) !important; font-size:.72rem !important; font-weight:600 !important;
+    text-transform:uppercase; letter-spacing:.4px;
+}
+[data-testid="stMetricValue"] {
+    font-size:1.7rem !important; font-weight:800 !important; color:var(--ink) !important; letter-spacing:-.3px;
+}
 
 .sec-hdr {
-    font-family:'Rajdhani',sans-serif; font-size:1.15rem; font-weight:700;
-    color:#334155; border-left:4px solid #cbd5e1; padding-left:10px;
-    margin: 1.5rem 0 1rem;
+    font-size:1.02rem; font-weight:700; color:var(--ink);
+    display:flex; align-items:center; gap:8px;
+    margin: 1.6rem 0 .9rem;
 }
+.sec-hdr::before { content:""; width:5px; height:16px; background:var(--accent); border-radius:3px; display:inline-block; }
 .sub-hdr {
-    font-family:'Rajdhani',sans-serif; font-size:.98rem; font-weight:700;
-    color:#475569; margin: 1rem 0 .5rem;
+    font-size:.85rem; font-weight:700; color:var(--ink-soft);
+    text-transform:uppercase; letter-spacing:.4px;
+    margin: 1.1rem 0 .5rem;
 }
 
 .stButton>button {
-    background:#ffffff !important; color:#334155 !important;
-    border:1px solid #cbd5e1 !important; border-radius:8px !important;
-    font-family:'Rajdhani',sans-serif !important; font-weight:700 !important;
-    font-size:.95rem !important; padding:9px 18px !important;
-    width:100% !important; transition:all .2s;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    background:#ffffff !important; color:var(--ink) !important;
+    border:1px solid var(--card-border) !important; border-radius:10px !important;
+    font-weight:600 !important; font-size:.92rem !important;
+    padding:10px 18px !important; width:100% !important;
+    transition:all .15s;
+    box-shadow: 0 1px 2px rgba(16,21,31,0.02);
 }
-.stButton>button:hover { background:#f1f5f9 !important; border-color:#94a3b8 !important; }
+.stButton>button:hover { border-color:var(--accent) !important; color:var(--accent-dark) !important; }
 
 button[data-testid="baseButton-primary"], .stButton>button[type="primary"] {
-    background:#0f172a !important; color:#ffffff !important; border-color:#0f172a !important;
+    background:var(--accent) !important; color:#ffffff !important; border-color:var(--accent) !important;
+}
+button[data-testid="baseButton-primary"]:hover, .stButton>button[type="primary"]:hover {
+    background:var(--accent-dark) !important; border-color:var(--accent-dark) !important; color:#fff !important;
 }
 
 .stSelectbox>div>div, .stNumberInput>div>div>input,
 .stTextInput>div>div>input, .stDateInput>div>div>input, .stMultiSelect>div>div {
-    background:#ffffff !important; border:1px solid #cbd5e1 !important;
-    border-radius:8px !important; color:#0f172a !important; font-size:.9rem !important;
+    background:#ffffff !important; border:1px solid var(--card-border) !important;
+    border-radius:10px !important; color:var(--ink) !important; font-size:.9rem !important;
 }
 
-.stForm { background:#ffffff !important; border:1px solid #e2e8f0 !important;
-    border-radius:12px !important; padding:16px !important; }
+.stForm { background:#ffffff !important; border:1px solid var(--card-border) !important;
+    border-radius:14px !important; padding:18px !important; }
 
-.stDataFrame { border-radius:10px; border: 1px solid #e2e8f0; overflow:hidden; }
+.stDataFrame { border-radius:12px; border: 1px solid var(--card-border); overflow:hidden; }
 
 .warn-box {
-    background:#fffbeb; border:1px solid #fcd34d; border-radius:9px;
-    padding:10px 14px; color:#92400e; font-size:.85rem; margin-bottom:.8rem; font-weight:500;
+    background:#FFF8E8; border:1px solid #F5D98B; border-radius:11px;
+    padding:11px 15px; color:#8A6208; font-size:.85rem; margin-bottom:.8rem; font-weight:500;
 }
 .info-box {
-    background:#f8f9fa; border:1px solid #cbd5e1; border-radius:9px;
-    padding:10px 14px; color:#475569; font-size:.85rem; margin-bottom:.8rem; font-weight:500;
+    background:#F1F5F9; border:1px solid var(--card-border); border-radius:11px;
+    padding:11px 15px; color:var(--ink-soft); font-size:.85rem; margin-bottom:.8rem; font-weight:500;
 }
 
 .wa-btn {
-    display:block; text-align:center; background:#10b981; color:#fff !important;
-    padding:12px; border-radius:9px; text-decoration:none; font-weight:700;
-    font-family:'Rajdhani',sans-serif; font-size:1.05rem; letter-spacing:.5px;
+    display:block; text-align:center; background:#25D366; color:#fff !important;
+    padding:13px; border-radius:11px; text-decoration:none; font-weight:700;
+    font-size:1rem; letter-spacing:.2px;
     margin-top:1rem; transition: background 0.2s;
+    box-shadow: 0 2px 6px rgba(37,211,102,0.25);
 }
-.wa-btn:hover { background:#059669; }
+.wa-btn:hover { background:#1DA851; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -133,9 +158,9 @@ head_col1, head_col2 = st.columns([3.5, 1.2])
 with head_col1:
     st.markdown("""
     <div class="top-banner">
-      <span style="font-size:1.8rem;">⚡</span>
+      <div class="icon-badge">⚡</div>
       <div>
-        <p class="t">METER TRACKER</p>
+        <p class="t">Meter Tracker</p>
         <p class="s">Vijayawada Field Ops</p>
       </div>
     </div>
@@ -499,7 +524,7 @@ with tab_inst:
                 card_col, del_col = st.columns([5, 1])
                 with card_col:
                     st.markdown(f"""
-                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:9px;
+                    <div style="background:#ffffff;border:1px solid #E7E9EE;border-radius:12px;
                         padding:10px 14px;margin-bottom:6px;">
                         <b>{entry['tech_name']}</b> — {entry['location']}<br/>
                         <span style="color:#64748b;font-size:.85rem;">
@@ -799,7 +824,7 @@ with tab_admin:
                 with bcard:
                     detail = " · ".join([x for x in [b["phone"], b["aadhar"]] if x]) or "no phone/aadhar given"
                     st.markdown(f"""
-                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:9px;padding:10px 14px;margin-bottom:6px;">
+                    <div style="background:#ffffff;border:1px solid #E7E9EE;border-radius:12px;padding:10px 14px;margin-bottom:6px;">
                         <b>{b['name']}</b><br/><span style="color:#64748b;font-size:.85rem;">{detail}</span>
                     </div>
                     """, unsafe_allow_html=True)
@@ -841,15 +866,15 @@ with tab_admin:
         else:
             for idx, row in df_t.iterrows():
                 is_active = str(row.get("is_active", "1")).strip() in ["1", "1.0", "true", "yes"]
-                pill_color = "#059669" if is_active else "#94a3b8"
-                pill_bg = "#ecfdf5" if is_active else "#f1f5f9"
+                pill_color = "#0B7A56" if is_active else "#94a3b8"
+                pill_bg = "#E6F7F0" if is_active else "#f1f5f9"
                 pill_text = "Active" if is_active else "Inactive"
 
                 rc1, rc2 = st.columns([5, 2])
                 with rc1:
                     detail = " · ".join([x for x in [str(row.get("phone", "")), str(row.get("aadhar", ""))] if x]) or "no phone/aadhar on file"
                     st.markdown(f"""
-                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:9px;padding:10px 14px;margin-bottom:6px;">
+                    <div style="background:#ffffff;border:1px solid #E7E9EE;border-radius:12px;padding:10px 14px;margin-bottom:6px;">
                         <b>{row.get('name','')}</b>
                         <span style="background:{pill_bg};color:{pill_color};border-radius:20px;padding:2px 10px;
                             font-size:.72rem;font-weight:700;margin-left:8px;">{pill_text}</span><br/>
@@ -936,7 +961,7 @@ with tab_admin:
                 bcard, bdel = st.columns([5, 1])
                 with bcard:
                     st.markdown(f"""
-                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:9px;padding:10px 14px;margin-bottom:6px;">
+                    <div style="background:#ffffff;border:1px solid #E7E9EE;border-radius:12px;padding:10px 14px;margin-bottom:6px;">
                         <b>{l}</b>
                     </div>
                     """, unsafe_allow_html=True)
@@ -979,7 +1004,7 @@ with tab_admin:
                 rc1, rc2 = st.columns([5, 2])
                 with rc1:
                     st.markdown(f"""
-                    <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:9px;padding:10px 14px;margin-bottom:6px;">
+                    <div style="background:#ffffff;border:1px solid #E7E9EE;border-radius:12px;padding:10px 14px;margin-bottom:6px;">
                         <b>{row.get('location_name','')}</b>
                     </div>
                     """, unsafe_allow_html=True)
