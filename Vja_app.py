@@ -536,11 +536,7 @@ with tab_dash:
 with tab_analytics:
     st.markdown("""
     <div class="info-box">
-    📈 This tab is independent of the Installs/Inventory data elsewhere in the app.
-    Upload the raw MDM export (any layout — the app finds the header row automatically)
-    to see live installer-wise hourly counts, half-day split, and average install time,
-    even when you don't have laptop access. Uploading the same file again only adds
-    genuinely new rows — nothing is double counted. Reset at the end of the day to start fresh.
+    📈 Upload the raw MDM export to see live installer-wise hourly counts, half-day split, and average install time.
     </div>
     """, unsafe_allow_html=True)
 
