@@ -3,3 +3,4 @@ st-gsheets-connection
 pandas
 Pillow
 streamlit-geolocation
+openpyxl
