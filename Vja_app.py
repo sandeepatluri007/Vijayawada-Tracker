@@ -44,6 +44,7 @@ HALF_DAY_CUTOFF = "13:30:00"  # H1 = first install .. 13:30, H2 = 13:30 .. last 
 # Tune these if your team size / daily targets differ.
 CF_GREEN_BG, CF_GREEN_FONT = "#C6EFCE", "#006100"
 CF_YELLOW_BG, CF_YELLOW_FONT = "#FFEB9C", "#9C5700"
+CF_ORANGE_BG, CF_ORANGE_FONT = "#FFD9B3", "#9C5000"
 CF_RED_BG, CF_RED_FONT = "#FFC7CE", "#9C0006"
 
 # Per installer × hour cell (e.g. B3:L13 in the source sheet): <2 red, =2 yellow, >2 green
@@ -59,7 +60,8 @@ AVG_TIME_GREEN_MAX, AVG_TIME_YELLOW_MAX = 20, 30
 
 
 def tier_style(v, red_max, yellow_min, yellow_max):
-    """4-tier: <red_max red · red_max-yellow_min neutral · yellow_min-yellow_max yellow · >yellow_max green."""
+    """4-tier: <red_max red · red_max-yellow_min orange · yellow_min-yellow_max yellow · >yellow_max green.
+    Every cell in range gets a colour — none are left blank."""
     try:
         v = float(v)
     except Exception:
@@ -67,10 +69,21 @@ def tier_style(v, red_max, yellow_min, yellow_max):
     if v < red_max:
         return f"background-color:{CF_RED_BG};color:{CF_RED_FONT}"
     if v < yellow_min:
-        return ""
+        return f"background-color:{CF_ORANGE_BG};color:{CF_ORANGE_FONT}"
     if v <= yellow_max:
         return f"background-color:{CF_YELLOW_BG};color:{CF_YELLOW_FONT}"
     return f"background-color:{CF_GREEN_BG};color:{CF_GREEN_FONT}"
+
+
+def _style_map(styler, func, subset=None):
+    """pandas renamed Styler.applymap -> Styler.map (2.1+) and later removed
+    applymap entirely, while older pandas doesn't have .map on Styler yet.
+    Try the modern name first, fall back to the old one, so this works across
+    whatever pandas version Streamlit Cloud happens to have installed."""
+    try:
+        return styler.map(func, subset=subset) if subset is not None else styler.map(func)
+    except AttributeError:
+        return styler.applymap(func, subset=subset) if subset is not None else styler.applymap(func)
 
 
 def cell_style_3tier(v, mid):
@@ -801,7 +814,7 @@ with tab_analytics:
             })
         avg_df = pd.DataFrame(avg_rows).sort_values("Total Installs", ascending=False)
         st.dataframe(
-            avg_df.style.applymap(avg_time_style, subset=["Avg Time/Install (min)"]),
+            _style_map(avg_df.style, avg_time_style, subset=["Avg Time/Install (min)"]),
             use_container_width=True, hide_index=True,
         )
         st.caption("🟩 Faster than target · 🟨 Mid-range · 🟥 Slower than target (lower minutes is better).")
