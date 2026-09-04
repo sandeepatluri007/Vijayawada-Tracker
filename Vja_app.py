@@ -39,6 +39,105 @@ SESSION_TIMEOUT_SECONDS = 30 * 60  # 30 minutes inactivity
 READ_TTL = 30  # seconds — cuts down on redundant Sheets reads
 HALF_DAY_CUTOFF = "13:30:00"  # H1 = first install .. 13:30, H2 = 13:30 .. last install
 
+# ── Conditional formatting thresholds ────────────────────────────────────────
+# Mirrors the colour rules used in the LoginID_Summary sheet of the MDM export.
+# Tune these if your team size / daily targets differ.
+CF_GREEN_BG, CF_GREEN_FONT = "#C6EFCE", "#006100"
+CF_YELLOW_BG, CF_YELLOW_FONT = "#FFEB9C", "#9C5700"
+CF_RED_BG, CF_RED_FONT = "#FFC7CE", "#9C0006"
+
+# Per installer × hour cell (e.g. B3:L13 in the source sheet): <2 red, =2 yellow, >2 green
+HOURLY_CELL_THRESHOLD = 2
+# Per-installer daily Total column (M3:M13 / Q16:Q26): <10 red, 10-15 neutral, 15-20 yellow, >20 green
+INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX = 10, 15, 20
+# Bottom TOTAL row, per-hour aggregate (B14:L14 / U17:U27): same 4-tier scheme
+HOURLY_TOTAL_RED_MAX, HOURLY_TOTAL_YELLOW_MIN, HOURLY_TOTAL_YELLOW_MAX = 10, 15, 20
+# Grand total for the day (M14): <150 red, 150-200 yellow, >200 green
+GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX = 150, 200
+# Avg install time in minutes (V32:V42): <20 green (fast), 20-30 yellow, >30 red (slow)
+AVG_TIME_GREEN_MAX, AVG_TIME_YELLOW_MAX = 20, 30
+
+
+def tier_style(v, red_max, yellow_min, yellow_max):
+    """4-tier: <red_max red · red_max-yellow_min neutral · yellow_min-yellow_max yellow · >yellow_max green."""
+    try:
+        v = float(v)
+    except Exception:
+        return ""
+    if v < red_max:
+        return f"background-color:{CF_RED_BG};color:{CF_RED_FONT}"
+    if v < yellow_min:
+        return ""
+    if v <= yellow_max:
+        return f"background-color:{CF_YELLOW_BG};color:{CF_YELLOW_FONT}"
+    return f"background-color:{CF_GREEN_BG};color:{CF_GREEN_FONT}"
+
+
+def cell_style_3tier(v, mid):
+    """3-tier for a single count cell: <mid red · =mid yellow · >mid green."""
+    try:
+        v = float(v)
+    except Exception:
+        return ""
+    if v < mid:
+        return f"background-color:{CF_RED_BG};color:{CF_RED_FONT}"
+    if v == mid:
+        return f"background-color:{CF_YELLOW_BG};color:{CF_YELLOW_FONT}"
+    return f"background-color:{CF_GREEN_BG};color:{CF_GREEN_FONT}"
+
+
+def avg_time_style(v):
+    """Lower avg install time is better: <20 green · 20-30 yellow · >30 red."""
+    try:
+        v = float(v)
+    except Exception:
+        return ""
+    if v <= 0:
+        return ""
+    if v < AVG_TIME_GREEN_MAX:
+        return f"background-color:{CF_GREEN_BG};color:{CF_GREEN_FONT}"
+    if v <= AVG_TIME_YELLOW_MAX:
+        return f"background-color:{CF_YELLOW_BG};color:{CF_YELLOW_FONT}"
+    return f"background-color:{CF_RED_BG};color:{CF_RED_FONT}"
+
+
+def style_hourly_table(df: pd.DataFrame, hour_cols):
+    """Applies the LoginID_Summary-style colouring: per-cell 3-tier for each
+    installer's hour buckets, 4-tier for the Total column, and a matching
+    4-tier scheme for the bottom aggregate TOTAL row."""
+    def styler(data):
+        css = pd.DataFrame("", index=data.index, columns=data.columns)
+        for i in data.index:
+            is_total_row = str(data.loc[i, "Installer"]).strip().upper() == "TOTAL"
+            for h in hour_cols:
+                if is_total_row:
+                    css.loc[i, h] = tier_style(data.loc[i, h], HOURLY_TOTAL_RED_MAX, HOURLY_TOTAL_YELLOW_MIN, HOURLY_TOTAL_YELLOW_MAX)
+                else:
+                    css.loc[i, h] = cell_style_3tier(data.loc[i, h], HOURLY_CELL_THRESHOLD)
+            if "Total" in data.columns:
+                css.loc[i, "Total"] = tier_style(data.loc[i, "Total"], INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)
+        return css
+    return df.style.apply(styler, axis=None)
+
+
+def render_colored_metric(label: str, value: int, red_max: int, yellow_max: int):
+    """A st.metric look-alike whose background/text colour reflects thresholds
+    (mirrors the M14 grand-total cell colouring in the source sheet)."""
+    if value < red_max:
+        bg, fg = CF_RED_BG, CF_RED_FONT
+    elif value <= yellow_max:
+        bg, fg = CF_YELLOW_BG, CF_YELLOW_FONT
+    else:
+        bg, fg = CF_GREEN_BG, CF_GREEN_FONT
+    st.markdown(f"""
+    <div style="background:{bg};color:{fg};border-radius:14px;padding:16px 14px;
+        border:1px solid rgba(0,0,0,0.06);text-align:left;">
+        <div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.4px;opacity:.85;">{label}</div>
+        <div style="font-size:1.7rem;font-weight:800;letter-spacing:-.3px;">{value}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 # ── CSS – Fintech-Inspired Theme (single accent, segmented tabs) ────────────
 st.markdown("""
 <style>
@@ -503,7 +602,17 @@ with tab_dash:
             group_df = filtered.groupby(["tech_name", "location"])[["qty_1ph", "qty_3ph"]].sum().reset_index()
             group_df["Total"] = group_df["qty_1ph"] + group_df["qty_3ph"]
             group_df.columns = ["Technician", "Location", "1PH", "3PH", "Total"]
-            st.dataframe(group_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                group_df.style.apply(
+                    lambda data: pd.DataFrame(
+                        {c: (data["Total"].apply(lambda v: tier_style(v, INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)) if c == "Total" else "") for c in data.columns},
+                        index=data.index,
+                    ),
+                    axis=None,
+                ),
+                use_container_width=True, hide_index=True,
+            )
+            st.caption("🟩 Green = strong Total · 🟨 Yellow = mid-range · 🟥 Red = below target.")
 
             st.markdown('<div class="sec-hdr">📤 Export & Share</div>', unsafe_allow_html=True)
             export_df = group_df.copy()
@@ -536,7 +645,11 @@ with tab_dash:
 with tab_analytics:
     st.markdown("""
     <div class="info-box">
-    📈 Upload the raw MDM export to see live installer-wise hourly counts, half-day split, and average install time.
+    📈 This tab is independent of the Installs/Inventory data elsewhere in the app.
+    Upload the raw MDM export (any layout — the app finds the header row automatically)
+    to see live installer-wise hourly counts, half-day split, and average install time,
+    even when you don't have laptop access. Uploading the same file again only adds
+    genuinely new rows — nothing is double counted. Reset at the end of the day to start fresh.
     </div>
     """, unsafe_allow_html=True)
 
@@ -629,7 +742,8 @@ with tab_analytics:
 
         st.markdown('<div class="sec-hdr">📌 Today At A Glance</div>', unsafe_allow_html=True)
         g1, g2, g3 = st.columns(3)
-        g1.metric("Total Installs", len(day_df))
+        with g1:
+            render_colored_metric("Total Installs", len(day_df), GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
         g2.metric("Active Installers", len(installers))
         g3.metric("Avg / Installer", round(len(day_df) / len(installers), 1) if installers else 0)
 
@@ -656,7 +770,9 @@ with tab_analytics:
             total_row[f"{h}-{h+1}"] = int(hourly_df[f"{h}-{h+1}"].sum())
         total_row["Total"] = int(hourly_df["Total"].sum())
         hourly_df = pd.concat([hourly_df, pd.DataFrame([total_row])], ignore_index=True)
-        st.dataframe(hourly_df, use_container_width=True, hide_index=True)
+        hour_col_labels = [f"{h}-{h+1}" for h in hour_cols]
+        st.dataframe(style_hourly_table(hourly_df, hour_col_labels), use_container_width=True, hide_index=True)
+        st.caption("🟩 Green = strong count · 🟨 Yellow = mid-range · 🟥 Red = below target — thresholds set in the code's Conditional formatting section.")
 
         # -- Half-day split --------------------------------------------------
         st.markdown('<div class="sec-hdr">🌓 Half-Day Split (H1: start – 13:30 · H2: 13:30 – end)</div>', unsafe_allow_html=True)
@@ -684,7 +800,11 @@ with tab_analytics:
                 "Total Installs": n, "Avg Time/Install (min)": avg_min,
             })
         avg_df = pd.DataFrame(avg_rows).sort_values("Total Installs", ascending=False)
-        st.dataframe(avg_df, use_container_width=True, hide_index=True)
+        st.dataframe(
+            avg_df.style.applymap(avg_time_style, subset=["Avg Time/Install (min)"]),
+            use_container_width=True, hide_index=True,
+        )
+        st.caption("🟩 Faster than target · 🟨 Mid-range · 🟥 Slower than target (lower minutes is better).")
 
         # -- Quick visual ------------------------------------------------------
         st.markdown('<div class="sec-hdr">📊 Total Installs By Installer</div>', unsafe_allow_html=True)
