@@ -5,6 +5,9 @@ Backend : streamlit-gsheets-connection  (Google Sheets)
 Theme   : Clean White & Light Greys (Field-Optimized)
 Security: PIN Protected (30-min inactivity auto-lock)
 
+requirements.txt must include: streamlit, streamlit-gsheets-connection, pandas,
+openpyxl, matplotlib (matplotlib is used only for the "Download as Image" table exports).
+
 Google Sheet worksheets required (create these tabs in your Sheet, header row only —
 the app creates and appends data automatically):
   Installations       - date, tech_name, location, qty_1ph, qty_3ph
@@ -24,6 +27,8 @@ import math
 import time
 import io
 import openpyxl
+import matplotlib
+matplotlib.use("Agg")
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -59,20 +64,27 @@ GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX = 150, 200
 AVG_TIME_GREEN_MAX, AVG_TIME_YELLOW_MAX = 20, 30
 
 
-def tier_style(v, red_max, yellow_min, yellow_max):
+def tier_colors(v, red_max, yellow_min, yellow_max):
     """4-tier: <red_max red · red_max-yellow_min orange · yellow_min-yellow_max yellow · >yellow_max green.
-    Every cell in range gets a colour — none are left blank."""
+    Returns a (bg_hex, font_hex) tuple, or (None, None) if v isn't numeric.
+    Shared by the on-screen CSS styling and the exported-image renderer so both
+    always show identical colours."""
     try:
         v = float(v)
     except Exception:
-        return ""
+        return (None, None)
     if v < red_max:
-        return f"background-color:{CF_RED_BG};color:{CF_RED_FONT}"
+        return (CF_RED_BG, CF_RED_FONT)
     if v < yellow_min:
-        return f"background-color:{CF_ORANGE_BG};color:{CF_ORANGE_FONT}"
+        return (CF_ORANGE_BG, CF_ORANGE_FONT)
     if v <= yellow_max:
-        return f"background-color:{CF_YELLOW_BG};color:{CF_YELLOW_FONT}"
-    return f"background-color:{CF_GREEN_BG};color:{CF_GREEN_FONT}"
+        return (CF_YELLOW_BG, CF_YELLOW_FONT)
+    return (CF_GREEN_BG, CF_GREEN_FONT)
+
+
+def tier_style(v, red_max, yellow_min, yellow_max):
+    bg, fg = tier_colors(v, red_max, yellow_min, yellow_max)
+    return f"background-color:{bg};color:{fg}" if bg else ""
 
 
 def _style_map(styler, func, subset=None):
@@ -86,32 +98,42 @@ def _style_map(styler, func, subset=None):
         return styler.applymap(func, subset=subset) if subset is not None else styler.applymap(func)
 
 
-def cell_style_3tier(v, mid):
+def cell_colors_3tier(v, mid):
     """3-tier for a single count cell: <mid red · =mid yellow · >mid green."""
     try:
         v = float(v)
     except Exception:
-        return ""
+        return (None, None)
     if v < mid:
-        return f"background-color:{CF_RED_BG};color:{CF_RED_FONT}"
+        return (CF_RED_BG, CF_RED_FONT)
     if v == mid:
-        return f"background-color:{CF_YELLOW_BG};color:{CF_YELLOW_FONT}"
-    return f"background-color:{CF_GREEN_BG};color:{CF_GREEN_FONT}"
+        return (CF_YELLOW_BG, CF_YELLOW_FONT)
+    return (CF_GREEN_BG, CF_GREEN_FONT)
 
 
-def avg_time_style(v):
+def cell_style_3tier(v, mid):
+    bg, fg = cell_colors_3tier(v, mid)
+    return f"background-color:{bg};color:{fg}" if bg else ""
+
+
+def avg_time_colors(v):
     """Lower avg install time is better: <20 green · 20-30 yellow · >30 red."""
     try:
         v = float(v)
     except Exception:
-        return ""
+        return (None, None)
     if v <= 0:
-        return ""
+        return (None, None)
     if v < AVG_TIME_GREEN_MAX:
-        return f"background-color:{CF_GREEN_BG};color:{CF_GREEN_FONT}"
+        return (CF_GREEN_BG, CF_GREEN_FONT)
     if v <= AVG_TIME_YELLOW_MAX:
-        return f"background-color:{CF_YELLOW_BG};color:{CF_YELLOW_FONT}"
-    return f"background-color:{CF_RED_BG};color:{CF_RED_FONT}"
+        return (CF_YELLOW_BG, CF_YELLOW_FONT)
+    return (CF_RED_BG, CF_RED_FONT)
+
+
+def avg_time_style(v):
+    bg, fg = avg_time_colors(v)
+    return f"background-color:{bg};color:{fg}" if bg else ""
 
 
 def style_hourly_table(df: pd.DataFrame, hour_cols):
@@ -131,6 +153,94 @@ def style_hourly_table(df: pd.DataFrame, hour_cols):
                 css.loc[i, "Total"] = tier_style(data.loc[i, "Total"], INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)
         return css
     return df.style.apply(styler, axis=None)
+
+
+# ── Export-as-image helpers (Dashboard + Analytics "Download as Image") ─────
+def build_hourly_color_grid(df: pd.DataFrame, hour_cols):
+    """Per-cell (bg, font) grid matching style_hourly_table's on-screen colours,
+    for rendering the same table as a PNG."""
+    grid = []
+    for i in range(len(df)):
+        is_total_row = str(df.iloc[i]["Installer"]).strip().upper() == "TOTAL"
+        row_colors = []
+        for col in df.columns:
+            if col == "Installer":
+                row_colors.append((None, None))
+            elif col in hour_cols:
+                v = df.iloc[i][col]
+                row_colors.append(
+                    tier_colors(v, HOURLY_TOTAL_RED_MAX, HOURLY_TOTAL_YELLOW_MIN, HOURLY_TOTAL_YELLOW_MAX)
+                    if is_total_row else cell_colors_3tier(v, HOURLY_CELL_THRESHOLD)
+                )
+            elif col == "Total":
+                row_colors.append(tier_colors(df.iloc[i][col], INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX))
+            else:
+                row_colors.append((None, None))
+        grid.append(row_colors)
+    return grid
+
+
+def build_single_col_color_grid(df: pd.DataFrame, col_name: str, color_func):
+    """(bg, font) grid with colour only on one column — used for the Total
+    column of the Technician Breakdown table and the avg-time table."""
+    grid = []
+    for i in range(len(df)):
+        row_colors = []
+        for col in df.columns:
+            row_colors.append(color_func(df.iloc[i][col]) if col == col_name else (None, None))
+        grid.append(row_colors)
+    return grid
+
+
+def dataframe_to_png_bytes(df: pd.DataFrame, color_grid=None, title: str = None) -> bytes:
+    """Renders a DataFrame (optionally with a matching (bg,font) colour grid)
+    as a PNG, so tables can be shared as an image (e.g. over WhatsApp)."""
+    import matplotlib.pyplot as plt
+
+    n_rows, n_cols = df.shape
+    fig_w = max(6.0, n_cols * 1.35)
+    fig_h = max(2.0, (n_rows + 2) * 0.42)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.axis("off")
+    if title:
+        ax.set_title(title, fontsize=13, fontweight="bold", loc="left", pad=14)
+
+    cell_text = df.astype(str).values
+    tbl = ax.table(cellText=cell_text, colLabels=list(df.columns), cellLoc="center", loc="center")
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(10)
+    tbl.scale(1, 1.7)
+    tbl.auto_set_column_width(col=list(range(n_cols)))
+
+    for j in range(n_cols):
+        header_cell = tbl[0, j]
+        header_cell.set_facecolor("#10151F")
+        header_cell.set_text_props(color="white", fontweight="bold")
+
+    for i in range(n_rows):
+        for j in range(n_cols):
+            cell = tbl[i + 1, j]
+            bg, fg = (None, None)
+            if color_grid is not None:
+                bg, fg = color_grid[i][j]
+            cell.set_facecolor(bg if bg else ("#FFFFFF" if i % 2 == 0 else "#F6F7F9"))
+            if fg:
+                cell.set_text_props(color=fg, fontweight="bold")
+
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def download_image_button(df: pd.DataFrame, file_name: str, key: str, color_grid=None, title: str = None, label: str = "📷 Download as Image"):
+    """Renders a Download-as-Image button for the given table, right under it."""
+    if df.empty:
+        return
+    png_bytes = dataframe_to_png_bytes(df, color_grid=color_grid, title=title)
+    st.download_button(label, data=png_bytes, file_name=file_name, mime="image/png", use_container_width=True, key=key)
 
 
 def render_colored_metric(label: str, value: int, red_max: int, yellow_max: int):
@@ -560,6 +670,7 @@ with tab_dash:
             loc_month.columns = ["Location", "1PH", "3PH", "Total"]
             loc_month = loc_month.sort_values("Total", ascending=False)
             st.dataframe(loc_month, use_container_width=True, hide_index=True)
+            download_image_button(loc_month, "This_Month_By_Location.png", key="dl_img_loc_month", title="This Month, By Location")
 
     st.divider()
     st.markdown('<div class="sec-hdr">🔌 Installation Summary (Filterable)</div>', unsafe_allow_html=True)
@@ -626,6 +737,11 @@ with tab_dash:
                 use_container_width=True, hide_index=True,
             )
             st.caption("🟩 Green = strong Total · 🟨 Yellow = mid-range · 🟥 Red = below target.")
+            download_image_button(
+                group_df, "Technician_Breakdown.png", key="dl_img_group_df",
+                color_grid=build_single_col_color_grid(group_df, "Total", lambda v: tier_colors(v, INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)),
+                title="Technician Breakdown",
+            )
 
             st.markdown('<div class="sec-hdr">📤 Export & Share</div>', unsafe_allow_html=True)
             export_df = group_df.copy()
@@ -786,6 +902,11 @@ with tab_analytics:
         hour_col_labels = [f"{h}-{h+1}" for h in hour_cols]
         st.dataframe(style_hourly_table(hourly_df, hour_col_labels), use_container_width=True, hide_index=True)
         st.caption("🟩 Green = strong count · 🟨 Yellow = mid-range · 🟥 Red = below target — thresholds set in the code's Conditional formatting section.")
+        download_image_button(
+            hourly_df, f"Hourly_Count_{sel_date}.png", key="dl_img_hourly",
+            color_grid=build_hourly_color_grid(hourly_df, hour_col_labels),
+            title=f"Installer-Wise Hourly Count — {sel_date}",
+        )
 
         # -- Half-day split --------------------------------------------------
         st.markdown('<div class="sec-hdr">🌓 Half-Day Split (H1: start – 13:30 · H2: 13:30 – end)</div>', unsafe_allow_html=True)
@@ -797,6 +918,7 @@ with tab_analytics:
             half_rows.append({"Installer": inst, "H1 (Morning)": h1, "H2 (Afternoon)": h2, "Total": h1 + h2})
         half_df = pd.DataFrame(half_rows).sort_values("Total", ascending=False)
         st.dataframe(half_df, use_container_width=True, hide_index=True)
+        download_image_button(half_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half", title=f"Half-Day Split — {sel_date}")
 
         # -- Average install time -------------------------------------------
         st.markdown('<div class="sec-hdr">⏳ Average Install Time / Installer</div>', unsafe_allow_html=True)
@@ -818,6 +940,11 @@ with tab_analytics:
             use_container_width=True, hide_index=True,
         )
         st.caption("🟩 Faster than target · 🟨 Mid-range · 🟥 Slower than target (lower minutes is better).")
+        download_image_button(
+            avg_df, f"Avg_Install_Time_{sel_date}.png", key="dl_img_avg",
+            color_grid=build_single_col_color_grid(avg_df, "Avg Time/Install (min)", avg_time_colors),
+            title=f"Average Install Time / Installer — {sel_date}",
+        )
 
         # -- Quick visual ------------------------------------------------------
         st.markdown('<div class="sec-hdr">📊 Total Installs By Installer</div>', unsafe_allow_html=True)
