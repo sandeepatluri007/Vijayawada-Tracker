@@ -876,11 +876,8 @@ with tab_dash:
 with tab_analytics:
     st.markdown("""
     <div class="info-box">
-    📈 This tab is independent of the Installs/Inventory data elsewhere in the app.
-    Upload the raw MDM export (any layout — the app finds the header row automatically)
-    to see live installer-wise hourly counts, half-day split, and average install time,
-    even when you don't have laptop access. Uploading the same file again only adds
-    genuinely new rows — nothing is double counted. Reset at the end of the day to start fresh.
+    📈 Upload the raw MDM export to see live installer-wise hourly counts, half-day split, and average install time,
+    
     </div>
     """, unsafe_allow_html=True)
 
@@ -1049,8 +1046,16 @@ with tab_analytics:
             h2 = int((sub["time"] > HALF_DAY_CUTOFF).sum())
             half_rows.append({"Installer": inst, "H1 (Morning)": h1, "H2 (Afternoon)": h2, "Total": h1 + h2})
         half_df = pd.DataFrame(half_rows).sort_values("Total", ascending=False)
-        st.dataframe(half_df, use_container_width=True, hide_index=True)
-        download_image_button(half_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half", title=f"Half-Day Split — {sel_date}")
+
+        half_total_row = {
+            "Installer": "TOTAL",
+            "H1 (Morning)": int(half_df["H1 (Morning)"].sum()) if not half_df.empty else 0,
+            "H2 (Afternoon)": int(half_df["H2 (Afternoon)"].sum()) if not half_df.empty else 0,
+            "Total": int(half_df["Total"].sum()) if not half_df.empty else 0,
+        }
+        half_display_df = pd.concat([half_df, pd.DataFrame([half_total_row])], ignore_index=True)
+        st.dataframe(half_display_df, use_container_width=True, hide_index=True)
+        download_image_button(half_display_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half", title=f"Half-Day Split — {sel_date}")
 
         # -- Average install time -------------------------------------------
         st.markdown('<div class="sec-hdr">⏳ Average Install Time / Installer</div>', unsafe_allow_html=True)
