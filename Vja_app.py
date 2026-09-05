@@ -933,16 +933,38 @@ with tab_analytics:
                         st.warning("⚠️ No valid TL_ installer rows with a date and time were found in this file.")
                     else:
                         df_araw_existing = get_data("AnalyticsRaw")
-                        existing_keys = set()
-                        if not df_araw_existing.empty and "key" in df_araw_existing.columns:
-                            existing_keys = set(df_araw_existing["key"].values)
+                        if df_araw_existing.empty:
+                            df_araw_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour", "location", "meter_type"])
+                        for col in ["location", "meter_type"]:
+                            if col not in df_araw_existing.columns:
+                                df_araw_existing[col] = ""
+
+                        existing_keys = set(df_araw_existing["key"].values) if "key" in df_araw_existing.columns else set()
+                        key_to_idx = {k: i for i, k in zip(df_araw_existing.index, df_araw_existing["key"].values)} if "key" in df_araw_existing.columns else {}
 
                         new_rows = []
                         dup_count = 0
+                        backfilled_count = 0
                         for rec in parsed_records:
                             key = f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
                             if key in existing_keys:
-                                dup_count += 1
+                                idx = key_to_idx[key]
+                                existing_loc = str(df_araw_existing.at[idx, "location"]).strip()
+                                existing_mtype = str(df_araw_existing.at[idx, "meter_type"]).strip()
+                                # Re-uploading an already-recorded row never adds a new install —
+                                # but if this record is missing Location/Meter Type and the
+                                # upload has it, fill it in instead of just skipping.
+                                filled_something = False
+                                if not existing_loc and rec["location"]:
+                                    df_araw_existing.at[idx, "location"] = rec["location"]
+                                    filled_something = True
+                                if not existing_mtype and rec["meter_type"]:
+                                    df_araw_existing.at[idx, "meter_type"] = rec["meter_type"]
+                                    filled_something = True
+                                if filled_something:
+                                    backfilled_count += 1
+                                else:
+                                    dup_count += 1
                                 continue
                             existing_keys.add(key)
                             new_rows.append({
@@ -951,14 +973,16 @@ with tab_analytics:
                                 "location": rec["location"], "meter_type": rec["meter_type"],
                             })
 
-                        if not new_rows:
-                            st.error("❌ All records in this file are already in Analytics (duplicate date/time/installer). Nothing new to add.")
+                        if not new_rows and not backfilled_count:
+                            st.error("❌ All records in this file are already in Analytics (duplicate date/time/installer) with no missing details to fill in. Nothing to update.")
                         else:
-                            merged = pd.concat([df_araw_existing, pd.DataFrame(new_rows)], ignore_index=True) if not df_araw_existing.empty else pd.DataFrame(new_rows)
+                            merged = pd.concat([df_araw_existing, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else df_araw_existing
                             if safe_update("AnalyticsRaw", merged):
                                 msg = f"✅ Added {len(new_rows)} new record(s) to Analytics."
+                                if backfilled_count:
+                                    msg += f" Filled in missing Location/Meter Type for {backfilled_count} existing record(s)."
                                 if dup_count:
-                                    msg += f" Skipped {dup_count} already-recorded duplicate(s)."
+                                    msg += f" Skipped {dup_count} already-complete duplicate(s)."
                                 if skipped_non_tl:
                                     msg += f" Ignored {skipped_non_tl} non-TL_ installer row(s)."
                                 st.success(msg)
