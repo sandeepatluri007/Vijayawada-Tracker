@@ -40,7 +40,7 @@ st.set_page_config(
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 PIN_CODE = "1323"
-SESSION_TIMEOUT_SECONDS = 30 * 60  # 30 minutes inactivity
+SESSION_TIMEOUT_SECONDS = 60 * 60  # 30 minutes inactivity
 READ_TTL = 30  # seconds — cuts down on redundant Sheets reads
 HALF_DAY_CUTOFF = "13:30:00"  # H1 = first install .. 13:30, H2 = 13:30 .. last install
 
@@ -774,11 +774,7 @@ with tab_dash:
 with tab_analytics:
     st.markdown("""
     <div class="info-box">
-    📈 This tab is independent of the Installs/Inventory data elsewhere in the app.
-    Upload the raw MDM export (any layout — the app finds the header row automatically)
-    to see live installer-wise hourly counts, half-day split, and average install time,
-    even when you don't have laptop access. Uploading the same file again only adds
-    genuinely new rows — nothing is double counted. Reset at the end of the day to start fresh.
+    📈 Upload the raw MDM export to see live installer-wise hourly counts, half-day split, and average install time.
     </div>
     """, unsafe_allow_html=True)
 
