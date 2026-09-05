@@ -15,7 +15,7 @@ the app creates and appends data automatically):
   Technicians           - name, phone, aadhar, is_active, login_id
   Locations             - location_name
   UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type
-  AnalyticsRaw          - key, date, time, installer_id, hour
+  AnalyticsRaw          - key, date, time, installer_id, hour, location, meter_type
 """
 
 import streamlit as st
@@ -40,7 +40,7 @@ st.set_page_config(
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 PIN_CODE = "1323"
-SESSION_TIMEOUT_SECONDS = 60 * 60  # 30 minutes inactivity
+SESSION_TIMEOUT_SECONDS = 30 * 60  # 30 minutes inactivity
 READ_TTL = 30  # seconds — cuts down on redundant Sheets reads
 HALF_DAY_CUTOFF = "13:30:00"  # H1 = first install .. 13:30, H2 = 13:30 .. last install
 
@@ -520,6 +520,18 @@ def find_header_row(ws, required_headers, max_scan_rows: int = 20):
     return None, None
 
 
+def find_optional_cols(ws, header_row: int, optional_headers):
+    """Given a known header row, look up a handful of extra (non-required)
+    column labels on that same row. Returns {label: col_index} only for the
+    ones actually present, so callers can treat missing ones as absent."""
+    row_vals = {}
+    for c in range(1, ws.max_column + 1):
+        v = ws.cell(row=header_row, column=c).value
+        if v is not None and str(v).strip() != "":
+            row_vals[str(v).strip().lower()] = c
+    return {h: row_vals[h.strip().lower()] for h in optional_headers if h.strip().lower() in row_vals}
+
+
 def normalize_date_val(val):
     """Return an ISO date string (YYYY-MM-DD) or None."""
     if val is None:
@@ -605,6 +617,96 @@ if not df_technicians_master.empty and has_col(df_technicians_master, "login_id"
         nm = str(r.get("name", "")).strip()
         if lid and nm:
             tech_login_lookup[lid] = nm
+
+
+def push_parsed_records_to_installations(parsed_records, source_label="install(s)"):
+    """Shared by the Installs-tab bulk upload and the Analytics tab's
+    'Update Installs' button. Each record is a dict with date/time/installer_id
+    (+ optional location/meter_type). Dedupes every record (date+time+installer)
+    against the shared UploadedInstallLog ledger — so the same real install can
+    never be double-counted no matter which tab pushed it — maps installer_id to
+    a technician name via tech_login_lookup, and merges the resulting 1PH/3PH
+    deltas into the Installations sheet."""
+    if not parsed_records:
+        st.warning("⚠️ No records to push.")
+        return
+
+    df_log_existing = get_data("UploadedInstallLog")
+    existing_keys = set()
+    if not df_log_existing.empty and "key" in df_log_existing.columns:
+        existing_keys = set(df_log_existing["key"].values)
+
+    new_log_rows = []
+    dates_seen, dates_with_new, unmapped_ids = set(), set(), set()
+    for rec in parsed_records:
+        dates_seen.add(rec["date"])
+        key = f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
+        if key in existing_keys:
+            continue
+        existing_keys.add(key)
+        tech_name = tech_login_lookup.get(rec["installer_id"].lower())
+        if tech_name is None:
+            tech_name = rec["installer_id"]
+            unmapped_ids.add(rec["installer_id"])
+        new_log_rows.append({
+            "key": key, "date": rec["date"], "time": rec["time"],
+            "installer_id": rec["installer_id"], "tech_name": tech_name,
+            "location": rec.get("location") or "Unspecified",
+            "meter_type": rec.get("meter_type") or "",
+        })
+        dates_with_new.add(rec["date"])
+
+    fully_dup_dates = dates_seen - dates_with_new
+
+    if not new_log_rows:
+        st.error(f"❌ Installs already exist for: {', '.join(sorted(dates_seen))}. Nothing new to add.")
+        return
+
+    # 1) append raw log rows (dedup ledger)
+    updated_log = pd.concat([df_log_existing, pd.DataFrame(new_log_rows)], ignore_index=True) if not df_log_existing.empty else pd.DataFrame(new_log_rows)
+
+    # 2) aggregate the NEW rows only, by date + tech_name + location
+    new_log_df = pd.DataFrame(new_log_rows)
+    new_log_df["is_1ph"] = new_log_df["meter_type"].str.contains("1", na=False)
+    new_log_df["is_3ph"] = new_log_df["meter_type"].str.contains("3", na=False)
+    unclassified = int((~new_log_df["is_1ph"] & ~new_log_df["is_3ph"]).sum())
+    agg = new_log_df.groupby(["date", "tech_name", "location"]).agg(
+        d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
+    ).reset_index()
+
+    # 3) merge deltas into Installations sheet
+    df_inst_existing = get_data("Installations")
+    if df_inst_existing.empty:
+        df_inst_existing = pd.DataFrame(columns=["date", "tech_name", "location", "qty_1ph", "qty_3ph"])
+    for col in ["qty_1ph", "qty_3ph"]:
+        if col in df_inst_existing.columns:
+            df_inst_existing[col] = pd.to_numeric(df_inst_existing[col], errors="coerce").fillna(0).astype(int)
+
+    for _, arow in agg.iterrows():
+        mask = (
+            (df_inst_existing.get("date") == arow["date"]) &
+            (df_inst_existing.get("tech_name") == arow["tech_name"]) &
+            (df_inst_existing.get("location") == arow["location"])
+        ) if not df_inst_existing.empty else pd.Series([], dtype=bool)
+        if not df_inst_existing.empty and mask.any():
+            df_inst_existing.loc[mask, "qty_1ph"] += int(arow["d_1ph"])
+            df_inst_existing.loc[mask, "qty_3ph"] += int(arow["d_3ph"])
+        else:
+            df_inst_existing = pd.concat([df_inst_existing, pd.DataFrame([{
+                "date": arow["date"], "tech_name": arow["tech_name"], "location": arow["location"],
+                "qty_1ph": int(arow["d_1ph"]), "qty_3ph": int(arow["d_3ph"]),
+            }])], ignore_index=True)
+
+    if safe_update("Installations", df_inst_existing) and safe_update("UploadedInstallLog", updated_log):
+        st.success(f"✅ Added {len(new_log_rows)} new {source_label} across {len(dates_with_new)} date(s).")
+        if fully_dup_dates:
+            st.warning(f"⚠️ Already fully recorded, skipped: {', '.join(sorted(fully_dup_dates))}")
+        if unmapped_ids:
+            st.info(f"ℹ️ No technician mapping found for: {', '.join(sorted(unmapped_ids))} — used their login ID as the name. Add a 'login_id' to that technician in Admin to map it to a display name next time.")
+        if unclassified:
+            st.warning(f"⚠️ {unclassified} record(s) had no meter type on file and weren't counted toward 1PH/3PH totals.")
+        st.rerun()
+
 
 # ── Tabs Configuration ────────────────────────────────────────────────────────
 tab_dash, tab_analytics, tab_inst, tab_inv, tab_admin = st.tabs([
@@ -774,7 +876,11 @@ with tab_dash:
 with tab_analytics:
     st.markdown("""
     <div class="info-box">
-    📈 Upload the raw MDM export to see live installer-wise hourly counts, half-day split, and average install time.
+    📈 This tab is independent of the Installs/Inventory data elsewhere in the app.
+    Upload the raw MDM export (any layout — the app finds the header row automatically)
+    to see live installer-wise hourly counts, half-day split, and average install time,
+    even when you don't have laptop access. Uploading the same file again only adds
+    genuinely new rows — nothing is double counted. Reset at the end of the day to start fresh.
     </div>
     """, unsafe_allow_html=True)
 
@@ -799,6 +905,7 @@ with tab_analytics:
                 if header_row is None:
                     st.error("❌ Could not find 'Installation Date', 'Installation Time' and 'Installer LoginID' columns in this file.")
                 else:
+                    optional_map = find_optional_cols(ws, header_row, ["Section", "New Meter Type"])
                     parsed_records = []
                     skipped_non_tl = 0
                     for r in range(header_row + 1, ws.max_row + 1):
@@ -813,9 +920,13 @@ with tab_analytics:
                         t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
                         if d is None or t is None:
                             continue
+                        section_val = ws.cell(row=r, column=optional_map["Section"]).value if "Section" in optional_map else None
+                        mtype_val = ws.cell(row=r, column=optional_map["New Meter Type"]).value if "New Meter Type" in optional_map else None
                         parsed_records.append({
                             "date": d, "time": t, "installer_id": installer_id,
                             "hour": t.split(":")[0],
+                            "location": str(section_val).strip() if section_val else "",
+                            "meter_type": str(mtype_val).strip() if mtype_val else "",
                         })
 
                     if not parsed_records:
@@ -837,6 +948,7 @@ with tab_analytics:
                             new_rows.append({
                                 "key": key, "date": rec["date"], "time": rec["time"],
                                 "installer_id": rec["installer_id"], "hour": rec["hour"],
+                                "location": rec["location"], "meter_type": rec["meter_type"],
                             })
 
                         if not new_rows:
@@ -955,12 +1067,38 @@ with tab_analytics:
             if reset_pin == PIN_CODE:
                 confirm_reset = st.checkbox("I understand this will delete all Analytics data collected so far")
                 if st.button("🗑️ Reset Analytics Data", type="primary", disabled=not confirm_reset, use_container_width=True):
-                    empty_df = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour"])
+                    empty_df = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour", "location", "meter_type"])
                     if safe_update("AnalyticsRaw", empty_df):
                         st.success("✅ Analytics data cleared. Ready for a new day.")
                         st.rerun()
             elif reset_pin:
                 st.error("❌ Incorrect PIN.")
+
+        # -- Push this date's Analytics data into Installations ---------------
+        st.markdown('<div class="sec-hdr">📥 Update Installs From Analytics</div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div class="info-box">
+        Sends <b>this date's</b> Analytics records into the main Installations sheet used by
+        the Dashboard and Installs tab. Installer LoginIDs are matched to a technician's
+        display name using the <b>login_id</b> field set on that technician in Admin — anyone
+        without one gets recorded under their raw login ID (e.g. TL_Vinod), and it's called out
+        below so you know to map them. A record already pushed — from here or from the Installs
+        tab's bulk upload — is never counted twice.
+        </div>
+        """, unsafe_allow_html=True)
+
+        if not has_col(day_df, "location") or not has_col(day_df, "meter_type") or (day_df["location"].eq("").all() and day_df["meter_type"].eq("").all()):
+            st.caption("ℹ️ This date's records don't have Location/Meter Type on file (uploaded before this feature was added) — they'll be pushed under 'Unspecified' location and won't count toward 1PH/3PH totals.")
+
+        if st.button(f"📥 Update Installs For {sel_date}", type="primary", use_container_width=True):
+            push_records = []
+            for _, r in day_df.iterrows():
+                push_records.append({
+                    "date": r["date"], "time": r["time"], "installer_id": r["installer_id"],
+                    "location": r["location"] if "location" in day_df.columns else "",
+                    "meter_type": r["meter_type"] if "meter_type" in day_df.columns else "",
+                })
+            push_parsed_records_to_installations(push_records, source_label="install(s) from Analytics")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  INSTALLS
@@ -1016,77 +1154,7 @@ with tab_inst:
                     if not parsed:
                         st.warning("⚠️ No valid rows with a date, time and installer were found in this file.")
                     else:
-                        df_log_existing = get_data("UploadedInstallLog")
-                        existing_keys = set()
-                        if not df_log_existing.empty and "key" in df_log_existing.columns:
-                            existing_keys = set(df_log_existing["key"].values)
-
-                        new_log_rows = []
-                        dates_seen, dates_with_new, unmapped_ids = set(), set(), set()
-                        for rec in parsed:
-                            dates_seen.add(rec["date"])
-                            key = f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
-                            if key in existing_keys:
-                                continue
-                            existing_keys.add(key)
-                            tech_name = tech_login_lookup.get(rec["installer_id"].lower())
-                            if tech_name is None:
-                                tech_name = rec["installer_id"]
-                                unmapped_ids.add(rec["installer_id"])
-                            new_log_rows.append({
-                                "key": key, "date": rec["date"], "time": rec["time"],
-                                "installer_id": rec["installer_id"], "tech_name": tech_name,
-                                "location": rec["location"], "meter_type": rec["meter_type"],
-                            })
-                            dates_with_new.add(rec["date"])
-
-                        fully_dup_dates = dates_seen - dates_with_new
-
-                        if not new_log_rows:
-                            st.error(f"❌ Installs already exist for: {', '.join(sorted(dates_seen))}. Nothing new to add.")
-                        else:
-                            # 1) append raw log rows (dedup ledger)
-                            updated_log = pd.concat([df_log_existing, pd.DataFrame(new_log_rows)], ignore_index=True) if not df_log_existing.empty else pd.DataFrame(new_log_rows)
-
-                            # 2) aggregate the NEW rows only, by date + tech_name + location
-                            new_log_df = pd.DataFrame(new_log_rows)
-                            new_log_df["is_1ph"] = new_log_df["meter_type"].str.contains("1", na=False)
-                            new_log_df["is_3ph"] = new_log_df["meter_type"].str.contains("3", na=False)
-                            agg = new_log_df.groupby(["date", "tech_name", "location"]).agg(
-                                d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
-                            ).reset_index()
-
-                            # 3) merge deltas into Installations sheet
-                            df_inst_existing = get_data("Installations")
-                            if df_inst_existing.empty:
-                                df_inst_existing = pd.DataFrame(columns=["date", "tech_name", "location", "qty_1ph", "qty_3ph"])
-                            for col in ["qty_1ph", "qty_3ph"]:
-                                if col in df_inst_existing.columns:
-                                    df_inst_existing[col] = pd.to_numeric(df_inst_existing[col], errors="coerce").fillna(0).astype(int)
-
-                            for _, arow in agg.iterrows():
-                                mask = (
-                                    (df_inst_existing.get("date") == arow["date"]) &
-                                    (df_inst_existing.get("tech_name") == arow["tech_name"]) &
-                                    (df_inst_existing.get("location") == arow["location"])
-                                ) if not df_inst_existing.empty else pd.Series([], dtype=bool)
-                                if not df_inst_existing.empty and mask.any():
-                                    df_inst_existing.loc[mask, "qty_1ph"] += int(arow["d_1ph"])
-                                    df_inst_existing.loc[mask, "qty_3ph"] += int(arow["d_3ph"])
-                                else:
-                                    df_inst_existing = pd.concat([df_inst_existing, pd.DataFrame([{
-                                        "date": arow["date"], "tech_name": arow["tech_name"], "location": arow["location"],
-                                        "qty_1ph": int(arow["d_1ph"]), "qty_3ph": int(arow["d_3ph"]),
-                                    }])], ignore_index=True)
-
-                            if safe_update("Installations", df_inst_existing) and safe_update("UploadedInstallLog", updated_log):
-                                msg = f"✅ Added {len(new_log_rows)} new install(s) across {len(dates_with_new)} date(s)."
-                                st.success(msg)
-                                if fully_dup_dates:
-                                    st.warning(f"⚠️ Already fully recorded, skipped: {', '.join(sorted(fully_dup_dates))}")
-                                if unmapped_ids:
-                                    st.info(f"ℹ️ No technician mapping found for: {', '.join(sorted(unmapped_ids))} — used their login ID as the name. Add a 'login_id' to that technician in Admin to map it to a display name next time.")
-                                st.rerun()
+                        push_parsed_records_to_installations(parsed, source_label="install(s)")
 
     st.divider()
     st.markdown('<div class="sec-hdr">➕ Daily Entry (Add Multiple At Once)</div>', unsafe_allow_html=True)
