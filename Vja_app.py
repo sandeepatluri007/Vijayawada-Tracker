@@ -40,7 +40,7 @@ st.set_page_config(
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 PIN_CODE = "1323"
-SESSION_TIMEOUT_SECONDS = 30 * 60  # 30 minutes inactivity
+SESSION_TIMEOUT_SECONDS = 60 * 60  # 30 minutes inactivity
 READ_TTL = 30  # seconds — cuts down on redundant Sheets reads
 HALF_DAY_CUTOFF = "13:30:00"  # H1 = first install .. 13:30, H2 = 13:30 .. last install
 
