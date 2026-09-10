@@ -46,7 +46,6 @@ st.set_page_config(
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 PIN_CODE = "1323"
-SESSION_TIMEOUT_SECONDS = 30 * 60  # 30 minutes inactivity
 READ_TTL = 30  # seconds — cuts down on redundant Sheets reads
 HALF_DAY_CUTOFF = "13:30:00"  # H1 = first install .. 13:30, H2 = 13:30 .. last install
 
@@ -247,6 +246,60 @@ def download_image_button(df: pd.DataFrame, file_name: str, key: str, color_grid
         return
     png_bytes = dataframe_to_png_bytes(df, color_grid=color_grid, title=title)
     st.download_button(label, data=png_bytes, file_name=file_name, mime="image/png", use_container_width=True, key=key)
+
+
+def build_map_snapshot_png(df: pd.DataFrame, title: str) -> bytes:
+    """A positional scatter of the filtered pins (Longitude/Latitude, no
+    street/satellite basemap tiles — the app has no mapping API key
+    configured) saved as a shareable PNG. This is a plot of the pin
+    positions, not a screenshot of the interactive tile map above."""
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(7.5, 6.5))
+    ax.scatter(df["_long"], df["_lat"], s=45, c="#0E9F6E", edgecolors="white", linewidths=0.9, zorder=3)
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
+    ax.set_title(title, fontsize=12, fontweight="bold", wrap=True)
+    ax.grid(True, linestyle="--", alpha=0.4)
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def build_kml(df: pd.DataFrame, doc_name: str = "Installed Meters") -> bytes:
+    """Standard KML with one Placemark per row (needs _lat/_long numeric
+    columns) — openable in Google Earth, Google My Maps, QGIS, or any other
+    GIS tool the field team already has."""
+    import xml.sax.saxutils as sx
+
+    def esc(v):
+        return sx.escape(str(v)) if v is not None else ""
+
+    detail_labels = [
+        ("SNO", "sno"), ("Section", "location"), ("Date", "date"), ("Time", "time"),
+        ("Installer", "tech_name"), ("Old Meter No", "old_meter_no"), ("New Meter No", "new_meter_no"),
+    ]
+    placemarks = []
+    for _, r in df.iterrows():
+        name = str(r.get("sno") or r.get("tech_name") or "Install").strip()
+        desc_lines = [f"{label}: {esc(r.get(col))}" for label, col in detail_labels if col in df.columns and str(r.get(col, "")).strip()]
+        description = "&#10;".join(desc_lines)
+        placemarks.append(
+            f"<Placemark><name>{esc(name)}</name><description>{description}</description>"
+            f"<Point><coordinates>{r['_long']},{r['_lat']},0</coordinates></Point></Placemark>"
+        )
+
+    kml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>'
+        f"<name>{esc(doc_name)}</name>{''.join(placemarks)}"
+        "</Document></kml>"
+    )
+    return kml.encode("utf-8")
 
 
 def dataframe_height(n_rows: int, row_px: int = 38, header_px: int = 38, max_px: int = 640) -> int:
@@ -467,36 +520,28 @@ with head_col2:
 
 st.write("")
 
-# ── Authentication / PIN Protection (30-min inactivity auto-lock) ────────────
+# ── Authentication / PIN Protection (persists until the app/tab is closed) ──
+# st.session_state lives only for the current browser session — closing the
+# tab (or the app losing its connection) destroys it, so a fresh visit always
+# needs the PIN again. There is no inactivity timeout: once unlocked, it
+# stays unlocked for as long as this browser tab stays open.
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
-if "last_activity" not in st.session_state:
-    st.session_state["last_activity"] = time.time()
-
-# If session has gone stale, force re-login before rendering anything else.
-if st.session_state["authenticated"]:
-    idle_for = time.time() - st.session_state["last_activity"]
-    if idle_for > SESSION_TIMEOUT_SECONDS:
-        st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
     st.markdown('<div class="sec-hdr">🔒 Supervisor Login</div>', unsafe_allow_html=True)
     with st.form("login_form"):
-        st.info("Please enter the daily operations PIN to access the system. You'll stay logged in for 30 minutes of inactivity.")
+        st.info("Please enter the daily operations PIN to access the system. You'll stay logged in until you close this tab.")
         pin_entry = st.text_input("Enter PIN", type="password")
         login_btn = st.form_submit_button("Unlock Tracker", type="primary")
         if login_btn:
             if pin_entry == PIN_CODE:
                 st.session_state["authenticated"] = True
-                st.session_state["last_activity"] = time.time()
                 st.success("Access Granted!")
                 st.rerun()
             else:
                 st.error("❌ Incorrect PIN. Access Denied.")
     st.stop()
-
-# Any render past this point means an active, valid session — refresh the clock.
-st.session_state["last_activity"] = time.time()
 
 # ── Cloud Crash Guard: Google Sheets Connection ──────────────────────────────
 try:
@@ -725,25 +770,22 @@ if not df_locations_master.empty and "location_name" in df_locations_master.colu
 # Installer LoginID -> Technician display name, from the optional "login_id"
 # column on the Technicians sheet. Unmapped logins fall back to the raw ID.
 tech_login_lookup = {}
+# Reverse of the above: technician display name -> their login_id, used to
+# standardize manual entries onto the same login-ID identity as uploads.
+name_to_login_id = {}
 if not df_technicians_master.empty and has_col(df_technicians_master, "login_id", "name"):
     for _, r in df_technicians_master.iterrows():
-        lid = str(r.get("login_id", "")).strip().lower()
+        lid = str(r.get("login_id", "")).strip()
         nm = str(r.get("name", "")).strip()
         if lid and nm:
-            tech_login_lookup[lid] = nm
+            tech_login_lookup[lid.lower()] = nm
+            name_to_login_id[nm] = lid
 
 
-def push_parsed_records_to_installations(parsed_records, source_label="install(s)"):
-    """Shared by the Installs-tab bulk upload, the Analytics tab's 'Update
-    Installs' button, and the Legacy Data upload. Each record is a dict with
-    date/time/installer_id (+ optional location/meter_type/sno/old_meter_no/
-    new_meter_no/lat/long). Dedupes every record (date+time+installer) against
-    the shared UploadedInstallLog ledger — so the same real install can never
-    be double-counted no matter which tab pushed it — maps installer_id to a
-    technician name via tech_login_lookup, merges the resulting 1PH/3PH deltas
-    into the Installations sheet, and backfills any blank detail fields
-    (location/meter_type/sno/old_meter_no/new_meter_no/lat/long) on records
-    that already exist, without adding to install counts."""
+def _execute_push(parsed_records, source_label="install(s)"):
+    """The actual write logic — no double-count risk gating. Called either
+    directly (no risk detected) or after the supervisor explicitly confirms
+    past a detected risk via the pending-confirmation banner."""
     if not parsed_records:
         st.warning("⚠️ No records to push.")
         return
@@ -867,6 +909,108 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
         st.rerun()
 
 
+def push_parsed_records_to_installations(parsed_records, source_label="install(s)"):
+    """Entry point used by all upload paths (Installs bulk upload, Legacy Data
+    upload, Analytics 'Update Installs'). Before writing anything, checks for
+    a specific double-count risk: merging new upload records onto a
+    date+technician+location combo whose current Installations quantity has
+    ZERO backing rows in UploadedInstallLog — meaning that quantity came
+    entirely from a manual entry. Adding on top of it blindly could double
+    count the same real installs the supervisor already logged by hand. If
+    that risk is found, the push is held for one explicit confirmation
+    (rendered as a banner near the top of the app) instead of silently
+    merging. If a combo already has upload history, adding more is treated as
+    legitimate additional installs and proceeds immediately, same as before."""
+    if not parsed_records:
+        st.warning("⚠️ No records to push.")
+        return
+
+    valid_records = [rec for rec in parsed_records if is_valid_installer_id(rec.get("installer_id"))]
+    if not valid_records:
+        st.warning(f"⚠️ No {INSTALLER_ID_PREFIX} installer records to push.")
+        return
+
+    df_log_existing = get_data("UploadedInstallLog")
+    existing_keys = set(df_log_existing["key"].values) if not df_log_existing.empty and "key" in df_log_existing.columns else set()
+    candidate_new = [rec for rec in valid_records if f"{rec['date']}||{rec['time']}||{rec['installer_id']}" not in existing_keys]
+
+    risky = []
+    if candidate_new:
+        tmp_df = pd.DataFrame(candidate_new)
+        tmp_df["tech_name"] = tmp_df["installer_id"].apply(lambda x: tech_login_lookup.get(str(x).lower(), x))
+        if "location" in tmp_df.columns:
+            tmp_df["location"] = tmp_df["location"].apply(lambda x: x if x else "Unspecified")
+        else:
+            tmp_df["location"] = "Unspecified"
+        grp = tmp_df.groupby(["date", "tech_name", "location"]).size().reset_index(name="new_count")
+
+        df_inst_existing = get_data("Installations")
+        log_has_cols = not df_log_existing.empty and has_col(df_log_existing, "date", "tech_name", "location")
+        inst_has_cols = not df_inst_existing.empty and has_col(df_inst_existing, "date", "tech_name", "location", "qty_1ph", "qty_3ph")
+
+        for _, row in grp.iterrows():
+            prior_mask = (
+                (df_log_existing["date"] == row["date"]) & (df_log_existing["tech_name"] == row["tech_name"]) & (df_log_existing["location"] == row["location"])
+            ) if log_has_cols else pd.Series([], dtype=bool)
+            if int(prior_mask.sum()) > 0:
+                continue  # this combo already has upload provenance — safe to add more
+
+            inst_mask = (
+                (df_inst_existing["date"] == row["date"]) & (df_inst_existing["tech_name"] == row["tech_name"]) & (df_inst_existing["location"] == row["location"])
+            ) if inst_has_cols else pd.Series([], dtype=bool)
+            if inst_mask.any():
+                existing_qty = int(
+                    pd.to_numeric(df_inst_existing.loc[inst_mask, "qty_1ph"], errors="coerce").fillna(0).sum()
+                    + pd.to_numeric(df_inst_existing.loc[inst_mask, "qty_3ph"], errors="coerce").fillna(0).sum()
+                )
+                if existing_qty > 0:
+                    risky.append({
+                        "Date": row["date"], "Technician": row["tech_name"], "Location": row["location"],
+                        "Existing Qty (manual entry, no upload history)": existing_qty,
+                        "New From This Upload": int(row["new_count"]),
+                    })
+
+    if risky:
+        st.session_state["pending_push"] = {"records": parsed_records, "source_label": source_label, "risky": risky}
+        st.rerun()
+        return
+
+    _execute_push(parsed_records, source_label)
+
+
+def diagnose_installations_discrepancy():
+    """Compares each Installations row's quantity against what's purely
+    derivable from UploadedInstallLog for that same date+technician+location.
+    A row with upload history whose Installations total EXCEEDS its
+    upload-derived total suggests a manual entry sitting on top of (and
+    possibly duplicating) already-uploaded records — the same pattern the
+    push-time risk check (added above) now guards against going forward.
+    This surfaces it for anything saved before that check existed."""
+    df_inst = get_data("Installations")
+    df_log = get_data("UploadedInstallLog")
+    if df_inst.empty or not has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
+        return pd.DataFrame()
+
+    df_inst = df_inst.copy()
+    for col in ["qty_1ph", "qty_3ph"]:
+        df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
+    df_inst["Installations Qty"] = df_inst["qty_1ph"] + df_inst["qty_3ph"]
+
+    if not df_log.empty and has_col(df_log, "date", "tech_name", "location"):
+        log_counts = df_log.groupby(["date", "tech_name", "location"]).size().reset_index(name="Upload-Derived Qty")
+    else:
+        log_counts = pd.DataFrame(columns=["date", "tech_name", "location", "Upload-Derived Qty"])
+
+    merged = df_inst.merge(log_counts, on=["date", "tech_name", "location"], how="left")
+    merged["Upload-Derived Qty"] = merged["Upload-Derived Qty"].fillna(0).astype(int)
+    merged["Implied Manual Qty"] = merged["Installations Qty"] - merged["Upload-Derived Qty"]
+
+    flagged = merged[(merged["Upload-Derived Qty"] > 0) & (merged["Implied Manual Qty"] > 0)].copy()
+    return flagged[["date", "tech_name", "location", "Installations Qty", "Upload-Derived Qty", "Implied Manual Qty"]].rename(
+        columns={"date": "Date", "tech_name": "Technician", "location": "Location"}
+    ).sort_values("Implied Manual Qty", ascending=False)
+
+
 def cleanup_non_tl_records():
     """One-click removal of any records saved before the TL_ filter was
     standardized. Removes matching rows from UploadedInstallLog (and, for
@@ -976,6 +1120,32 @@ def render_legacy_upload_widget(key_prefix: str):
                         if skipped_non_tl:
                             st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
                         push_parsed_records_to_installations(parsed, source_label="legacy install(s)")
+
+
+# ── Pending double-count confirmation banner (rendered before the tabs so ──
+# it's visible no matter which tab triggered it) ────────────────────────────
+if "pending_push" in st.session_state:
+    pend = st.session_state["pending_push"]
+    st.markdown("""
+    <div class="danger-box">
+    ⚠️ <b>Possible double-count risk.</b> The record(s) below already have a manually-entered
+    quantity for that date/technician/location with no matching upload history — adding this
+    upload on top could count the same real installs twice. Review, then choose:
+    </div>
+    """, unsafe_allow_html=True)
+    st.dataframe(pd.DataFrame(pend["risky"]), use_container_width=True, hide_index=True)
+    pc1, pc2 = st.columns(2)
+    with pc1:
+        if st.button("✅ Proceed Anyway (verified — not duplicates)", type="primary", use_container_width=True, key="pending_push_proceed"):
+            records, label = pend["records"], pend["source_label"]
+            del st.session_state["pending_push"]
+            _execute_push(records, label)
+    with pc2:
+        if st.button("❌ Cancel This Upload", use_container_width=True, key="pending_push_cancel"):
+            del st.session_state["pending_push"]
+            st.info("Upload cancelled — nothing was saved.")
+            st.rerun()
+    st.divider()
 
 
 # ── Tabs Configuration ────────────────────────────────────────────────────────
@@ -1494,6 +1664,42 @@ with tab_map:
             )
             st.pydeck_chart(deck, use_container_width=True)
 
+            # -- Select a pin: see lat/long as copyable text -----------------
+            st.markdown('<div class="sub-hdr">📍 Select A Pin</div>', unsafe_allow_html=True)
+            pin_labels = {}
+            for idx, r in pinned.reset_index(drop=True).iterrows():
+                label = f"{r.get('sno') or r.get('tech_name') or 'Install'} — {r.get('date','')} {r.get('time','')} ({r.get('location','')})"
+                pin_labels[label] = idx
+            pinned_reset = pinned.reset_index(drop=True)
+            sel_pin_label = st.selectbox("Pick a record", ["-- Select --"] + list(pin_labels.keys()), key="map_pin_picker")
+            if sel_pin_label != "-- Select --":
+                pin_row = pinned_reset.iloc[pin_labels[sel_pin_label]]
+                pin_lat, pin_lon = pin_row["_lat"], pin_row["_long"]
+                pc1, pc2 = st.columns([2, 1])
+                with pc1:
+                    st.code(f"{pin_lat}, {pin_lon}", language=None)
+                with pc2:
+                    st.markdown(
+                        f'<a href="https://www.google.com/maps?q={pin_lat},{pin_lon}" target="_blank" class="wa-btn" style="background:#0E9F6E;">📍 Open In Maps</a>',
+                        unsafe_allow_html=True,
+                    )
+                detail_bits = [f"**SNO:** {pin_row.get('sno','—') or '—'}", f"**Installer:** {pin_row.get('tech_name','—') or '—'}",
+                               f"**Old Meter:** {pin_row.get('old_meter_no','—') or '—'}", f"**New Meter:** {pin_row.get('new_meter_no','—') or '—'}"]
+                st.caption(" · ".join(detail_bits))
+
+            # -- Save view + share ---------------------------------------------
+            st.markdown('<div class="sub-hdr">📤 Export This View</div>', unsafe_allow_html=True)
+            filter_desc = f"{', '.join(map_loc_filter) if map_loc_filter and len(map_loc_filter) < len(loc_options) else 'All Sections'} · {md_start} to {md_end}"
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                png_snapshot = build_map_snapshot_png(pinned, title=f"Install Locations\n{filter_desc}")
+                st.download_button("📷 Save Map View As PNG", data=png_snapshot, file_name="map_view.png", mime="image/png", use_container_width=True, key="map_png_export")
+                st.caption("A plot of pin positions (Lat/Long) — not a screenshot of the street map above, since no mapping API key is configured.")
+            with ec2:
+                kml_bytes = build_kml(pinned, doc_name=f"Installed Meters — {filter_desc}")
+                st.download_button("🗺️ Share As KML File", data=kml_bytes, file_name="installed_meters.kml", mime="application/vnd.google-earth.kml+xml", use_container_width=True, key="map_kml_export")
+                st.caption("Opens in Google Earth, Google My Maps, QGIS, or any GIS tool your field team already has.")
+
             with st.expander(f"📋 View {len(pinned)} record(s) as a table"):
                 map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
                 map_table_cols = [c for c in map_table_cols if c in pinned.columns]
@@ -1646,16 +1852,22 @@ with tab_inst:
                 st.error("❌ Pick a location first.")
             else:
                 added = 0
+                unmapped_batch = []
                 for t, (q1, q3) in qty_map.items():
                     if q1 > 0 or q3 > 0:
+                        login_id = name_to_login_id.get(t, "")
+                        if not login_id:
+                            unmapped_batch.append(t)
                         st.session_state["installs_batch"].append({
-                            "date": str(qm_date), "tech_name": t, "location": qm_loc,
+                            "date": str(qm_date), "tech_name": t, "installer_id": login_id, "location": qm_loc,
                             "qty_1ph": int(q1), "qty_3ph": int(q3),
                         })
                         added += 1
                 if added:
                     st.session_state["qm_version"] += 1
                     st.success(f"✅ Added {added} entr{'y' if added == 1 else 'ies'} to the batch below.")
+                    if unmapped_batch:
+                        st.warning(f"⚠️ No Login ID on file for: {', '.join(sorted(set(unmapped_batch)))} — add one in Admin so future duplicate checks can match uploads to this technician.")
                     st.rerun()
                 else:
                     st.warning("⚠️ Enter at least one quantity for a selected technician.")
@@ -1679,12 +1891,15 @@ with tab_inst:
                 elif single_q1 == 0 and single_q3 == 0:
                     st.error("❌ Enter at least one quantity.")
                 else:
+                    single_login_id = name_to_login_id.get(single_tech, "")
                     st.session_state["installs_batch"].append({
-                        "date": str(single_date), "tech_name": single_tech, "location": single_loc,
+                        "date": str(single_date), "tech_name": single_tech, "installer_id": single_login_id, "location": single_loc,
                         "qty_1ph": int(single_q1), "qty_3ph": int(single_q3),
                     })
                     st.session_state["qm_version"] += 1
                     st.success("✅ Added to batch below.")
+                    if not single_login_id:
+                        st.warning(f"⚠️ No Login ID on file for {single_tech} — add one in Admin so future duplicate checks can match uploads to this technician.")
                     st.rerun()
 
         # ── Batch preview cards + Save All ───────────────────────────────────
@@ -1722,7 +1937,9 @@ with tab_inst:
 
             if save_all:
                 df_existing = get_data("Installations")
-                new_rows, skipped = [], []
+                df_log_check = get_data("UploadedInstallLog")
+                log_has_cols = not df_log_check.empty and has_col(df_log_check, "date", "tech_name", "location")
+                new_rows, skipped, upload_overlap_warnings = [], [], []
                 for entry in batch:
                     dup = False
                     if not df_existing.empty and has_col(df_existing, "date", "tech_name"):
@@ -1731,9 +1948,21 @@ with tab_inst:
                         skipped.append(f"{entry['tech_name']} ({entry['date']})")
                     else:
                         new_rows.append({
-                            "date": entry["date"], "tech_name": entry["tech_name"], "location": entry["location"],
+                            "date": entry["date"], "tech_name": entry["tech_name"],
+                            "installer_id": entry.get("installer_id", ""), "location": entry["location"],
                             "qty_1ph": str(entry["qty_1ph"]), "qty_3ph": str(entry["qty_3ph"]),
                         })
+                        # Reverse of the upload-side check: warn if this exact
+                        # date/tech/location already has upload history, since
+                        # this manual entry might be re-logging the same installs.
+                        if log_has_cols:
+                            overlap_mask = (
+                                (df_log_check["date"] == entry["date"]) &
+                                (df_log_check["tech_name"] == entry["tech_name"]) &
+                                (df_log_check["location"] == entry["location"])
+                            )
+                            if overlap_mask.any():
+                                upload_overlap_warnings.append(f"{entry['tech_name']} on {entry['date']} at {entry['location']} ({int(overlap_mask.sum())} upload record(s) already exist)")
 
                 if new_rows:
                     updated = pd.concat([df_existing, pd.DataFrame(new_rows)], ignore_index=True) if not df_existing.empty else pd.DataFrame(new_rows)
@@ -1741,6 +1970,8 @@ with tab_inst:
                         st.success(f"✅ Saved {len(new_rows)} entr{'y' if len(new_rows) == 1 else 'ies'}.")
                         if skipped:
                             st.warning(f"⚠️ Skipped (already exists for that tech/date): {', '.join(skipped)}")
+                        if upload_overlap_warnings:
+                            st.warning("⚠️ Possible double-count: these already have upload-recorded installs for the same date/tech/location — verify this manual entry isn't re-logging them: " + "; ".join(upload_overlap_warnings))
                         st.session_state["installs_batch"] = []
                         st.rerun()
                 else:
@@ -2257,3 +2488,24 @@ with tab_admin:
                 st.rerun()
         elif cleanup_pin:
             st.error("❌ Incorrect PIN.")
+
+    with st.expander("🔎 Check For Possible Double-Counted Installs"):
+        st.markdown("""
+        <div class="info-box">
+        Flags any date/technician/location where the Installations total is higher than what's
+        derivable purely from uploaded records — a sign that a manual entry may have been added
+        on top of installs that were later also uploaded, double-counting them. This is a
+        read-only report; nothing is changed automatically. Review each row, then correct it
+        manually via the Installation Log in the Installs tab (edit or delete the affected entry).
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("🔎 Run Discrepancy Check", use_container_width=True, key="run_discrepancy_check"):
+            flagged = diagnose_installations_discrepancy()
+            if flagged.empty:
+                st.success("✅ No discrepancies found — every Installations row with upload history matches its upload-derived count.")
+            else:
+                st.warning(f"⚠️ Found {len(flagged)} row(s) where the Installations total exceeds what uploads alone account for.")
+                st.dataframe(flagged, use_container_width=True, hide_index=True, height=dataframe_height(len(flagged)))
+                st.caption("'Implied Manual Qty' is the portion NOT explained by uploads — likely the manually-entered amount, which may be duplicating the uploaded records.")
+                csv_data = flagged.to_csv(index=False).encode("utf-8")
+                st.download_button("📥 Download This Report", data=csv_data, file_name="installations_discrepancy_report.csv", mime="text/csv", use_container_width=True)
