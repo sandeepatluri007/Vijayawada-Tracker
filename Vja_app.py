@@ -604,6 +604,18 @@ DETAIL_FIELD_HEADERS = {
 INSTALL_BULK_REQUIRED_HEADERS = ["Installation Date", "Installation Time", "Installer LoginID", "Section", "New Meter Type"]
 ANALYTICS_REQUIRED_HEADERS = ["Installation Date", "Installation Time", "Installer LoginID"]
 
+# Only installer/login IDs with this prefix are ever processed or saved —
+# applied consistently in the Installs bulk upload, the Legacy Data upload,
+# and the Analytics upload, so no non-technician or test rows slip into any
+# of the sheets via one path but not another.
+INSTALLER_ID_PREFIX = "TL_"
+
+
+def is_valid_installer_id(raw_installer) -> bool:
+    if raw_installer is None:
+        return False
+    return str(raw_installer).strip().upper().startswith(INSTALLER_ID_PREFIX)
+
 
 def normalize_coord_val(val):
     """Return a float lat/lon, or None if blank/zero/unparseable."""
@@ -736,6 +748,15 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
         st.warning("⚠️ No records to push.")
         return
 
+    # Defense-in-depth: every caller already filters to INSTALLER_ID_PREFIX
+    # (TL_) before parsing, but enforce it here too so the rule holds even if
+    # a future caller forgets.
+    non_tl_filtered = sum(1 for rec in parsed_records if not is_valid_installer_id(rec.get("installer_id")))
+    parsed_records = [rec for rec in parsed_records if is_valid_installer_id(rec.get("installer_id"))]
+    if not parsed_records:
+        st.warning(f"⚠️ No {INSTALLER_ID_PREFIX} installer records to push.")
+        return
+
     detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
     df_log_existing = get_data("UploadedInstallLog")
     if df_log_existing.empty:
@@ -841,7 +862,58 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
             st.info(f"ℹ️ No technician mapping found for: {', '.join(sorted(unmapped_ids))} — used their login ID as the name. Add a 'login_id' to that technician in Admin to map it to a display name next time.")
         if unclassified:
             st.warning(f"⚠️ {unclassified} record(s) had no meter type on file and weren't counted toward 1PH/3PH totals.")
+        if non_tl_filtered:
+            st.warning(f"⚠️ {non_tl_filtered} record(s) with a non-{INSTALLER_ID_PREFIX} installer ID were filtered out and not saved.")
         st.rerun()
+
+
+def cleanup_non_tl_records():
+    """One-click removal of any records saved before the TL_ filter was
+    standardized. Removes matching rows from UploadedInstallLog (and, for
+    safety, AnalyticsRaw), and correctly reverses their 1PH/3PH counts back
+    out of the Installations sheet — dropping any Installations row that
+    lands at zero/zero as a result. Returns (removed_from_log, removed_from_analytics)."""
+    removed_log = 0
+    removed_araw = 0
+
+    df_log = get_data("UploadedInstallLog")
+    if not df_log.empty and "installer_id" in df_log.columns:
+        is_bad = ~df_log["installer_id"].apply(is_valid_installer_id)
+        bad_rows = df_log[is_bad].copy()
+        removed_log = len(bad_rows)
+        if removed_log:
+            df_inst = get_data("Installations")
+            if not df_inst.empty and has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
+                for col in ["qty_1ph", "qty_3ph"]:
+                    df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
+                bad_rows["is_1ph"] = bad_rows.get("meter_type", "").astype(str).str.contains("1", na=False)
+                bad_rows["is_3ph"] = bad_rows.get("meter_type", "").astype(str).str.contains("3", na=False)
+                agg = bad_rows.groupby(["date", "tech_name", "location"]).agg(
+                    d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
+                ).reset_index()
+                for _, arow in agg.iterrows():
+                    mask = (
+                        (df_inst["date"] == arow["date"]) &
+                        (df_inst["tech_name"] == arow["tech_name"]) &
+                        (df_inst["location"] == arow["location"])
+                    )
+                    if mask.any():
+                        df_inst.loc[mask, "qty_1ph"] = (df_inst.loc[mask, "qty_1ph"] - int(arow["d_1ph"])).clip(lower=0)
+                        df_inst.loc[mask, "qty_3ph"] = (df_inst.loc[mask, "qty_3ph"] - int(arow["d_3ph"])).clip(lower=0)
+                df_inst = df_inst[~((df_inst["qty_1ph"] == 0) & (df_inst["qty_3ph"] == 0))].reset_index(drop=True)
+                safe_update("Installations", df_inst)
+            df_log_clean = df_log[~is_bad].reset_index(drop=True)
+            safe_update("UploadedInstallLog", df_log_clean)
+
+    df_araw = get_data("AnalyticsRaw")
+    if not df_araw.empty and "installer_id" in df_araw.columns:
+        is_bad2 = ~df_araw["installer_id"].apply(is_valid_installer_id)
+        removed_araw = int(is_bad2.sum())
+        if removed_araw:
+            df_araw_clean = df_araw[~is_bad2].reset_index(drop=True)
+            safe_update("AnalyticsRaw", df_araw_clean)
+
+    return removed_log, removed_araw
 
 
 def render_legacy_upload_widget(key_prefix: str):
@@ -875,9 +947,13 @@ def render_legacy_upload_widget(key_prefix: str):
                 else:
                     detail_optional_map = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
                     parsed = []
+                    skipped_non_tl = 0
                     for r in range(header_row + 1, ws.max_row + 1):
                         raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
                         if raw_installer is None or str(raw_installer).strip() == "":
+                            continue
+                        if not is_valid_installer_id(raw_installer):
+                            skipped_non_tl += 1
                             continue
                         d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
                         t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
@@ -895,8 +971,10 @@ def render_legacy_upload_widget(key_prefix: str):
                         parsed.append(rec)
 
                     if not parsed:
-                        st.warning("⚠️ No valid rows with a date, time and installer were found in this file.")
+                        st.warning(f"⚠️ No valid {INSTALLER_ID_PREFIX} installer rows with a date and time were found in this file.")
                     else:
+                        if skipped_non_tl:
+                            st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
                         push_parsed_records_to_installations(parsed, source_label="legacy install(s)")
 
 
@@ -1103,7 +1181,7 @@ with tab_analytics:
                         if raw_installer is None or str(raw_installer).strip() == "":
                             continue
                         installer_id = str(raw_installer).strip()
-                        if not installer_id.upper().startswith("TL_"):
+                        if not is_valid_installer_id(installer_id):
                             skipped_non_tl += 1
                             continue
                         d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
@@ -1459,9 +1537,13 @@ with tab_inst:
                 else:
                     detail_optional_map = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
                     parsed = []
+                    skipped_non_tl = 0
                     for r in range(header_row + 1, ws.max_row + 1):
                         raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
                         if raw_installer is None or str(raw_installer).strip() == "":
+                            continue
+                        if not is_valid_installer_id(raw_installer):
+                            skipped_non_tl += 1
                             continue
                         d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
                         t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
@@ -1479,8 +1561,10 @@ with tab_inst:
                         parsed.append(rec)
 
                     if not parsed:
-                        st.warning("⚠️ No valid rows with a date, time and installer were found in this file.")
+                        st.warning(f"⚠️ No valid {INSTALLER_ID_PREFIX} installer rows with a date and time were found in this file.")
                     else:
+                        if skipped_non_tl:
+                            st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
                         push_parsed_records_to_installations(parsed, source_label="install(s)")
 
     st.divider()
@@ -2149,3 +2233,27 @@ with tab_admin:
                         if st.button("❌ Cancel", key=f"cancel_del_loc_{idx}"):
                             del st.session_state["deleting_loc_idx"]
                             st.rerun()
+
+    # ── Data Maintenance ──────────────────────────────────────────────────────
+    st.divider()
+    st.markdown('<div class="sec-hdr">🧹 Data Maintenance</div>', unsafe_allow_html=True)
+    with st.expander(f"🔒 Remove Non-{INSTALLER_ID_PREFIX} Installer Records"):
+        st.markdown(f"""
+        <div class="danger-box">
+        ⚠️ Permanently removes any install record whose Installer LoginID doesn't start with
+        <b>{INSTALLER_ID_PREFIX}</b> (from records saved before this filter was standardized
+        across all uploads). Their 1PH/3PH counts are correctly subtracted back out of the
+        Installations totals. This cannot be undone.
+        </div>
+        """, unsafe_allow_html=True)
+        cleanup_pin = st.text_input("Enter PIN to unlock", type="password", key="cleanup_pin")
+        if cleanup_pin == PIN_CODE:
+            if st.button(f"🧹 Remove All Non-{INSTALLER_ID_PREFIX} Records", type="primary", use_container_width=True, key="run_cleanup_btn"):
+                removed_log, removed_araw = cleanup_non_tl_records()
+                if removed_log or removed_araw:
+                    st.success(f"✅ Removed {removed_log} record(s) from Installs data and {removed_araw} from Analytics data. Installations totals have been corrected.")
+                else:
+                    st.info(f"No non-{INSTALLER_ID_PREFIX} records found — nothing to remove.")
+                st.rerun()
+        elif cleanup_pin:
+            st.error("❌ Incorrect PIN.")
