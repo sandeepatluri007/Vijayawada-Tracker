@@ -763,7 +763,7 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
                 existing_val = df_log_existing.at[idx, col]
                 existing_blank = existing_val in (None, "", "Unspecified") or (isinstance(existing_val, float) and pd.isna(existing_val))
                 if existing_blank:
-                    df_log_existing.at[idx, col] = new_val
+                    df_log_existing.at[idx, col] = str(new_val)
                     filled_something = True
             if filled_something:
                 backfilled_count += 1
@@ -1152,7 +1152,7 @@ with tab_analytics:
                                         continue
                                     existing_val = str(df_araw_existing.at[idx, col]).strip()
                                     if not existing_val:
-                                        df_araw_existing.at[idx, col] = new_val
+                                        df_araw_existing.at[idx, col] = str(new_val)
                                         filled_something = True
                                 if filled_something:
                                     backfilled_count += 1
