@@ -6,7 +6,10 @@ Theme   : Clean White & Light Greys (Field-Optimized)
 Security: PIN Protected (30-min inactivity auto-lock)
 
 requirements.txt must include: streamlit, streamlit-gsheets-connection, pandas,
-openpyxl, matplotlib (matplotlib is used only for the "Download as Image" table exports).
+openpyxl, matplotlib (used for the "Download as Image" table exports and the
+Hourly Count heatmap view). pydeck powers the Map tab's pin map — it ships
+bundled with streamlit, so it normally does not need to be listed separately;
+add it explicitly only if the Map tab errors with a missing-module message.
 
 Google Sheet worksheets required (create these tabs in your Sheet, header row only —
 the app creates and appends data automatically):
@@ -14,8 +17,10 @@ the app creates and appends data automatically):
   Inventory            - date, type, qty, mrn, make
   Technicians           - name, phone, aadhar, is_active, login_id
   Locations             - location_name
-  UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type
-  AnalyticsRaw          - key, date, time, installer_id, hour, location, meter_type
+  UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type,
+                           sno, old_meter_no, new_meter_no, lat, long
+  AnalyticsRaw          - key, date, time, installer_id, hour, location, meter_type,
+                           sno, old_meter_no, new_meter_no, lat, long
 """
 
 import streamlit as st
@@ -29,6 +34,7 @@ import io
 import openpyxl
 import matplotlib
 matplotlib.use("Agg")
+import pydeck as pdk
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -40,7 +46,7 @@ st.set_page_config(
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 PIN_CODE = "1323"
-SESSION_TIMEOUT_SECONDS = 60 * 60  # 30 minutes inactivity
+SESSION_TIMEOUT_SECONDS = 30 * 60  # 30 minutes inactivity
 READ_TTL = 30  # seconds — cuts down on redundant Sheets reads
 HALF_DAY_CUTOFF = "13:30:00"  # H1 = first install .. 13:30, H2 = 13:30 .. last install
 
@@ -241,6 +247,56 @@ def download_image_button(df: pd.DataFrame, file_name: str, key: str, color_grid
         return
     png_bytes = dataframe_to_png_bytes(df, color_grid=color_grid, title=title)
     st.download_button(label, data=png_bytes, file_name=file_name, mime="image/png", use_container_width=True, key=key)
+
+
+def dataframe_height(n_rows: int, row_px: int = 38, header_px: int = 38, max_px: int = 640) -> int:
+    """Height (px) that fits every row without Streamlit's internal vertical
+    scrollbar, capped at max_px for very long tables (which fall back to the
+    normal scrollable view rather than pushing the page too tall)."""
+    return min(header_px + row_px * max(n_rows, 1) + 3, max_px)
+
+
+def render_hourly_heatmap(df: pd.DataFrame, hour_cols, color_grid):
+    """Alternative to the wide Hourly Count table: a compact heatmap (installer
+    x hour + Total) that scales to the container width instead of needing
+    horizontal scrolling for teams with many active hours in a day."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    cols_to_plot = hour_cols + ["Total"]
+    n_rows = len(df)
+    fig_w = max(6.0, len(cols_to_plot) * 0.85)
+    fig_h = max(2.0, n_rows * 0.5 + 1.2)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    def hex_to_rgb(h):
+        h = h.lstrip("#")
+        return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+    img = np.ones((n_rows, len(cols_to_plot), 3))
+    for i in range(n_rows):
+        for j, col in enumerate(cols_to_plot):
+            col_idx = df.columns.get_loc(col)
+            bg, _ = color_grid[i][col_idx]
+            img[i, j] = hex_to_rgb(bg) if bg else (1, 1, 1)
+
+    ax.imshow(img, aspect="auto")
+    ax.set_xticks(range(len(cols_to_plot)))
+    ax.set_xticklabels(cols_to_plot, rotation=45, ha="right", fontsize=9)
+    ax.set_yticks(range(n_rows))
+    ax.set_yticklabels(df["Installer"].tolist(), fontsize=9)
+    for i in range(n_rows):
+        for j, col in enumerate(cols_to_plot):
+            ax.text(j, i, str(df.iloc[i][col]), ha="center", va="center", fontsize=9, fontweight="bold", color="#10151F")
+    ax.set_xticks(np.arange(-0.5, len(cols_to_plot), 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+    ax.grid(which="minor", color="white", linewidth=1.5)
+    ax.tick_params(which="minor", size=0)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    fig.tight_layout()
+    st.pyplot(fig, use_container_width=True)
+    plt.close(fig)
 
 
 def render_colored_metric(label: str, value: int, red_max: int, yellow_max: int):
@@ -532,6 +588,52 @@ def find_optional_cols(ws, header_row: int, optional_headers):
     return {h: row_vals[h.strip().lower()] for h in optional_headers if h.strip().lower() in row_vals}
 
 
+# Extra per-record detail columns (present in the same MDM export) that feed
+# the Map tab and the meter-number Search box on the Installs tab. All optional
+# — files/uploads without them still work, just without these fields filled in.
+DETAIL_FIELD_HEADERS = {
+    "sno": "Consumer No",
+    "old_meter_no": "Old Meter Serial Number",
+    "new_meter_no": "New Meter Serial Number",
+    "lat": "latitude",
+    "long": "longitude",
+}
+
+# Column headers required to parse a full installation record (bulk upload,
+# legacy upload). Analytics-tab live tracking only strictly needs the first three.
+INSTALL_BULK_REQUIRED_HEADERS = ["Installation Date", "Installation Time", "Installer LoginID", "Section", "New Meter Type"]
+ANALYTICS_REQUIRED_HEADERS = ["Installation Date", "Installation Time", "Installer LoginID"]
+
+
+def normalize_coord_val(val):
+    """Return a float lat/lon, or None if blank/zero/unparseable."""
+    try:
+        f = float(str(val).strip())
+        if f == 0:
+            return None
+        return f
+    except Exception:
+        return None
+
+
+def extract_detail_fields(ws, row: int, optional_map: dict) -> dict:
+    """Pulls SNO / Old Meter No / New Meter No / lat / long for one data row,
+    given an optional_map from find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))."""
+    out = {}
+    for key, header in DETAIL_FIELD_HEADERS.items():
+        col = optional_map.get(header)
+        if col is None:
+            out[key] = ""
+            continue
+        val = ws.cell(row=row, column=col).value
+        if key in ("lat", "long"):
+            coord = normalize_coord_val(val)
+            out[key] = coord if coord is not None else ""
+        else:
+            out[key] = str(val).strip() if val is not None else ""
+    return out
+
+
 def normalize_date_val(val):
     """Return an ISO date string (YYYY-MM-DD) or None."""
     if val is None:
@@ -620,28 +722,51 @@ if not df_technicians_master.empty and has_col(df_technicians_master, "login_id"
 
 
 def push_parsed_records_to_installations(parsed_records, source_label="install(s)"):
-    """Shared by the Installs-tab bulk upload and the Analytics tab's
-    'Update Installs' button. Each record is a dict with date/time/installer_id
-    (+ optional location/meter_type). Dedupes every record (date+time+installer)
-    against the shared UploadedInstallLog ledger — so the same real install can
-    never be double-counted no matter which tab pushed it — maps installer_id to
-    a technician name via tech_login_lookup, and merges the resulting 1PH/3PH
-    deltas into the Installations sheet."""
+    """Shared by the Installs-tab bulk upload, the Analytics tab's 'Update
+    Installs' button, and the Legacy Data upload. Each record is a dict with
+    date/time/installer_id (+ optional location/meter_type/sno/old_meter_no/
+    new_meter_no/lat/long). Dedupes every record (date+time+installer) against
+    the shared UploadedInstallLog ledger — so the same real install can never
+    be double-counted no matter which tab pushed it — maps installer_id to a
+    technician name via tech_login_lookup, merges the resulting 1PH/3PH deltas
+    into the Installations sheet, and backfills any blank detail fields
+    (location/meter_type/sno/old_meter_no/new_meter_no/lat/long) on records
+    that already exist, without adding to install counts."""
     if not parsed_records:
         st.warning("⚠️ No records to push.")
         return
 
+    detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
     df_log_existing = get_data("UploadedInstallLog")
-    existing_keys = set()
-    if not df_log_existing.empty and "key" in df_log_existing.columns:
-        existing_keys = set(df_log_existing["key"].values)
+    if df_log_existing.empty:
+        df_log_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "tech_name"] + detail_cols)
+    for col in detail_cols:
+        if col not in df_log_existing.columns:
+            df_log_existing[col] = ""
+
+    existing_keys = set(df_log_existing["key"].values) if "key" in df_log_existing.columns else set()
+    key_to_idx = {k: i for i, k in zip(df_log_existing.index, df_log_existing["key"].values)} if "key" in df_log_existing.columns else {}
 
     new_log_rows = []
     dates_seen, dates_with_new, unmapped_ids = set(), set(), set()
+    backfilled_count = 0
     for rec in parsed_records:
         dates_seen.add(rec["date"])
         key = f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
         if key in existing_keys:
+            idx = key_to_idx[key]
+            filled_something = False
+            for col in detail_cols:
+                new_val = rec.get(col)
+                if new_val in (None, ""):
+                    continue
+                existing_val = df_log_existing.at[idx, col]
+                existing_blank = existing_val in (None, "", "Unspecified") or (isinstance(existing_val, float) and pd.isna(existing_val))
+                if existing_blank:
+                    df_log_existing.at[idx, col] = new_val
+                    filled_something = True
+            if filled_something:
+                backfilled_count += 1
             continue
         existing_keys.add(key)
         tech_name = tech_login_lookup.get(rec["installer_id"].lower())
@@ -653,17 +778,26 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
             "installer_id": rec["installer_id"], "tech_name": tech_name,
             "location": rec.get("location") or "Unspecified",
             "meter_type": rec.get("meter_type") or "",
+            "sno": rec.get("sno") or "", "old_meter_no": rec.get("old_meter_no") or "",
+            "new_meter_no": rec.get("new_meter_no") or "",
+            "lat": rec.get("lat") or "", "long": rec.get("long") or "",
         })
         dates_with_new.add(rec["date"])
 
     fully_dup_dates = dates_seen - dates_with_new
 
-    if not new_log_rows:
-        st.error(f"❌ Installs already exist for: {', '.join(sorted(dates_seen))}. Nothing new to add.")
+    if not new_log_rows and not backfilled_count:
+        st.error(f"❌ Installs already exist for: {', '.join(sorted(dates_seen))}, with no missing details to fill in. Nothing to update.")
         return
 
-    # 1) append raw log rows (dedup ledger)
-    updated_log = pd.concat([df_log_existing, pd.DataFrame(new_log_rows)], ignore_index=True) if not df_log_existing.empty else pd.DataFrame(new_log_rows)
+    # 1) append/update raw log rows (dedup + detail ledger)
+    updated_log = pd.concat([df_log_existing, pd.DataFrame(new_log_rows)], ignore_index=True) if new_log_rows else df_log_existing
+
+    if not new_log_rows:
+        if safe_update("UploadedInstallLog", updated_log):
+            st.success(f"✅ No new installs, but filled in missing details for {backfilled_count} existing record(s).")
+            st.rerun()
+        return
 
     # 2) aggregate the NEW rows only, by date + tech_name + location
     new_log_df = pd.DataFrame(new_log_rows)
@@ -699,6 +833,8 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
 
     if safe_update("Installations", df_inst_existing) and safe_update("UploadedInstallLog", updated_log):
         st.success(f"✅ Added {len(new_log_rows)} new {source_label} across {len(dates_with_new)} date(s).")
+        if backfilled_count:
+            st.info(f"ℹ️ Also filled in missing details for {backfilled_count} existing record(s).")
         if fully_dup_dates:
             st.warning(f"⚠️ Already fully recorded, skipped: {', '.join(sorted(fully_dup_dates))}")
         if unmapped_ids:
@@ -708,9 +844,65 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
         st.rerun()
 
 
+def render_legacy_upload_widget(key_prefix: str):
+    """A 'Upload Legacy/Historical Data' widget, reused on both the Map tab
+    and the Installs tab. Parses the same MDM export column layout as the
+    regular bulk upload (Installation Date/Time/Installer LoginID/Section/
+    New Meter Type + the optional detail columns), then pushes through the
+    exact same dedup/backfill/merge pipeline — so historical data is checked
+    for duplicates against everything already recorded and only new records
+    (or missing details) are added."""
+    st.markdown("""
+    <div class="info-box">
+    For older records not already in the system. Same file format as the Installs tab's
+    bulk upload — every row is checked against what's already recorded (by date, time and
+    installer), so duplicates are skipped and only genuinely new records get added.
+    </div>
+    """, unsafe_allow_html=True)
+    legacy_file = st.file_uploader("Upload Legacy/Historical Excel (.xlsx)", type=["xlsx"], key=f"{key_prefix}_legacy_uploader")
+    if legacy_file is not None:
+        if st.button("📥 Process Legacy Data", type="primary", use_container_width=True, key=f"{key_prefix}_legacy_process_btn"):
+            try:
+                ws = load_first_data_sheet(legacy_file)
+            except Exception as e:
+                st.error(f"❌ Could not open the file: {e}")
+                ws = None
+
+            if ws is not None:
+                header_row, col_map = find_header_row(ws, INSTALL_BULK_REQUIRED_HEADERS)
+                if header_row is None:
+                    st.error("❌ Could not find 'Installation Date', 'Installation Time', 'Installer LoginID', 'Section' and 'New Meter Type' columns in this file.")
+                else:
+                    detail_optional_map = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
+                    parsed = []
+                    for r in range(header_row + 1, ws.max_row + 1):
+                        raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
+                        if raw_installer is None or str(raw_installer).strip() == "":
+                            continue
+                        d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
+                        t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
+                        if d is None or t is None:
+                            continue
+                        section = ws.cell(row=r, column=col_map["Section"]).value
+                        mtype = ws.cell(row=r, column=col_map["New Meter Type"]).value
+                        rec = {
+                            "date": d, "time": t,
+                            "installer_id": str(raw_installer).strip(),
+                            "location": str(section).strip() if section else "Unspecified",
+                            "meter_type": str(mtype).strip() if mtype else "",
+                        }
+                        rec.update(extract_detail_fields(ws, r, detail_optional_map))
+                        parsed.append(rec)
+
+                    if not parsed:
+                        st.warning("⚠️ No valid rows with a date, time and installer were found in this file.")
+                    else:
+                        push_parsed_records_to_installations(parsed, source_label="legacy install(s)")
+
+
 # ── Tabs Configuration ────────────────────────────────────────────────────────
-tab_dash, tab_analytics, tab_inst, tab_inv, tab_admin = st.tabs([
-    "📊 Dashboard", "📈 Analytics", "🛠️ Installs", "📦 Store", "⚙️ Admin"
+tab_dash, tab_analytics, tab_map, tab_inst, tab_inv, tab_admin = st.tabs([
+    "📊 Dashboard", "📈 Analytics", "🗺️ Map", "🛠️ Installs", "📦 Store", "⚙️ Admin"
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -836,7 +1028,7 @@ with tab_dash:
                     ),
                     axis=None,
                 ),
-                use_container_width=True, hide_index=True,
+                use_container_width=True, hide_index=True, height=dataframe_height(len(group_df)),
             )
             st.caption("🟩 Green = strong Total · 🟨 Yellow = mid-range · 🟥 Red = below target.")
             download_image_button(
@@ -876,12 +1068,13 @@ with tab_dash:
 with tab_analytics:
     st.markdown("""
     <div class="info-box">
-    📈 Upload the raw MDM export to see live installer-wise hourly counts, half-day split, and average install time,
-    
+    📈 This tab is independent of the Installs/Inventory data elsewhere in the app.
+    Upload the raw MDM export (any layout — the app finds the header row automatically)
+    to see live installer-wise hourly counts, half-day split, and average install time,
+    even when you don't have laptop access. Uploading the same file again only adds
+    genuinely new rows — nothing is double counted. Reset at the end of the day to start fresh.
     </div>
     """, unsafe_allow_html=True)
-
-    ANALYTICS_REQUIRED_HEADERS = ["Installation Date", "Installation Time", "Installer LoginID"]
 
     st.markdown('<div class="sec-hdr">⬆️ Upload Progress File</div>', unsafe_allow_html=True)
     analytics_file = st.file_uploader(
@@ -902,7 +1095,7 @@ with tab_analytics:
                 if header_row is None:
                     st.error("❌ Could not find 'Installation Date', 'Installation Time' and 'Installer LoginID' columns in this file.")
                 else:
-                    optional_map = find_optional_cols(ws, header_row, ["Section", "New Meter Type"])
+                    optional_map = find_optional_cols(ws, header_row, ["Section", "New Meter Type"] + list(DETAIL_FIELD_HEADERS.values()))
                     parsed_records = []
                     skipped_non_tl = 0
                     for r in range(header_row + 1, ws.max_row + 1):
@@ -919,20 +1112,23 @@ with tab_analytics:
                             continue
                         section_val = ws.cell(row=r, column=optional_map["Section"]).value if "Section" in optional_map else None
                         mtype_val = ws.cell(row=r, column=optional_map["New Meter Type"]).value if "New Meter Type" in optional_map else None
-                        parsed_records.append({
+                        rec = {
                             "date": d, "time": t, "installer_id": installer_id,
                             "hour": t.split(":")[0],
                             "location": str(section_val).strip() if section_val else "",
                             "meter_type": str(mtype_val).strip() if mtype_val else "",
-                        })
+                        }
+                        rec.update(extract_detail_fields(ws, r, optional_map))
+                        parsed_records.append(rec)
 
                     if not parsed_records:
                         st.warning("⚠️ No valid TL_ installer rows with a date and time were found in this file.")
                     else:
+                        araw_detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
                         df_araw_existing = get_data("AnalyticsRaw")
                         if df_araw_existing.empty:
-                            df_araw_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour", "location", "meter_type"])
-                        for col in ["location", "meter_type"]:
+                            df_araw_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour"] + araw_detail_cols)
+                        for col in araw_detail_cols:
                             if col not in df_araw_existing.columns:
                                 df_araw_existing[col] = ""
 
@@ -946,29 +1142,28 @@ with tab_analytics:
                             key = f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
                             if key in existing_keys:
                                 idx = key_to_idx[key]
-                                existing_loc = str(df_araw_existing.at[idx, "location"]).strip()
-                                existing_mtype = str(df_araw_existing.at[idx, "meter_type"]).strip()
                                 # Re-uploading an already-recorded row never adds a new install —
-                                # but if this record is missing Location/Meter Type and the
+                                # but if this record is missing any detail field and the new
                                 # upload has it, fill it in instead of just skipping.
                                 filled_something = False
-                                if not existing_loc and rec["location"]:
-                                    df_araw_existing.at[idx, "location"] = rec["location"]
-                                    filled_something = True
-                                if not existing_mtype and rec["meter_type"]:
-                                    df_araw_existing.at[idx, "meter_type"] = rec["meter_type"]
-                                    filled_something = True
+                                for col in araw_detail_cols:
+                                    new_val = rec.get(col)
+                                    if new_val in (None, ""):
+                                        continue
+                                    existing_val = str(df_araw_existing.at[idx, col]).strip()
+                                    if not existing_val:
+                                        df_araw_existing.at[idx, col] = new_val
+                                        filled_something = True
                                 if filled_something:
                                     backfilled_count += 1
                                 else:
                                     dup_count += 1
                                 continue
                             existing_keys.add(key)
-                            new_rows.append({
-                                "key": key, "date": rec["date"], "time": rec["time"],
-                                "installer_id": rec["installer_id"], "hour": rec["hour"],
-                                "location": rec["location"], "meter_type": rec["meter_type"],
-                            })
+                            new_row = {"key": key, "date": rec["date"], "time": rec["time"], "installer_id": rec["installer_id"], "hour": rec["hour"]}
+                            for col in araw_detail_cols:
+                                new_row[col] = rec.get(col, "")
+                            new_rows.append(new_row)
 
                         if not new_rows and not backfilled_count:
                             st.error("❌ All records in this file are already in Analytics (duplicate date/time/installer) with no missing details to fill in. Nothing to update.")
@@ -977,7 +1172,7 @@ with tab_analytics:
                             if safe_update("AnalyticsRaw", merged):
                                 msg = f"✅ Added {len(new_rows)} new record(s) to Analytics."
                                 if backfilled_count:
-                                    msg += f" Filled in missing Location/Meter Type for {backfilled_count} existing record(s)."
+                                    msg += f" Filled in missing details for {backfilled_count} existing record(s)."
                                 if dup_count:
                                     msg += f" Skipped {dup_count} already-complete duplicate(s)."
                                 if skipped_non_tl:
@@ -1029,7 +1224,14 @@ with tab_analytics:
         total_row["Total"] = int(hourly_df["Total"].sum())
         hourly_df = pd.concat([hourly_df, pd.DataFrame([total_row])], ignore_index=True)
         hour_col_labels = [f"{h}-{h+1}" for h in hour_cols]
-        st.dataframe(style_hourly_table(hourly_df, hour_col_labels), use_container_width=True, hide_index=True)
+        hourly_view_mode = st.radio(
+            "Hourly table view", ["📋 Table", "🔲 Heatmap (no horizontal scroll)"],
+            horizontal=True, key="hourly_view_mode", label_visibility="collapsed",
+        )
+        if hourly_view_mode.startswith("📋"):
+            st.dataframe(style_hourly_table(hourly_df, hour_col_labels), use_container_width=True, hide_index=True, height=dataframe_height(len(hourly_df)))
+        else:
+            render_hourly_heatmap(hourly_df, hour_col_labels, build_hourly_color_grid(hourly_df, hour_col_labels))
         st.caption("🟩 Green = strong count · 🟨 Yellow = mid-range · 🟥 Red = below target — thresholds set in the code's Conditional formatting section.")
         download_image_button(
             hourly_df, f"Hourly_Count_{sel_date}.png", key="dl_img_hourly",
@@ -1054,7 +1256,7 @@ with tab_analytics:
             "Total": int(half_df["Total"].sum()) if not half_df.empty else 0,
         }
         half_display_df = pd.concat([half_df, pd.DataFrame([half_total_row])], ignore_index=True)
-        st.dataframe(half_display_df, use_container_width=True, hide_index=True)
+        st.dataframe(half_display_df, use_container_width=True, hide_index=True, height=dataframe_height(len(half_display_df)))
         download_image_button(half_display_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half", title=f"Half-Day Split — {sel_date}")
 
         # -- Average install time -------------------------------------------
@@ -1074,7 +1276,7 @@ with tab_analytics:
         avg_df = pd.DataFrame(avg_rows).sort_values("Total Installs", ascending=False)
         st.dataframe(
             _style_map(avg_df.style, avg_time_style, subset=["Avg Time/Install (min)"]),
-            use_container_width=True, hide_index=True,
+            use_container_width=True, hide_index=True, height=dataframe_height(len(avg_df)),
         )
         st.caption("🟩 Faster than target · 🟨 Mid-range · 🟥 Slower than target (lower minutes is better).")
         download_image_button(
@@ -1096,7 +1298,7 @@ with tab_analytics:
             if reset_pin == PIN_CODE:
                 confirm_reset = st.checkbox("I understand this will delete all Analytics data collected so far")
                 if st.button("🗑️ Reset Analytics Data", type="primary", disabled=not confirm_reset, use_container_width=True):
-                    empty_df = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour", "location", "meter_type"])
+                    empty_df = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour", "location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"])
                     if safe_update("AnalyticsRaw", empty_df):
                         st.success("✅ Analytics data cleared. Ready for a new day.")
                         st.rerun()
@@ -1122,12 +1324,107 @@ with tab_analytics:
         if st.button(f"📥 Update Installs For {sel_date}", type="primary", use_container_width=True):
             push_records = []
             for _, r in day_df.iterrows():
-                push_records.append({
-                    "date": r["date"], "time": r["time"], "installer_id": r["installer_id"],
-                    "location": r["location"] if "location" in day_df.columns else "",
-                    "meter_type": r["meter_type"] if "meter_type" in day_df.columns else "",
-                })
+                rec = {"date": r["date"], "time": r["time"], "installer_id": r["installer_id"]}
+                for col in ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]:
+                    rec[col] = r[col] if col in day_df.columns else ""
+                push_records.append(rec)
             push_parsed_records_to_installations(push_records, source_label="install(s) from Analytics")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAP  (built from UploadedInstallLog — populated by the Installs bulk upload,
+#  the Analytics "Update Installs" push, and the Legacy Data upload below)
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_map:
+    st.markdown("""
+    <div class="info-box">
+    🗺️ Every install pushed from the Installs tab's bulk upload, from Analytics, or from a
+    Legacy Data upload lands here as a pin (when the source file included latitude/longitude).
+    </div>
+    """, unsafe_allow_html=True)
+
+    df_map_raw = get_data("UploadedInstallLog")
+
+    if df_map_raw.empty or not has_col(df_map_raw, "date", "lat", "long"):
+        st.info("No install records with location data yet. Upload installs via the Installs tab, Analytics, or the Legacy Data uploader below.")
+    else:
+        df_map = df_map_raw.copy()
+        df_map["_date"] = pd.to_datetime(df_map["date"], errors="coerce").dt.date
+        df_map["_lat"] = pd.to_numeric(df_map["lat"], errors="coerce")
+        df_map["_long"] = pd.to_numeric(df_map["long"], errors="coerce")
+
+        loc_options = sorted([l for l in df_map["location"].unique() if str(l).strip()]) if "location" in df_map.columns else []
+        valid_dates = df_map["_date"].dropna()
+        min_d, max_d = (valid_dates.min(), valid_dates.max()) if not valid_dates.empty else (date.today(), date.today())
+
+        mf1, mf2 = st.columns(2)
+        with mf1:
+            map_loc_filter = st.multiselect("Section", loc_options, default=loc_options)
+        with mf2:
+            map_date_range = st.date_input("Date Range", [min_d, max_d], key="map_date_range")
+
+        if isinstance(map_date_range, (list, tuple)) and len(map_date_range) == 2:
+            md_start, md_end = map_date_range[0], map_date_range[1]
+        elif isinstance(map_date_range, (list, tuple)) and len(map_date_range) == 1:
+            md_start = md_end = map_date_range[0]
+        else:
+            md_start = md_end = map_date_range
+
+        filtered_map = df_map[(df_map["_date"] >= md_start) & (df_map["_date"] <= md_end)]
+        if map_loc_filter:
+            filtered_map = filtered_map[filtered_map["location"].isin(map_loc_filter)]
+
+        total_in_range = len(filtered_map)
+        pinned = filtered_map.dropna(subset=["_lat", "_long"])
+        pinned = pinned[(pinned["_lat"] != 0) & (pinned["_long"] != 0)]
+
+        mm1, mm2 = st.columns(2)
+        mm1.metric("Records In Filter", total_in_range)
+        mm2.metric("With Location Data", len(pinned))
+
+        if pinned.empty:
+            st.warning("⚠️ None of the filtered records have latitude/longitude on file.")
+        else:
+            center_lat, center_lon = pinned["_lat"].mean(), pinned["_long"].mean()
+            tooltip_df = pinned.rename(columns={"_lat": "lat", "_long": "lon"})
+            for col in ["sno", "old_meter_no", "new_meter_no", "tech_name", "location", "date"]:
+                if col not in tooltip_df.columns:
+                    tooltip_df[col] = ""
+
+            layer = pdk.Layer(
+                "ScatterplotLayer",
+                data=tooltip_df,
+                get_position=["lon", "lat"],
+                get_fill_color=[14, 159, 110, 190],
+                get_radius=25,
+                radius_min_pixels=4,
+                radius_max_pixels=9,
+                pickable=True,
+                stroked=True,
+                get_line_color=[255, 255, 255],
+                line_width_min_pixels=1,
+            )
+            view_state = pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=13, pitch=0)
+            deck = pdk.Deck(
+                layers=[layer],
+                initial_view_state=view_state,
+                map_style="road",
+                tooltip={
+                    "html": "<b>SNO:</b> {sno}<br/><b>Section:</b> {location}<br/><b>Date:</b> {date}<br/>"
+                            "<b>Installer:</b> {tech_name}<br/><b>Old Meter:</b> {old_meter_no}<br/><b>New Meter:</b> {new_meter_no}",
+                    "style": {"backgroundColor": "#10151F", "color": "white", "fontSize": "12px"},
+                },
+            )
+            st.pydeck_chart(deck, use_container_width=True)
+
+            with st.expander(f"📋 View {len(pinned)} record(s) as a table"):
+                map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
+                map_table_cols = [c for c in map_table_cols if c in pinned.columns]
+                st.dataframe(pinned[map_table_cols], use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(pinned), max_px=500))
+
+    st.divider()
+    with st.expander("📤 Upload Legacy/Historical Data"):
+        render_legacy_upload_widget(key_prefix="map")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  INSTALLS
@@ -1145,8 +1442,6 @@ with tab_inst:
     </div>
     """, unsafe_allow_html=True)
 
-    INSTALL_BULK_REQUIRED_HEADERS = ["Installation Date", "Installation Time", "Installer LoginID", "Section", "New Meter Type"]
-
     bulk_file = st.file_uploader("Upload Installation Excel (.xlsx)", type=["xlsx"], key="bulk_install_uploader")
 
     if bulk_file is not None:
@@ -1162,6 +1457,7 @@ with tab_inst:
                 if header_row is None:
                     st.error("❌ Could not find 'Installation Date', 'Installation Time', 'Installer LoginID', 'Section' and 'New Meter Type' columns in this file.")
                 else:
+                    detail_optional_map = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
                     parsed = []
                     for r in range(header_row + 1, ws.max_row + 1):
                         raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
@@ -1173,17 +1469,56 @@ with tab_inst:
                             continue
                         section = ws.cell(row=r, column=col_map["Section"]).value
                         mtype = ws.cell(row=r, column=col_map["New Meter Type"]).value
-                        parsed.append({
+                        rec = {
                             "date": d, "time": t,
                             "installer_id": str(raw_installer).strip(),
                             "location": str(section).strip() if section else "Unspecified",
                             "meter_type": str(mtype).strip() if mtype else "",
-                        })
+                        }
+                        rec.update(extract_detail_fields(ws, r, detail_optional_map))
+                        parsed.append(rec)
 
                     if not parsed:
                         st.warning("⚠️ No valid rows with a date, time and installer were found in this file.")
                     else:
                         push_parsed_records_to_installations(parsed, source_label="install(s)")
+
+    st.divider()
+    st.markdown('<div class="sec-hdr">🔍 Search By Meter / Service No</div>', unsafe_allow_html=True)
+    st.caption("Search by Old Meter Service No (SNO), New Meter No, or Old Meter No — handy for checking whether a specific SNO was already installed by your team.")
+    search_query = st.text_input("Search SNO / Old Meter No / New Meter No", key="meter_search_box", placeholder="e.g. 1234567890 or meter serial number")
+
+    if search_query.strip():
+        df_search = get_data("UploadedInstallLog")
+        if df_search.empty or not has_col(df_search, "sno", "old_meter_no", "new_meter_no"):
+            st.info("No install records with meter/SNO details on file yet.")
+        else:
+            q = search_query.strip().lower()
+            for col in ["sno", "old_meter_no", "new_meter_no"]:
+                if col not in df_search.columns:
+                    df_search[col] = ""
+            match_mask = (
+                df_search["sno"].str.lower().str.contains(q, na=False) |
+                df_search["old_meter_no"].str.lower().str.contains(q, na=False) |
+                df_search["new_meter_no"].str.lower().str.contains(q, na=False)
+            )
+            results = df_search[match_mask]
+            if results.empty:
+                st.warning(f"⚠️ No matches found for '{search_query.strip()}'.")
+            else:
+                display_cols_map = {
+                    "date": "Date", "installer_id": "Installer LoginID", "location": "Section",
+                    "sno": "SNO", "old_meter_no": "Old Meter No", "new_meter_no": "New Meter No",
+                    "lat": "Latitude", "long": "Longitude",
+                }
+                cols_present = [c for c in display_cols_map if c in results.columns]
+                results_display = results[cols_present].rename(columns=display_cols_map)
+                st.success(f"✅ Found {len(results)} match(es).")
+                st.dataframe(results_display, use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(results_display), max_px=500))
+
+    with st.expander("📤 Upload Legacy/Historical Data"):
+        render_legacy_upload_widget(key_prefix="installs")
 
     st.divider()
     st.markdown('<div class="sec-hdr">➕ Daily Entry (Add Multiple At Once)</div>', unsafe_allow_html=True)
