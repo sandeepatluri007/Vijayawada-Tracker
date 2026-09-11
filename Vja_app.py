@@ -3,24 +3,30 @@ Smart Meter Field Tracker
 =========================
 Backend : streamlit-gsheets-connection  (Google Sheets)
 Theme   : Clean White & Light Greys (Field-Optimized)
-Security: PIN Protected (30-min inactivity auto-lock)
+Security: PIN Protected (stays unlocked until the browser tab is closed)
 
 requirements.txt must include: streamlit, streamlit-gsheets-connection, pandas,
-openpyxl, matplotlib (used for the "Download as Image" table exports and the
-Hourly Count heatmap view). pydeck powers the Map tab's pin map — it ships
-bundled with streamlit, so it normally does not need to be listed separately;
-add it explicitly only if the Map tab errors with a missing-module message.
+openpyxl, matplotlib (used for the "Download as Image" table exports, the
+Hourly Count heatmap view, and the Map's PNG snapshot export). pydeck powers
+the Map tab's pin map — it ships bundled with streamlit, so it normally does
+not need to be listed separately; add it explicitly only if the Map tab
+errors with a missing-module message.
 
 Google Sheet worksheets required (create these tabs in your Sheet, header row only —
 the app creates and appends data automatically):
-  Installations       - date, tech_name, location, qty_1ph, qty_3ph
+  Installations       - date, tech_name, installer_id, location, qty_1ph, qty_3ph
   Inventory            - date, type, qty, mrn, make
   Technicians           - name, phone, aadhar, is_active, login_id
   Locations             - location_name
   UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type,
-                           sno, old_meter_no, new_meter_no, lat, long
+                           sno, old_meter_no, new_meter_no, lat, long, source
   AnalyticsRaw          - key, date, time, installer_id, hour, location, meter_type,
                            sno, old_meter_no, new_meter_no, lat, long
+  MapRecords            - key, date, time, installer_id, tech_name, location, sno,
+                           old_meter_no, new_meter_no, lat, long
+                           (Map tab ONLY — never touches Installations/inventory. Populated
+                           by a one-way mirror from Installs-tab uploads + Analytics pushes,
+                           plus the Map tab's own independent Legacy Data upload.)
 """
 
 import streamlit as st
@@ -802,8 +808,8 @@ def _execute_push(parsed_records, source_label="install(s)"):
     detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
     df_log_existing = get_data("UploadedInstallLog")
     if df_log_existing.empty:
-        df_log_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "tech_name"] + detail_cols)
-    for col in detail_cols:
+        df_log_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "tech_name", "source"] + detail_cols)
+    for col in detail_cols + ["source"]:
         if col not in df_log_existing.columns:
             df_log_existing[col] = ""
 
@@ -844,6 +850,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
             "sno": rec.get("sno") or "", "old_meter_no": rec.get("old_meter_no") or "",
             "new_meter_no": rec.get("new_meter_no") or "",
             "lat": rec.get("lat") or "", "long": rec.get("long") or "",
+            "source": source_label,
         })
         dates_with_new.add(rec["date"])
 
@@ -895,6 +902,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
             }])], ignore_index=True)
 
     if safe_update("Installations", df_inst_existing) and safe_update("UploadedInstallLog", updated_log):
+        mirror_records_to_map(new_log_rows)
         st.success(f"✅ Added {len(new_log_rows)} new {source_label} across {len(dates_with_new)} date(s).")
         if backfilled_count:
             st.info(f"ℹ️ Also filled in missing details for {backfilled_count} existing record(s).")
@@ -907,6 +915,41 @@ def _execute_push(parsed_records, source_label="install(s)"):
         if non_tl_filtered:
             st.warning(f"⚠️ {non_tl_filtered} record(s) with a non-{INSTALLER_ID_PREFIX} installer ID were filtered out and not saved.")
         st.rerun()
+
+
+def mirror_records_to_map(records) -> int:
+    """One-way sync: install data pushed into Installations — via the
+    Installs-tab bulk upload, the Installs-tab Legacy Data upload, or the
+    Analytics 'Update Installs' push — also lands in MapRecords so it shows
+    up on the Map tab. This never runs in the other direction: the Map tab's
+    own Legacy Data upload writes only to MapRecords and never calls this or
+    touches Installations/UploadedInstallLog at all."""
+    if not records:
+        return 0
+    map_cols = ["key", "date", "time", "installer_id", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
+    df_map_existing = get_data("MapRecords")
+    if df_map_existing.empty:
+        df_map_existing = pd.DataFrame(columns=map_cols)
+    for col in map_cols:
+        if col not in df_map_existing.columns:
+            df_map_existing[col] = ""
+    existing_keys = set(df_map_existing["key"].values) if "key" in df_map_existing.columns else set()
+
+    new_map_rows = []
+    for rec in records:
+        key = rec.get("key") or f"{rec.get('date')}||{rec.get('time')}||{rec.get('installer_id')}"
+        if key in existing_keys:
+            continue
+        existing_keys.add(key)
+        row = {col: rec.get(col, "") for col in map_cols}
+        row["key"] = key
+        new_map_rows.append(row)
+
+    if not new_map_rows:
+        return 0
+    updated_map = pd.concat([df_map_existing, pd.DataFrame(new_map_rows)], ignore_index=True)
+    safe_update("MapRecords", updated_map)
+    return len(new_map_rows)
 
 
 def push_parsed_records_to_installations(parsed_records, source_label="install(s)"):
@@ -1009,6 +1052,254 @@ def diagnose_installations_discrepancy():
     return flagged[["date", "tech_name", "location", "Installations Qty", "Upload-Derived Qty", "Implied Manual Qty"]].rename(
         columns={"date": "Date", "tech_name": "Technician", "location": "Location"}
     ).sort_values("Implied Manual Qty", ascending=False)
+
+
+def find_sno_duplicates():
+    """The highest-confidence duplicate signal: the same Consumer No (SNO)
+    appearing more than once in UploadedInstallLog on the SAME date. A given
+    service number shouldn't legitimately get a fresh install twice in one
+    day — this almost always means the same real install was uploaded twice
+    (e.g. once via the regular bulk upload, again via a Legacy Data upload,
+    possibly with a slightly different parsed time producing a different
+    dedup key). Returns a DataFrame with one row per duplicate record,
+    grouped/sorted so each SNO+date cluster sits together, plus a 'Keep?'
+    column pre-set to keep only the earliest time in each cluster."""
+    df_log = get_data("UploadedInstallLog")
+    if df_log.empty or not has_col(df_log, "sno", "date", "time", "key"):
+        return pd.DataFrame()
+
+    sno_df = df_log[df_log["sno"].astype(str).str.strip() != ""].copy()
+    if sno_df.empty:
+        return pd.DataFrame()
+
+    dup_mask = sno_df.duplicated(subset=["sno", "date"], keep=False)
+    dups = sno_df[dup_mask].sort_values(["sno", "date", "time"]).copy()
+    if dups.empty:
+        return pd.DataFrame()
+
+    # Default: keep the earliest record in each SNO+date cluster, flag the rest for removal.
+    dups["Keep?"] = ~dups.duplicated(subset=["sno", "date"], keep="first")
+    cols = ["key", "sno", "date", "time", "tech_name", "location", "meter_type", "old_meter_no", "new_meter_no", "Keep?"]
+    cols = [c for c in cols if c in dups.columns]
+    return dups[cols].rename(columns={
+        "key": "Key", "sno": "SNO", "date": "Date", "time": "Time", "tech_name": "Technician",
+        "location": "Location", "meter_type": "Meter Type", "old_meter_no": "Old Meter No", "new_meter_no": "New Meter No",
+    })
+
+
+def find_near_time_duplicates(threshold_seconds: int = 120):
+    """Lower-confidence signal: the same installer with two records on the
+    same date whose times are within threshold_seconds of each other —
+    can indicate the same real install parsed twice with slightly different
+    time precision (no SNO to cross-check against). For manual review only —
+    no default selection, since two genuinely fast back-to-back installs by
+    the same installer are also possible."""
+    df_log = get_data("UploadedInstallLog")
+    if df_log.empty or not has_col(df_log, "installer_id", "date", "time", "key"):
+        return pd.DataFrame()
+
+    flagged_idx = set()
+    for (_inst, _d), g in df_log.groupby(["installer_id", "date"]):
+        g = g.sort_values("time")
+        try:
+            secs = g["time"].apply(time_to_minutes) * 60
+        except Exception:
+            continue
+        idx_list = g.index.tolist()
+        vals = secs.tolist()
+        for i in range(1, len(vals)):
+            if (vals[i] - vals[i - 1]) < threshold_seconds:
+                flagged_idx.add(idx_list[i - 1])
+                flagged_idx.add(idx_list[i])
+
+    if not flagged_idx:
+        return pd.DataFrame()
+    near = df_log.loc[sorted(flagged_idx)].sort_values(["installer_id", "date", "time"]).copy()
+    near["Keep?"] = True  # no default removal suggestion — pure review
+    cols = ["key", "installer_id", "tech_name", "date", "time", "location", "sno", "meter_type", "Keep?"]
+    cols = [c for c in cols if c in near.columns]
+    return near[cols].rename(columns={
+        "key": "Key", "installer_id": "Installer LoginID", "tech_name": "Technician", "date": "Date",
+        "time": "Time", "location": "Location", "sno": "SNO", "meter_type": "Meter Type",
+    })
+
+
+def find_matching_log_keys_from_file(uploaded_file):
+    """Parses an uploaded file the same way as the bulk/legacy uploaders and
+    returns the set of date+time+installer keys it would generate. Re-uploading
+    the exact same file that was previously used (e.g. via the old Map-tab
+    legacy upload, before that was decoupled from Installations) lets us
+    identify precisely which existing UploadedInstallLog rows came from that
+    specific upload, since key generation is fully deterministic from the
+    file's contents. Returns None if the file's headers can't be parsed."""
+    try:
+        ws = load_first_data_sheet(uploaded_file)
+    except Exception:
+        return None
+    header_row, col_map = find_header_row(ws, INSTALL_BULK_REQUIRED_HEADERS)
+    if header_row is None:
+        return None
+    keys = set()
+    for r in range(header_row + 1, ws.max_row + 1):
+        raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
+        if raw_installer is None or str(raw_installer).strip() == "":
+            continue
+        if not is_valid_installer_id(raw_installer):
+            continue
+        d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
+        t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
+        if d is None or t is None:
+            continue
+        keys.add(f"{d}||{t}||{str(raw_installer).strip()}")
+    return keys
+
+
+def remove_install_log_rows(keys_to_remove) -> int:
+    """Removes specific rows (by their 'key') from UploadedInstallLog and
+    correctly reverses their 1PH/3PH counts back out of the Installations
+    sheet, dropping any Installations row that lands at zero/zero. Returns
+    the number of rows removed."""
+    keys_to_remove = set(keys_to_remove)
+    if not keys_to_remove:
+        return 0
+    df_log = get_data("UploadedInstallLog")
+    if df_log.empty or "key" not in df_log.columns:
+        return 0
+
+    is_target = df_log["key"].isin(keys_to_remove)
+    removed_rows = df_log[is_target].copy()
+    removed_count = len(removed_rows)
+    if removed_count == 0:
+        return 0
+
+    df_inst = get_data("Installations")
+    if not df_inst.empty and has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
+        for col in ["qty_1ph", "qty_3ph"]:
+            df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
+        removed_rows["is_1ph"] = removed_rows.get("meter_type", "").astype(str).str.contains("1", na=False)
+        removed_rows["is_3ph"] = removed_rows.get("meter_type", "").astype(str).str.contains("3", na=False)
+        agg = removed_rows.groupby(["date", "tech_name", "location"]).agg(
+            d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
+        ).reset_index()
+        for _, arow in agg.iterrows():
+            mask = (df_inst["date"] == arow["date"]) & (df_inst["tech_name"] == arow["tech_name"]) & (df_inst["location"] == arow["location"])
+            if mask.any():
+                df_inst.loc[mask, "qty_1ph"] = (df_inst.loc[mask, "qty_1ph"] - int(arow["d_1ph"])).clip(lower=0)
+                df_inst.loc[mask, "qty_3ph"] = (df_inst.loc[mask, "qty_3ph"] - int(arow["d_3ph"])).clip(lower=0)
+        df_inst = df_inst[~((df_inst["qty_1ph"] == 0) & (df_inst["qty_3ph"] == 0))].reset_index(drop=True)
+        safe_update("Installations", df_inst)
+
+    df_log_clean = df_log[~is_target].reset_index(drop=True)
+    safe_update("UploadedInstallLog", df_log_clean)
+    return removed_count
+
+
+def find_map_duplicates():
+    """Same-SNO-same-date duplicate check, scoped entirely to MapRecords
+    (the Map tab's own independent data — never cross-checked against
+    UploadedInstallLog/Installations)."""
+    df_map = get_data("MapRecords")
+    if df_map.empty or not has_col(df_map, "sno", "date", "time"):
+        return pd.DataFrame()
+    sno_df = df_map[df_map["sno"].astype(str).str.strip() != ""].copy()
+    if sno_df.empty:
+        return pd.DataFrame()
+    dup_mask = sno_df.duplicated(subset=["sno", "date"], keep=False)
+    dups = sno_df[dup_mask].sort_values(["sno", "date", "time"]).copy()
+    if dups.empty:
+        return pd.DataFrame()
+    dups["Keep?"] = ~dups.duplicated(subset=["sno", "date"], keep="first")
+    cols = ["key", "sno", "date", "time", "tech_name", "location", "old_meter_no", "new_meter_no", "Keep?"]
+    cols = [c for c in cols if c in dups.columns]
+    return dups[cols].rename(columns={
+        "key": "Key", "sno": "SNO", "date": "Date", "time": "Time", "tech_name": "Technician",
+        "location": "Location", "old_meter_no": "Old Meter No", "new_meter_no": "New Meter No",
+    })
+
+
+def remove_map_records(keys_to_remove) -> int:
+    """Removes specific rows (by 'key') from MapRecords only. No
+    Installations/UploadedInstallLog reversal needed — Map's own data never
+    touches inventory counts."""
+    keys_to_remove = set(keys_to_remove)
+    if not keys_to_remove:
+        return 0
+    df_map = get_data("MapRecords")
+    if df_map.empty or "key" not in df_map.columns:
+        return 0
+    is_target = df_map["key"].isin(keys_to_remove)
+    removed = int(is_target.sum())
+    if removed == 0:
+        return 0
+    safe_update("MapRecords", df_map[~is_target].reset_index(drop=True))
+    return removed
+
+
+def render_map_legacy_upload_widget():
+    """Uploads legacy/historical data for the Map tab ONLY. Writes exclusively
+    to MapRecords and never touches Installations or UploadedInstallLog — this
+    is the fix for the earlier bug where Map-tab legacy uploads were merging
+    into inventory counts. Dedupes within MapRecords by date+time+installer,
+    then flags same-SNO-same-date duplicates for review."""
+    st.markdown("""
+    <div class="info-box">
+    📍 For map-only historical location data. This does <b>not</b> affect Installations,
+    inventory, or any counts elsewhere in the app — it only adds pins here. Same file format
+    as the Installs tab's bulk upload. Checked for duplicates against what's already on the map.
+    </div>
+    """, unsafe_allow_html=True)
+    legacy_file = st.file_uploader("Upload Legacy/Historical Excel (.xlsx) — Map Only", type=["xlsx"], key="map_legacy_uploader")
+    if legacy_file is not None:
+        if st.button("📥 Process Legacy Data (Map Only)", type="primary", use_container_width=True, key="map_legacy_process_btn"):
+            try:
+                ws = load_first_data_sheet(legacy_file)
+            except Exception as e:
+                st.error(f"❌ Could not open the file: {e}")
+                ws = None
+
+            if ws is not None:
+                header_row, col_map = find_header_row(ws, INSTALL_BULK_REQUIRED_HEADERS)
+                if header_row is None:
+                    st.error("❌ Could not find 'Installation Date', 'Installation Time', 'Installer LoginID', 'Section' and 'New Meter Type' columns in this file.")
+                else:
+                    detail_optional_map = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
+                    parsed = []
+                    skipped_non_tl = 0
+                    for r in range(header_row + 1, ws.max_row + 1):
+                        raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
+                        if raw_installer is None or str(raw_installer).strip() == "":
+                            continue
+                        if not is_valid_installer_id(raw_installer):
+                            skipped_non_tl += 1
+                            continue
+                        d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
+                        t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
+                        if d is None or t is None:
+                            continue
+                        section = ws.cell(row=r, column=col_map["Section"]).value
+                        rec = {
+                            "date": d, "time": t,
+                            "installer_id": str(raw_installer).strip(),
+                            "location": str(section).strip() if section else "Unspecified",
+                        }
+                        rec.update(extract_detail_fields(ws, r, detail_optional_map))
+                        rec["tech_name"] = tech_login_lookup.get(rec["installer_id"].lower(), rec["installer_id"])
+                        parsed.append(rec)
+
+                    if not parsed:
+                        st.warning(f"⚠️ No valid {INSTALLER_ID_PREFIX} installer rows with a date and time were found in this file.")
+                    else:
+                        if skipped_non_tl:
+                            st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
+                        added = mirror_records_to_map(parsed)
+                        if added == 0:
+                            st.error("❌ All records in this file are already on the map. Nothing new to add.")
+                        else:
+                            st.success(f"✅ Added {added} new record(s) to the Map. Installations and inventory counts were not affected.")
+                            dup_check = find_map_duplicates()
+                            if not dup_check.empty:
+                                st.warning(f"⚠️ {dup_check['SNO'].nunique()} SNO(s) now have more than one record on the same date in Map data. Review under Map tab \u2192 Data Maintenance if you want to remove any.")
+                            st.rerun()
 
 
 def cleanup_non_tl_records():
@@ -1369,6 +1660,12 @@ with tab_analytics:
                         rec.update(extract_detail_fields(ws, r, optional_map))
                         parsed_records.append(rec)
 
+                    # New/unrecognized Installer LoginIDs — flagged immediately so the
+                    # supervisor can add them in Admin without waiting to push to Installs.
+                    unknown_logins = sorted({rec["installer_id"] for rec in parsed_records if rec["installer_id"].lower() not in tech_login_lookup})
+                    if unknown_logins:
+                        st.warning(f"⚠️ New/unrecognized Installer LoginID(s) found: {', '.join(unknown_logins)}. Add a technician with this Login ID in Admin \u2192 Technicians so their name maps correctly.")
+
                     if not parsed_records:
                         st.warning("⚠️ No valid TL_ installer rows with a date and time were found in this file.")
                     else:
@@ -1585,15 +1882,17 @@ with tab_analytics:
 with tab_map:
     st.markdown("""
     <div class="info-box">
-    🗺️ Every install pushed from the Installs tab's bulk upload, from Analytics, or from a
-    Legacy Data upload lands here as a pin (when the source file included latitude/longitude).
+    🗺️ Install data pushed via the Installs tab's bulk upload, the Installs tab's Legacy Data
+    upload, or Analytics's "Update Installs" all mirror here automatically as pins. The Map
+    tab's own Legacy Data upload below is separate — it adds pins here only and never affects
+    Installations, inventory, or any counts elsewhere in the app.
     </div>
     """, unsafe_allow_html=True)
 
-    df_map_raw = get_data("UploadedInstallLog")
+    df_map_raw = get_data("MapRecords")
 
     if df_map_raw.empty or not has_col(df_map_raw, "date", "lat", "long"):
-        st.info("No install records with location data yet. Upload installs via the Installs tab, Analytics, or the Legacy Data uploader below.")
+        st.info("No records with location data yet. Upload installs via the Installs tab or Analytics, or use the Legacy Data uploader below.")
     else:
         df_map = df_map_raw.copy()
         df_map["_date"] = pd.to_datetime(df_map["date"], errors="coerce").dt.date
@@ -1707,8 +2006,24 @@ with tab_map:
                              height=dataframe_height(len(pinned), max_px=500))
 
     st.divider()
-    with st.expander("📤 Upload Legacy/Historical Data"):
-        render_legacy_upload_widget(key_prefix="map")
+    with st.expander("📤 Upload Legacy/Historical Data (Map Only — does not affect Installations)"):
+        render_map_legacy_upload_widget()
+
+    st.divider()
+    st.markdown('<div class="sec-hdr">🧹 Map Data Maintenance</div>', unsafe_allow_html=True)
+    with st.expander("🔎 Check & Remove Duplicate Map Records"):
+        st.caption("Scoped entirely to Map data — never touches Installations/inventory.")
+        map_dups = find_map_duplicates()
+        if map_dups.empty:
+            st.success("✅ No same-SNO-same-date duplicates found in Map data.")
+        else:
+            st.warning(f"⚠️ Found {len(map_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
+            edited_map_dups = st.data_editor(map_dups, use_container_width=True, hide_index=True, key="map_dups_editor", disabled=[c for c in map_dups.columns if c != "Keep?"])
+            to_remove = edited_map_dups[~edited_map_dups["Keep?"]]["Key"].tolist()
+            if st.button(f"🗑️ Remove {len(to_remove)} Unchecked Record(s)", type="primary", use_container_width=True, disabled=not to_remove, key="remove_map_dups_btn"):
+                removed = remove_map_records(to_remove)
+                st.success(f"✅ Removed {removed} duplicate record(s) from the Map.")
+                st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  INSTALLS
@@ -2509,3 +2824,74 @@ with tab_admin:
                 st.caption("'Implied Manual Qty' is the portion NOT explained by uploads — likely the manually-entered amount, which may be duplicating the uploaded records.")
                 csv_data = flagged.to_csv(index=False).encode("utf-8")
                 st.download_button("📥 Download This Report", data=csv_data, file_name="installations_discrepancy_report.csv", mime="text/csv", use_container_width=True)
+
+    with st.expander("↩️ Undo A Previous Upload"):
+        st.markdown("""
+        <div class="info-box">
+        Re-upload the exact same Excel file you used for a previous upload (e.g. the file you
+        once used in the Map tab's legacy uploader, before that was separated from Installations).
+        Since each record's key is generated the same way every time from the file's contents,
+        this finds exactly which of those records are still sitting in Installs data — then lets
+        you remove precisely those, correctly reversing their 1PH/3PH counts.
+        </div>
+        """, unsafe_allow_html=True)
+        undo_pin = st.text_input("Enter PIN to unlock", type="password", key="undo_pin")
+        if undo_pin == PIN_CODE:
+            undo_file = st.file_uploader("Re-upload the file to undo", type=["xlsx"], key="undo_uploader")
+            if undo_file is not None:
+                if st.button("🔍 Find Matching Records In Installs Data", use_container_width=True, key="undo_find_btn"):
+                    file_keys = find_matching_log_keys_from_file(undo_file)
+                    if file_keys is None:
+                        st.error("❌ Could not read this file's columns — make sure it's the same export format.")
+                    elif not file_keys:
+                        st.warning("⚠️ No valid records found in this file.")
+                    else:
+                        df_log_undo = get_data("UploadedInstallLog")
+                        if df_log_undo.empty or "key" not in df_log_undo.columns:
+                            st.info("No Installs data on file at all — nothing to undo.")
+                        else:
+                            matching = df_log_undo[df_log_undo["key"].isin(file_keys)]
+                            if matching.empty:
+                                st.info("None of this file's records currently exist in Installs data — they may already have been removed, or this file was never merged in.")
+                            else:
+                                st.session_state["pending_undo_keys"] = set(matching["key"].values)
+                                st.warning(f"⚠️ Found {len(matching)} record(s) from this file still in Installs data.")
+                                st.dataframe(matching, use_container_width=True, hide_index=True, height=dataframe_height(len(matching)))
+            if "pending_undo_keys" in st.session_state:
+                if st.button(f"🗑️ Remove These {len(st.session_state['pending_undo_keys'])} Record(s) & Reverse Counts", type="primary", use_container_width=True, key="undo_remove_btn"):
+                    removed = remove_install_log_rows(st.session_state["pending_undo_keys"])
+                    st.success(f"✅ Removed {removed} record(s) and corrected Installations totals.")
+                    del st.session_state["pending_undo_keys"]
+                    st.rerun()
+        elif undo_pin:
+            st.error("❌ Incorrect PIN.")
+
+    with st.expander("🔁 Find & Remove Duplicate Installs (SNO-based)"):
+        st.markdown("""
+        <div class="info-box">
+        The same Consumer No (SNO) appearing more than once in Installs data on the SAME date
+        is a strong sign the same real install was uploaded twice. This is scoped to Installs
+        data — for Map-only duplicates, use the Map tab's own Data Maintenance section.
+        </div>
+        """, unsafe_allow_html=True)
+        sno_dups = find_sno_duplicates()
+        if sno_dups.empty:
+            st.success("✅ No same-SNO-same-date duplicates found in Installs data.")
+        else:
+            st.warning(f"⚠️ Found {len(sno_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
+            edited_sno_dups = st.data_editor(sno_dups, use_container_width=True, hide_index=True, key="sno_dups_editor", disabled=[c for c in sno_dups.columns if c != "Keep?"])
+            dup_pin = st.text_input("Enter PIN to unlock removal", type="password", key="sno_dup_pin")
+            if dup_pin == PIN_CODE:
+                to_remove_sno = edited_sno_dups[~edited_sno_dups["Keep?"]]["Key"].tolist()
+                if st.button(f"🗑️ Remove {len(to_remove_sno)} Unchecked Record(s) & Reverse Counts", type="primary", use_container_width=True, disabled=not to_remove_sno, key="remove_sno_dups_btn"):
+                    removed = remove_install_log_rows(to_remove_sno)
+                    st.success(f"✅ Removed {removed} duplicate record(s) and corrected Installations totals.")
+                    st.rerun()
+            elif dup_pin:
+                st.error("❌ Incorrect PIN.")
+
+        near_dups = find_near_time_duplicates()
+        if not near_dups.empty:
+            st.markdown('<div class="sub-hdr">⏱️ Lower-Confidence: Same Installer, Times Within 2 Minutes</div>', unsafe_allow_html=True)
+            st.caption("No SNO to cross-check, or same SNO not required for this check — review carefully, back-to-back installs can be genuine.")
+            st.dataframe(near_dups, use_container_width=True, hide_index=True, height=dataframe_height(len(near_dups)))
