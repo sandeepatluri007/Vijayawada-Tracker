@@ -37,6 +37,7 @@ import urllib.parse
 import math
 import time
 import io
+import hashlib
 import openpyxl
 import matplotlib
 matplotlib.use("Agg")
@@ -52,7 +53,15 @@ st.set_page_config(
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 PIN_CODE = "1323"
-READ_TTL = 30  # seconds — cuts down on redundant Sheets reads
+# A stable per-PIN token, remembered in the browser (localStorage) after a
+# successful login, so Streamlit Community Cloud's app-sleep / session-reset
+# behavior doesn't force a fresh PIN entry on a device that already unlocked
+# it — this trades a little security for not re-typing the PIN constantly.
+# Change PIN_CODE any time to invalidate every remembered browser at once.
+REMEMBER_TOKEN = hashlib.sha256((PIN_CODE + "vja-remember-v1").encode()).hexdigest()[:20]
+READ_TTL = 90  # seconds — cuts down on redundant Sheets reads (raised from 30s: the app now
+# reads 7 worksheets across multiple tabs/tools, and a low TTL meant far more real Google
+# Sheets API calls than needed, which is the main driver of "connection drop" messages)
 HALF_DAY_CUTOFF = "13:30:00"  # H1 = first install .. 13:30, H2 = 13:30 .. last install
 
 # ── Conditional formatting thresholds ────────────────────────────────────────
@@ -526,23 +535,53 @@ with head_col2:
 
 st.write("")
 
-# ── Authentication / PIN Protection (persists until the app/tab is closed) ──
-# st.session_state lives only for the current browser session — closing the
-# tab (or the app losing its connection) destroys it, so a fresh visit always
-# needs the PIN again. There is no inactivity timeout: once unlocked, it
-# stays unlocked for as long as this browser tab stays open.
+# ── Authentication / PIN Protection (persists until the app/tab is closed, ──
+# and now also survives a Streamlit Community Cloud app-sleep / session reset
+# via a "remembered browser" token — see REMEMBER_TOKEN above) ─────────────
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
+# 1) Same-run restore: the URL already carries a valid remember token
+#    (set right after a previous login on this browser).
+if not st.session_state["authenticated"] and st.query_params.get("k") == REMEMBER_TOKEN:
+    st.session_state["authenticated"] = True
+
 if not st.session_state["authenticated"]:
+    # 2) Cross-visit restore: check this browser's localStorage for a saved
+    #    token and, if found, reload the page with it appended to the URL —
+    #    covers a fresh app-sleep wake-up, a bookmarked/home-screen open, or
+    #    any other visit that dropped the query param.
+    st.components.v1.html("""
+    <script>
+    (function() {
+        try {
+            const params = new URLSearchParams(window.parent.location.search);
+            if (!params.has('k')) {
+                const saved = window.parent.localStorage.getItem('vja_remember_token');
+                if (saved) {
+                    params.set('k', saved);
+                    window.parent.location.search = params.toString();
+                }
+            }
+        } catch (e) {}
+    })();
+    </script>
+    """, height=0)
+
     st.markdown('<div class="sec-hdr">🔒 Supervisor Login</div>', unsafe_allow_html=True)
     with st.form("login_form"):
-        st.info("Please enter the daily operations PIN to access the system. You'll stay logged in until you close this tab.")
+        st.info("Please enter the daily operations PIN to access the system. This browser will stay unlocked going forward.")
         pin_entry = st.text_input("Enter PIN", type="password")
         login_btn = st.form_submit_button("Unlock Tracker", type="primary")
         if login_btn:
             if pin_entry == PIN_CODE:
                 st.session_state["authenticated"] = True
+                st.query_params["k"] = REMEMBER_TOKEN
+                st.components.v1.html(f"""
+                <script>
+                try {{ window.parent.localStorage.setItem('vja_remember_token', '{REMEMBER_TOKEN}'); }} catch (e) {{}}
+                </script>
+                """, height=0)
                 st.success("Access Granted!")
                 st.rerun()
             else:
@@ -559,20 +598,20 @@ except Exception as e:
     st.stop()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def get_data(worksheet: str, retries: int = 3) -> pd.DataFrame:
+def get_data(worksheet: str, retries: int = 5) -> pd.DataFrame:
     for attempt in range(retries):
         try:
             df = conn.read(worksheet=worksheet, ttl=READ_TTL)
             return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
         except Exception:
             if attempt < retries - 1:
-                time.sleep(1)
+                time.sleep(min(2 ** attempt, 8))  # 1s, 2s, 4s, 8s — rides out brief rate-limit/network blips
             else:
                 st.toast(f"📡 Connection drop loading {worksheet}...", icon="⚠️")
                 return pd.DataFrame()
 
 
-def safe_update(worksheet: str, data: pd.DataFrame, retries: int = 3) -> bool:
+def safe_update(worksheet: str, data: pd.DataFrame, retries: int = 5) -> bool:
     """Write to Sheets with retries so a dropped connection doesn't lose the entry.
     On repeated failure, the data the user entered is NOT cleared — they can just retry."""
     for attempt in range(retries):
@@ -583,7 +622,7 @@ def safe_update(worksheet: str, data: pd.DataFrame, retries: int = 3) -> bool:
             return True
         except Exception as e:
             if attempt < retries - 1:
-                time.sleep(1.5)
+                time.sleep(min(2 ** attempt, 8))
             else:
                 st.error(f"⚠️ Save failed after several attempts ({e}). Your entries are still in the form — please tap Save again once you have signal.")
                 return False
@@ -2497,6 +2536,18 @@ with tab_inv:
 #  ADMIN
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_admin:
+    if st.button("🔓 Log Out This Browser", use_container_width=True, key="logout_btn"):
+        st.session_state["authenticated"] = False
+        if "k" in st.query_params:
+            del st.query_params["k"]
+        st.components.v1.html("""
+        <script>
+        try { window.parent.localStorage.removeItem('vja_remember_token'); } catch (e) {}
+        </script>
+        """, height=0)
+        st.rerun()
+    st.caption("Forgets this browser only — other devices that were remembered stay unlocked until they also log out (or you change the PIN, which invalidates every remembered browser at once).")
+
     st.markdown("""
     <div class="warn-box" style="background:#f8f9fa;border-color:#cbd5e1;color:#475569;">
     💡 <b>Tip:</b> Add one or several at once below, review them as cards, then Save Batch.
