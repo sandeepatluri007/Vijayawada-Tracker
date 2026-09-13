@@ -63,6 +63,7 @@ READ_TTL = 90  # seconds — cuts down on redundant Sheets reads (raised from 30
 # reads 7 worksheets across multiple tabs/tools, and a low TTL meant far more real Google
 # Sheets API calls than needed, which is the main driver of "connection drop" messages)
 HALF_DAY_CUTOFF = "13:30:00"  # H1 = first install .. 13:30, H2 = 13:30 .. last install
+FORECAST_DAY_END = "18:00:00"  # assumed end-of-workday for the forecasted-total projection
 
 # ── Conditional formatting thresholds ────────────────────────────────────────
 # Mirrors the colour rules used in the LoginID_Summary sheet of the MDM export.
@@ -214,22 +215,34 @@ def build_single_col_color_grid(df: pd.DataFrame, col_name: str, color_func):
 
 def dataframe_to_png_bytes(df: pd.DataFrame, color_grid=None, title: str = None) -> bytes:
     """Renders a DataFrame (optionally with a matching (bg,font) colour grid)
-    as a PNG, so tables can be shared as an image (e.g. over WhatsApp)."""
+    as a PNG, so tables can be shared as an image (e.g. over WhatsApp).
+    "Fit to screen": the canvas is capped at MAX_FIG_W x MAX_FIG_H instead of
+    growing without bound for large tables — beyond that cap, font size and
+    row height shrink to still fit everything on one canvas, so the image
+    doesn't need pinch-zooming or scrolling to view on a phone."""
     import matplotlib.pyplot as plt
 
+    MAX_FIG_W, MAX_FIG_H = 9.0, 13.0
+
     n_rows, n_cols = df.shape
-    fig_w = max(6.0, n_cols * 1.35)
-    fig_h = max(2.0, (n_rows + 2) * 0.42)
+    title_lines = title.count("\n") + 1 if title else 0
+    raw_w = max(6.0, n_cols * 1.35)
+    raw_h = max(2.0, (n_rows + 2) * 0.42) + title_lines * 0.35
+
+    fig_w = min(raw_w, MAX_FIG_W)
+    fig_h = min(raw_h, MAX_FIG_H)
+    shrink = min(fig_w / raw_w, fig_h / raw_h, 1.0)
+
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     ax.axis("off")
     if title:
-        ax.set_title(title, fontsize=13, fontweight="bold", loc="left", pad=14)
+        ax.set_title(title, fontsize=max(9, round(13 * shrink)), fontweight="bold", loc="left", pad=14)
 
     cell_text = df.astype(str).values
     tbl = ax.table(cellText=cell_text, colLabels=list(df.columns), cellLoc="center", loc="center")
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(10)
-    tbl.scale(1, 1.7)
+    tbl.set_fontsize(max(6, round(10 * shrink)))
+    tbl.scale(1, max(1.1, 1.7 * shrink))
     tbl.auto_set_column_width(col=list(range(n_cols)))
 
     for j in range(n_cols):
@@ -789,6 +802,48 @@ def load_first_data_sheet(uploaded_file):
 def time_to_minutes(hhmmss: str) -> float:
     h, m, s = hhmmss.split(":")
     return int(h) * 60 + int(m) + int(s) / 60.0
+
+
+def forecast_total_installs(day_df: pd.DataFrame, installers: list, day_end_str: str = FORECAST_DAY_END):
+    """Projects the team's likely total installs by day-end, from each active
+    installer's own pace (avg minutes/install so far, using the same
+    span/count formula as the Average Install Time table) applied to the
+    time remaining until day_end_str. An installer with only 1 install today
+    has no observed pace of their own — falls back to the team's average
+    pace across installers who do have >=2 installs. If NO installer has
+    >=2 installs yet, there's no pace to extrapolate from at all, and this
+    returns None (caller should show "not enough data yet" instead of a
+    fabricated number). Returns a rounded int total otherwise."""
+    day_end_min = time_to_minutes(day_end_str)
+
+    per_installer = []  # (count, own_pace_or_None, last_install_minutes)
+    paces = []
+    for inst in installers:
+        sub = day_df[day_df["installer_id"] == inst].sort_values("time")
+        n = len(sub)
+        first_t, last_t = sub["time"].iloc[0], sub["time"].iloc[-1]
+        last_min = time_to_minutes(last_t)
+        own_pace = None
+        if n >= 2:
+            span_min = time_to_minutes(last_t) - time_to_minutes(first_t)
+            own_pace = span_min / n  # same formula as the Avg Install Time table
+            if own_pace > 0:
+                paces.append(own_pace)
+        per_installer.append((n, own_pace, last_min))
+
+    if not paces:
+        return None  # nobody has an established pace yet — too early to project
+
+    team_avg_pace = sum(paces) / len(paces)
+
+    total_forecast = 0.0
+    for n, own_pace, last_min in per_installer:
+        pace = own_pace if own_pace else team_avg_pace
+        remaining_min = max(0.0, day_end_min - last_min)
+        projected_additional = (remaining_min / pace) if pace > 0 else 0.0
+        total_forecast += n + projected_additional
+
+    return round(total_forecast)
 
 
 # ── Shared data fetched once per run (avoids repeat reads across tabs) ──────
@@ -1854,11 +1909,18 @@ with tab_analytics:
         installers = sorted(day_df["installer_id"].unique())
 
         st.markdown('<div class="sec-hdr">📌 Today At A Glance</div>', unsafe_allow_html=True)
-        g1, g2, g3 = st.columns(3)
+        forecast_total = forecast_total_installs(day_df, installers) if installers else None
+        g1, g2, g3, g4 = st.columns(4)
         with g1:
             render_colored_metric("Total Installs", len(day_df), GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
         g2.metric("Active Installers", len(installers))
         g3.metric("Avg / Installer", round(len(day_df) / len(installers), 1) if installers else 0)
+        with g4:
+            if forecast_total is not None:
+                render_colored_metric("Forecasted Total", forecast_total, GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
+            else:
+                st.metric("Forecasted Total", "—")
+        st.caption(f"Forecast projects each installer's own pace so far forward to {FORECAST_DAY_END[:5]} — based on the last uploaded data, not live time. Needs at least one installer with 2+ installs today to estimate a pace.")
 
         # -- Hourly table --------------------------------------------------
         st.markdown('<div class="sec-hdr">⏱️ Installer-Wise Hourly Count</div>', unsafe_allow_html=True)
@@ -1893,10 +1955,15 @@ with tab_analytics:
         else:
             render_hourly_heatmap(hourly_df, hour_col_labels, build_hourly_color_grid(hourly_df, hour_col_labels))
         st.caption("🟩 Green = strong count · 🟨 Yellow = mid-range · 🟥 Red = below target — thresholds set in the code's Conditional formatting section.")
+        glance_line = (
+            f"Total: {len(day_df)}  |  Active Installers: {len(installers)}  |  "
+            f"Avg/Installer: {round(len(day_df) / len(installers), 1) if installers else 0}  |  "
+            f"Forecasted Total: {forecast_total if forecast_total is not None else 'N/A'}"
+        )
         download_image_button(
             hourly_df, f"Hourly_Count_{sel_date}.png", key="dl_img_hourly",
             color_grid=build_hourly_color_grid(hourly_df, hour_col_labels),
-            title=f"Installer-Wise Hourly Count — {sel_date}",
+            title=f"Installer-Wise Hourly Count — {sel_date}\n{glance_line}",
         )
 
         # -- Half-day split --------------------------------------------------
