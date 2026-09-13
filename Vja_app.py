@@ -804,17 +804,58 @@ def time_to_minutes(hhmmss: str) -> float:
     return int(h) * 60 + int(m) + int(s) / 60.0
 
 
+TREND_WINDOW_HOURS = 1      # how many of the most-recent hours count as "recent" for the trend signal
+TREND_MIN_SAMPLE = 5        # minimum team-wide installs in that window before trusting it
+TREND_CLAMP_MIN, TREND_CLAMP_MAX = 0.5, 1.5  # caps how much one hot/slow spell can swing the forecast
+
+
+def compute_team_trend_multiplier(day_df: pd.DataFrame) -> float:
+    """Team-wide momentum signal: installs/hour across ALL active installers
+    in the last TREND_WINDOW_HOURS hours of activity, compared against the
+    team's own average installs/hour for the day so far. Below 1.0 means the
+    team has slowed down recently vs. its own day average; above 1.0 means
+    it's sped up. Requires at least TREND_MIN_SAMPLE team-wide installs in
+    the recent window to trust it (otherwise returns 1.0 — no adjustment,
+    too little data to read a trend from) and clamps to
+    [TREND_CLAMP_MIN, TREND_CLAMP_MAX] so one unusually slow or fast hour
+    can't swing the whole day's forecast on its own."""
+    valid = day_df.dropna(subset=["hour_int"])
+    if valid.empty:
+        return 1.0
+    active_hours = sorted(valid["hour_int"].unique())
+    if len(active_hours) < 2:
+        return 1.0  # not enough distinct hours yet to compare "recent" vs "day so far"
+
+    day_avg_rate = len(valid) / len(active_hours)
+    if day_avg_rate <= 0:
+        return 1.0
+
+    recent_hours = active_hours[-TREND_WINDOW_HOURS:]
+    recent_count = len(valid[valid["hour_int"].isin(recent_hours)])
+    if recent_count < TREND_MIN_SAMPLE:
+        return 1.0  # too few recent installs team-wide to trust a trend read
+
+    recent_rate = recent_count / len(recent_hours)
+    multiplier = recent_rate / day_avg_rate
+    return max(TREND_CLAMP_MIN, min(TREND_CLAMP_MAX, multiplier))
+
+
 def forecast_total_installs(day_df: pd.DataFrame, installers: list, day_end_str: str = FORECAST_DAY_END):
-    """Projects the team's likely total installs by day-end, from each active
-    installer's own pace (avg minutes/install so far, using the same
-    span/count formula as the Average Install Time table) applied to the
-    time remaining until day_end_str. An installer with only 1 install today
-    has no observed pace of their own — falls back to the team's average
-    pace across installers who do have >=2 installs. If NO installer has
+    """Projects the team's likely total installs by day-end. Combines two
+    signals: each active installer's own pace (avg minutes/install so far,
+    same span/count formula as the Average Install Time table) as the
+    baseline, adjusted by a team-wide trend multiplier (see
+    compute_team_trend_multiplier) that reflects whether the WHOLE team has
+    recently sped up or slowed down vs. its own day average — catching
+    systemic shifts (post-lunch dip, a hard section, weather) that one
+    installer's own history alone wouldn't show. An installer with only 1
+    install today has no pace of their own — falls back to the team's
+    average pace across installers with >=2 installs. If NO installer has
     >=2 installs yet, there's no pace to extrapolate from at all, and this
-    returns None (caller should show "not enough data yet" instead of a
-    fabricated number). Returns a rounded int total otherwise."""
+    returns (None, 1.0) — caller should show "not enough data yet" rather
+    than a fabricated number. Returns (rounded_total, trend_multiplier)."""
     day_end_min = time_to_minutes(day_end_str)
+    trend_multiplier = compute_team_trend_multiplier(day_df)
 
     per_installer = []  # (count, own_pace_or_None, last_install_minutes)
     paces = []
@@ -832,18 +873,19 @@ def forecast_total_installs(day_df: pd.DataFrame, installers: list, day_end_str:
         per_installer.append((n, own_pace, last_min))
 
     if not paces:
-        return None  # nobody has an established pace yet — too early to project
+        return None, 1.0  # nobody has an established pace yet — too early to project
 
     team_avg_pace = sum(paces) / len(paces)
 
     total_forecast = 0.0
     for n, own_pace, last_min in per_installer:
-        pace = own_pace if own_pace else team_avg_pace
+        base_pace = own_pace if own_pace else team_avg_pace
+        adjusted_pace = base_pace / trend_multiplier  # slower team trend -> more minutes/install -> fewer projected
         remaining_min = max(0.0, day_end_min - last_min)
-        projected_additional = (remaining_min / pace) if pace > 0 else 0.0
+        projected_additional = (remaining_min / adjusted_pace) if adjusted_pace > 0 else 0.0
         total_forecast += n + projected_additional
 
-    return round(total_forecast)
+    return round(total_forecast), trend_multiplier
 
 
 # ── Shared data fetched once per run (avoids repeat reads across tabs) ──────
@@ -1909,7 +1951,7 @@ with tab_analytics:
         installers = sorted(day_df["installer_id"].unique())
 
         st.markdown('<div class="sec-hdr">📌 Today At A Glance</div>', unsafe_allow_html=True)
-        forecast_total = forecast_total_installs(day_df, installers) if installers else None
+        forecast_total, trend_multiplier = forecast_total_installs(day_df, installers) if installers else (None, 1.0)
         g1, g2, g3, g4 = st.columns(4)
         with g1:
             render_colored_metric("Total Installs", len(day_df), GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
@@ -1920,7 +1962,16 @@ with tab_analytics:
                 render_colored_metric("Forecasted Total", forecast_total, GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
             else:
                 st.metric("Forecasted Total", "—")
-        st.caption(f"Forecast projects each installer's own pace so far forward to {FORECAST_DAY_END[:5]} — based on the last uploaded data, not live time. Needs at least one installer with 2+ installs today to estimate a pace.")
+        if forecast_total is not None:
+            if trend_multiplier < 0.97:
+                trend_note = f"⬇️ Team pace is running ~{round((1 - trend_multiplier) * 100)}% below its own day average in the last {TREND_WINDOW_HOURS}h — forecast adjusted down accordingly."
+            elif trend_multiplier > 1.03:
+                trend_note = f"⬆️ Team pace is running ~{round((trend_multiplier - 1) * 100)}% above its own day average in the last {TREND_WINDOW_HOURS}h — forecast adjusted up accordingly."
+            else:
+                trend_note = "➡️ Team pace is steady vs. its own day average — no trend adjustment applied."
+            st.caption(f"Forecast projects each installer's pace forward to {FORECAST_DAY_END[:5]}, adjusted by recent team-wide trend. {trend_note} Based on the last uploaded data, not live time.")
+        else:
+            st.caption(f"Forecast projects each installer's pace forward to {FORECAST_DAY_END[:5]} once there's enough data — needs at least one installer with 2+ installs today.")
 
         # -- Hourly table --------------------------------------------------
         st.markdown('<div class="sec-hdr">⏱️ Installer-Wise Hourly Count</div>', unsafe_allow_html=True)
