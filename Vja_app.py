@@ -914,16 +914,18 @@ def _execute_push(parsed_records, source_label="install(s)"):
     new_log_df["is_3ph"] = new_log_df["meter_type"].str.contains("3", na=False)
     unclassified = int((~new_log_df["is_1ph"] & ~new_log_df["is_3ph"]).sum())
     agg = new_log_df.groupby(["date", "tech_name", "location"]).agg(
-        d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
+        d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum"), installer_id=("installer_id", "first")
     ).reset_index()
 
     # 3) merge deltas into Installations sheet
     df_inst_existing = get_data("Installations")
     if df_inst_existing.empty:
-        df_inst_existing = pd.DataFrame(columns=["date", "tech_name", "location", "qty_1ph", "qty_3ph"])
+        df_inst_existing = pd.DataFrame(columns=["date", "tech_name", "installer_id", "location", "qty_1ph", "qty_3ph"])
     for col in ["qty_1ph", "qty_3ph"]:
         if col in df_inst_existing.columns:
             df_inst_existing[col] = pd.to_numeric(df_inst_existing[col], errors="coerce").fillna(0).astype(int)
+    if "installer_id" not in df_inst_existing.columns:
+        df_inst_existing["installer_id"] = ""
 
     for _, arow in agg.iterrows():
         mask = (
@@ -934,14 +936,26 @@ def _execute_push(parsed_records, source_label="install(s)"):
         if not df_inst_existing.empty and mask.any():
             df_inst_existing.loc[mask, "qty_1ph"] += int(arow["d_1ph"])
             df_inst_existing.loc[mask, "qty_3ph"] += int(arow["d_3ph"])
+            # Backfill installer_id on a matching row that predates this field (e.g. old manual entries).
+            blank_id_mask = mask & (df_inst_existing["installer_id"].astype(str).str.strip() == "")
+            if blank_id_mask.any():
+                df_inst_existing.loc[blank_id_mask, "installer_id"] = arow["installer_id"]
         else:
             df_inst_existing = pd.concat([df_inst_existing, pd.DataFrame([{
-                "date": arow["date"], "tech_name": arow["tech_name"], "location": arow["location"],
+                "date": arow["date"], "tech_name": arow["tech_name"], "installer_id": arow["installer_id"], "location": arow["location"],
                 "qty_1ph": int(arow["d_1ph"]), "qty_3ph": int(arow["d_3ph"]),
             }])], ignore_index=True)
 
     if safe_update("Installations", df_inst_existing) and safe_update("UploadedInstallLog", updated_log):
-        mirror_records_to_map(new_log_rows)
+        map_added, map_ok = mirror_records_to_map(new_log_rows)
+        if not map_ok:
+            st.session_state["map_sync_warning"] = (
+                f"⚠️ {len(new_log_rows)} install(s) were saved to Installs data, but syncing them to the "
+                "Map tab failed. This almost always means the 'MapRecords' worksheet tab doesn't exist yet "
+                "in your Google Sheet — add it (same columns as UploadedInstallLog: key, date, time, "
+                "installer_id, tech_name, location, sno, old_meter_no, new_meter_no, lat, long), then "
+                "re-upload the same file to backfill the map."
+            )
         st.success(f"✅ Added {len(new_log_rows)} new {source_label} across {len(dates_with_new)} date(s).")
         if backfilled_count:
             st.info(f"ℹ️ Also filled in missing details for {backfilled_count} existing record(s).")
@@ -956,15 +970,18 @@ def _execute_push(parsed_records, source_label="install(s)"):
         st.rerun()
 
 
-def mirror_records_to_map(records) -> int:
+def mirror_records_to_map(records) -> tuple:
     """One-way sync: install data pushed into Installations — via the
     Installs-tab bulk upload, the Installs-tab Legacy Data upload, or the
     Analytics 'Update Installs' push — also lands in MapRecords so it shows
     up on the Map tab. This never runs in the other direction: the Map tab's
     own Legacy Data upload writes only to MapRecords and never calls this or
-    touches Installations/UploadedInstallLog at all."""
+    touches Installations/UploadedInstallLog at all.
+    Returns (added_count, ok) — ok is False if the write to MapRecords
+    itself failed (most commonly because the 'MapRecords' worksheet tab
+    doesn't exist yet in the Google Sheet)."""
     if not records:
-        return 0
+        return 0, True
     map_cols = ["key", "date", "time", "installer_id", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
     df_map_existing = get_data("MapRecords")
     if df_map_existing.empty:
@@ -985,10 +1002,10 @@ def mirror_records_to_map(records) -> int:
         new_map_rows.append(row)
 
     if not new_map_rows:
-        return 0
+        return 0, True
     updated_map = pd.concat([df_map_existing, pd.DataFrame(new_map_rows)], ignore_index=True)
-    safe_update("MapRecords", updated_map)
-    return len(new_map_rows)
+    ok = safe_update("MapRecords", updated_map)
+    return len(new_map_rows), ok
 
 
 def push_parsed_records_to_installations(parsed_records, source_label="install(s)"):
@@ -1215,8 +1232,10 @@ def remove_install_log_rows(keys_to_remove) -> int:
     if not df_inst.empty and has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
         for col in ["qty_1ph", "qty_3ph"]:
             df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
-        removed_rows["is_1ph"] = removed_rows.get("meter_type", "").astype(str).str.contains("1", na=False)
-        removed_rows["is_3ph"] = removed_rows.get("meter_type", "").astype(str).str.contains("3", na=False)
+        if "meter_type" not in removed_rows.columns:
+            removed_rows["meter_type"] = ""
+        removed_rows["is_1ph"] = removed_rows["meter_type"].astype(str).str.contains("1", na=False)
+        removed_rows["is_3ph"] = removed_rows["meter_type"].astype(str).str.contains("3", na=False)
         agg = removed_rows.groupby(["date", "tech_name", "location"]).agg(
             d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
         ).reset_index()
@@ -1330,8 +1349,10 @@ def render_map_legacy_upload_widget():
                     else:
                         if skipped_non_tl:
                             st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
-                        added = mirror_records_to_map(parsed)
-                        if added == 0:
+                        added, map_ok = mirror_records_to_map(parsed)
+                        if not map_ok:
+                            st.error("❌ Failed to save to the Map. Make sure the 'MapRecords' worksheet tab exists in your Google Sheet (see the app's setup docstring for its columns), then try again.")
+                        elif added == 0:
                             st.error("❌ All records in this file are already on the map. Nothing new to add.")
                         else:
                             st.success(f"✅ Added {added} new record(s) to the Map. Installations and inventory counts were not affected.")
@@ -1360,8 +1381,10 @@ def cleanup_non_tl_records():
             if not df_inst.empty and has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
                 for col in ["qty_1ph", "qty_3ph"]:
                     df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
-                bad_rows["is_1ph"] = bad_rows.get("meter_type", "").astype(str).str.contains("1", na=False)
-                bad_rows["is_3ph"] = bad_rows.get("meter_type", "").astype(str).str.contains("3", na=False)
+                if "meter_type" not in bad_rows.columns:
+                    bad_rows["meter_type"] = ""
+                bad_rows["is_1ph"] = bad_rows["meter_type"].astype(str).str.contains("1", na=False)
+                bad_rows["is_3ph"] = bad_rows["meter_type"].astype(str).str.contains("3", na=False)
                 agg = bad_rows.groupby(["date", "tech_name", "location"]).agg(
                     d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
                 ).reset_index()
@@ -1450,6 +1473,16 @@ def render_legacy_upload_widget(key_prefix: str):
                         if skipped_non_tl:
                             st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
                         push_parsed_records_to_installations(parsed, source_label="legacy install(s)")
+
+
+# ── Persistent Map-sync failure warning (survives the st.rerun() that would ──
+# otherwise wipe it — see mirror_records_to_map) ─────────────────────────────
+if "map_sync_warning" in st.session_state:
+    st.markdown(f'<div class="danger-box">{st.session_state["map_sync_warning"]}</div>', unsafe_allow_html=True)
+    if st.button("✅ Got it, dismiss", key="dismiss_map_sync_warning"):
+        del st.session_state["map_sync_warning"]
+        st.rerun()
+    st.divider()
 
 
 # ── Pending double-count confirmation banner (rendered before the tabs so ──
@@ -1643,6 +1676,118 @@ with tab_dash:
 #  ANALYTICS  (fully independent of Installations/Inventory/Technicians —
 #  purely for live installer-performance tracking on the phone while traveling)
 # ═══════════════════════════════════════════════════════════════════════════════
+def process_analytics_upload(analytics_file) -> dict:
+    """Parses and merges an uploaded Analytics file into AnalyticsRaw. Returns
+    {'ok': bool, 'wrote': bool} — 'ok' is False only if the file couldn't be
+    read/parsed at all (drives whether the manual retry button gets
+    highlighted); 'wrote' is True only if AnalyticsRaw was actually updated
+    (drives whether to rerun and refresh the tables below)."""
+    try:
+        ws = load_first_data_sheet(analytics_file)
+    except Exception as e:
+        st.error(f"❌ Could not open the file: {e}")
+        return {"ok": False, "wrote": False}
+
+    header_row, col_map = find_header_row(ws, ANALYTICS_REQUIRED_HEADERS)
+    if header_row is None:
+        st.error("❌ Could not find 'Installation Date', 'Installation Time' and 'Installer LoginID' columns in this file.")
+        return {"ok": False, "wrote": False}
+
+    optional_map = find_optional_cols(ws, header_row, ["Section", "New Meter Type"] + list(DETAIL_FIELD_HEADERS.values()))
+    parsed_records = []
+    skipped_non_tl = 0
+    for r in range(header_row + 1, ws.max_row + 1):
+        raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
+        if raw_installer is None or str(raw_installer).strip() == "":
+            continue
+        installer_id = str(raw_installer).strip()
+        if not is_valid_installer_id(installer_id):
+            skipped_non_tl += 1
+            continue
+        d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
+        t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
+        if d is None or t is None:
+            continue
+        section_val = ws.cell(row=r, column=optional_map["Section"]).value if "Section" in optional_map else None
+        mtype_val = ws.cell(row=r, column=optional_map["New Meter Type"]).value if "New Meter Type" in optional_map else None
+        rec = {
+            "date": d, "time": t, "installer_id": installer_id,
+            "hour": t.split(":")[0],
+            "location": str(section_val).strip() if section_val else "",
+            "meter_type": str(mtype_val).strip() if mtype_val else "",
+        }
+        rec.update(extract_detail_fields(ws, r, optional_map))
+        parsed_records.append(rec)
+
+    # New/unrecognized Installer LoginIDs — flagged immediately so the
+    # supervisor can add them in Admin without waiting to push to Installs.
+    unknown_logins = sorted({rec["installer_id"] for rec in parsed_records if rec["installer_id"].lower() not in tech_login_lookup})
+    if unknown_logins:
+        st.warning(f"⚠️ New/unrecognized Installer LoginID(s) found: {', '.join(unknown_logins)}. Add a technician with this Login ID in Admin \u2192 Technicians so their name maps correctly.")
+
+    if not parsed_records:
+        st.warning("⚠️ No valid TL_ installer rows with a date and time were found in this file.")
+        return {"ok": True, "wrote": False}
+
+    araw_detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
+    df_araw_existing = get_data("AnalyticsRaw")
+    if df_araw_existing.empty:
+        df_araw_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour"] + araw_detail_cols)
+    for col in araw_detail_cols:
+        if col not in df_araw_existing.columns:
+            df_araw_existing[col] = ""
+
+    existing_keys = set(df_araw_existing["key"].values) if "key" in df_araw_existing.columns else set()
+    key_to_idx = {k: i for i, k in zip(df_araw_existing.index, df_araw_existing["key"].values)} if "key" in df_araw_existing.columns else {}
+
+    new_rows = []
+    dup_count = 0
+    backfilled_count = 0
+    for rec in parsed_records:
+        key = f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
+        if key in existing_keys:
+            idx = key_to_idx[key]
+            # Re-uploading an already-recorded row never adds a new install —
+            # but if this record is missing any detail field and the new
+            # upload has it, fill it in instead of just skipping.
+            filled_something = False
+            for col in araw_detail_cols:
+                new_val = rec.get(col)
+                if new_val in (None, ""):
+                    continue
+                existing_val = str(df_araw_existing.at[idx, col]).strip()
+                if not existing_val:
+                    df_araw_existing.at[idx, col] = str(new_val)
+                    filled_something = True
+            if filled_something:
+                backfilled_count += 1
+            else:
+                dup_count += 1
+            continue
+        existing_keys.add(key)
+        new_row = {"key": key, "date": rec["date"], "time": rec["time"], "installer_id": rec["installer_id"], "hour": rec["hour"]}
+        for col in araw_detail_cols:
+            new_row[col] = rec.get(col, "")
+        new_rows.append(new_row)
+
+    if not new_rows and not backfilled_count:
+        st.error("❌ All records in this file are already in Analytics (duplicate date/time/installer) with no missing details to fill in. Nothing to update.")
+        return {"ok": True, "wrote": False}
+
+    merged = pd.concat([df_araw_existing, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else df_araw_existing
+    if safe_update("AnalyticsRaw", merged):
+        msg = f"✅ Added {len(new_rows)} new record(s) to Analytics."
+        if backfilled_count:
+            msg += f" Filled in missing details for {backfilled_count} existing record(s)."
+        if dup_count:
+            msg += f" Skipped {dup_count} already-complete duplicate(s)."
+        if skipped_non_tl:
+            msg += f" Ignored {skipped_non_tl} non-TL_ installer row(s)."
+        st.success(msg)
+        return {"ok": True, "wrote": True}
+    return {"ok": False, "wrote": False}
+
+
 with tab_analytics:
     st.markdown("""
     <div class="info-box">
@@ -1656,113 +1801,44 @@ with tab_analytics:
 
     st.markdown('<div class="sec-hdr">⬆️ Upload Progress File</div>', unsafe_allow_html=True)
     analytics_file = st.file_uploader(
-        "Upload the MDM export (.xlsx) — only Installer LoginIDs starting with TL_ are counted",
+        "Upload the MDM export (.xlsx) — only Installer LoginIDs starting with TL_ are counted. "
+        "Processing starts automatically once a file is selected.",
         type=["xlsx"], key="analytics_uploader"
     )
 
+    SLOW_PROCESS_SECONDS = 5
+
     if analytics_file is not None:
-        if st.button("📊 Process & Add To Analytics", type="primary", use_container_width=True):
-            try:
-                ws = load_first_data_sheet(analytics_file)
-            except Exception as e:
-                st.error(f"❌ Could not open the file: {e}")
-                ws = None
+        file_fp = f"{analytics_file.name}_{analytics_file.size}"
 
-            if ws is not None:
-                header_row, col_map = find_header_row(ws, ANALYTICS_REQUIRED_HEADERS)
-                if header_row is None:
-                    st.error("❌ Could not find 'Installation Date', 'Installation Time' and 'Installer LoginID' columns in this file.")
-                else:
-                    optional_map = find_optional_cols(ws, header_row, ["Section", "New Meter Type"] + list(DETAIL_FIELD_HEADERS.values()))
-                    parsed_records = []
-                    skipped_non_tl = 0
-                    for r in range(header_row + 1, ws.max_row + 1):
-                        raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
-                        if raw_installer is None or str(raw_installer).strip() == "":
-                            continue
-                        installer_id = str(raw_installer).strip()
-                        if not is_valid_installer_id(installer_id):
-                            skipped_non_tl += 1
-                            continue
-                        d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
-                        t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
-                        if d is None or t is None:
-                            continue
-                        section_val = ws.cell(row=r, column=optional_map["Section"]).value if "Section" in optional_map else None
-                        mtype_val = ws.cell(row=r, column=optional_map["New Meter Type"]).value if "New Meter Type" in optional_map else None
-                        rec = {
-                            "date": d, "time": t, "installer_id": installer_id,
-                            "hour": t.split(":")[0],
-                            "location": str(section_val).strip() if section_val else "",
-                            "meter_type": str(mtype_val).strip() if mtype_val else "",
-                        }
-                        rec.update(extract_detail_fields(ws, r, optional_map))
-                        parsed_records.append(rec)
+        if st.session_state.get("analytics_last_fp") != file_fp:
+            t0 = time.time()
+            with st.spinner("📊 Processing and adding to Analytics..."):
+                result = process_analytics_upload(analytics_file)
+            st.session_state["analytics_last_fp"] = file_fp
+            st.session_state["analytics_last_ok"] = result["ok"]
+            st.session_state["analytics_last_slow"] = (time.time() - t0) > SLOW_PROCESS_SECONDS
+            if result["wrote"]:
+                st.rerun()
 
-                    # New/unrecognized Installer LoginIDs — flagged immediately so the
-                    # supervisor can add them in Admin without waiting to push to Installs.
-                    unknown_logins = sorted({rec["installer_id"] for rec in parsed_records if rec["installer_id"].lower() not in tech_login_lookup})
-                    if unknown_logins:
-                        st.warning(f"⚠️ New/unrecognized Installer LoginID(s) found: {', '.join(unknown_logins)}. Add a technician with this Login ID in Admin \u2192 Technicians so their name maps correctly.")
+        last_ok = st.session_state.get("analytics_last_ok", True)
+        last_slow = st.session_state.get("analytics_last_slow", False)
+        needs_attention = (not last_ok) or last_slow
 
-                    if not parsed_records:
-                        st.warning("⚠️ No valid TL_ installer rows with a date and time were found in this file.")
-                    else:
-                        araw_detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
-                        df_araw_existing = get_data("AnalyticsRaw")
-                        if df_araw_existing.empty:
-                            df_araw_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour"] + araw_detail_cols)
-                        for col in araw_detail_cols:
-                            if col not in df_araw_existing.columns:
-                                df_araw_existing[col] = ""
+        if needs_attention:
+            st.warning(("⚠️ Automatic processing failed — tap below to retry." if not last_ok
+                        else "⏳ Automatic processing took a while — tap below if the data below doesn't look up to date."))
 
-                        existing_keys = set(df_araw_existing["key"].values) if "key" in df_araw_existing.columns else set()
-                        key_to_idx = {k: i for i, k in zip(df_araw_existing.index, df_araw_existing["key"].values)} if "key" in df_araw_existing.columns else {}
-
-                        new_rows = []
-                        dup_count = 0
-                        backfilled_count = 0
-                        for rec in parsed_records:
-                            key = f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
-                            if key in existing_keys:
-                                idx = key_to_idx[key]
-                                # Re-uploading an already-recorded row never adds a new install —
-                                # but if this record is missing any detail field and the new
-                                # upload has it, fill it in instead of just skipping.
-                                filled_something = False
-                                for col in araw_detail_cols:
-                                    new_val = rec.get(col)
-                                    if new_val in (None, ""):
-                                        continue
-                                    existing_val = str(df_araw_existing.at[idx, col]).strip()
-                                    if not existing_val:
-                                        df_araw_existing.at[idx, col] = str(new_val)
-                                        filled_something = True
-                                if filled_something:
-                                    backfilled_count += 1
-                                else:
-                                    dup_count += 1
-                                continue
-                            existing_keys.add(key)
-                            new_row = {"key": key, "date": rec["date"], "time": rec["time"], "installer_id": rec["installer_id"], "hour": rec["hour"]}
-                            for col in araw_detail_cols:
-                                new_row[col] = rec.get(col, "")
-                            new_rows.append(new_row)
-
-                        if not new_rows and not backfilled_count:
-                            st.error("❌ All records in this file are already in Analytics (duplicate date/time/installer) with no missing details to fill in. Nothing to update.")
-                        else:
-                            merged = pd.concat([df_araw_existing, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else df_araw_existing
-                            if safe_update("AnalyticsRaw", merged):
-                                msg = f"✅ Added {len(new_rows)} new record(s) to Analytics."
-                                if backfilled_count:
-                                    msg += f" Filled in missing details for {backfilled_count} existing record(s)."
-                                if dup_count:
-                                    msg += f" Skipped {dup_count} already-complete duplicate(s)."
-                                if skipped_non_tl:
-                                    msg += f" Ignored {skipped_non_tl} non-TL_ installer row(s)."
-                                st.success(msg)
-                                st.rerun()
+        btn_label = "🔁 Retry: Process & Add To Analytics" if not last_ok else "📊 Process & Add To Analytics"
+        if st.button(btn_label, type=("primary" if needs_attention else "secondary"), use_container_width=True, key="manual_analytics_process_btn"):
+            t0 = time.time()
+            with st.spinner("📊 Processing and adding to Analytics..."):
+                result = process_analytics_upload(analytics_file)
+            st.session_state["analytics_last_fp"] = file_fp
+            st.session_state["analytics_last_ok"] = result["ok"]
+            st.session_state["analytics_last_slow"] = (time.time() - t0) > SLOW_PROCESS_SECONDS
+            if result["wrote"]:
+                st.rerun()
 
     # ── Build analytics tables from stored raw data ─────────────────────────
     st.divider()
@@ -1915,8 +1991,11 @@ with tab_analytics:
             push_parsed_records_to_installations(push_records, source_label="install(s) from Analytics")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  MAP  (built from UploadedInstallLog — populated by the Installs bulk upload,
-#  the Analytics "Update Installs" push, and the Legacy Data upload below)
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAP  (built from MapRecords — its own independent sheet. Populated by a
+#  one-way mirror from Installs-tab uploads + Analytics's "Update Installs"
+#  push, plus this tab's own Legacy Data upload. Never written back to
+#  Installations/UploadedInstallLog.)
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_map:
     st.markdown("""
@@ -1930,8 +2009,19 @@ with tab_map:
 
     df_map_raw = get_data("MapRecords")
 
-    if df_map_raw.empty or not has_col(df_map_raw, "date", "lat", "long"):
-        st.info("No records with location data yet. Upload installs via the Installs tab or Analytics, or use the Legacy Data uploader below.")
+    if df_map_raw.empty:
+        st.info("""
+        No records on the Map yet. This is expected if you haven't uploaded anything via the
+        Installs tab, Analytics, or the Legacy Data uploader below yet.
+
+        If you *have* uploaded installs and still see this, the most likely cause is that the
+        **'MapRecords' worksheet tab doesn't exist yet** in your Google Sheet — the app can't
+        create new tabs on its own, it can only write into ones that already exist. Add a tab
+        named exactly `MapRecords` (see the app file's setup notes for its columns), then
+        re-upload the same file to backfill it.
+        """)
+    elif not has_col(df_map_raw, "date", "lat", "long"):
+        st.warning("⚠️ The 'MapRecords' worksheet is missing expected columns (date/lat/long). Check its header row matches the app's setup notes.")
     else:
         df_map = df_map_raw.copy()
         df_map["_date"] = pd.to_datetime(df_map["date"], errors="coerce").dt.date
