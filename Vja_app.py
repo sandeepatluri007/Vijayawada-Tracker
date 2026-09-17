@@ -32,7 +32,7 @@ the app creates and appends data automatically):
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import date, datetime, time as dtime
+from datetime import date, datetime, time as dtime, timedelta
 import urllib.parse
 import math
 import time
@@ -42,6 +42,7 @@ import openpyxl
 import matplotlib
 matplotlib.use("Agg")
 import pydeck as pdk
+from fpdf import FPDF
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -53,6 +54,48 @@ st.set_page_config(
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 PIN_CODE = "1323"
+
+# ── 1PH Incentive Billing (from '1Ph Incentive Tier Calculator.xlsx') ───────
+# Progressive slab structure, like a tax bracket: each slab's rate applies
+# only to the installs that fall within that band, not the whole total.
+# Scoped to 1PH only — the uploaded calculator doesn't cover 3PH, so the
+# Dashboard tile is explicitly labeled "1PH Billing" rather than guessing at
+# a 3PH rate. Update these constants (and INCENTIVE_TIER_SLABS_1PH) if the
+# approved rates change.
+INCENTIVE_UNIT_RATE_1PH = 165.0     # Rs./install — proposed unit rate
+INCENTIVE_FLAT_ADDON_1PH = 15.0     # Rs./install — flat add-on
+INCENTIVE_TIER_SLABS_1PH = [
+    # (From, To, Incentive Rate Rs./install)
+    (1, 1000, 0),
+    (1001, 1500, 20),
+    (1501, 2500, 30),
+    (2501, 3500, 45),
+    (3501, 9_999_999, 60),
+]
+
+
+def calculate_1ph_incentive_billing(total_installs: int) -> dict:
+    """Replicates the '1Ph Incentive Tier Calculator' workbook's formula
+    exactly: Installs_in_slab = MAX(0, MIN(total,To) - MIN(total,From-1)),
+    Slab Incentive = Installs_in_slab x Rate, summed across all slabs.
+    Total Monthly Cost = Base Cost + Tiered Slab Incentive + Flat Add-on."""
+    if total_installs <= 0:
+        return {"base_cost": 0.0, "tier_incentive": 0.0, "flat_addon": 0.0, "total_cost": 0.0, "blended_per_install": 0.0, "slabs": []}
+    slab_breakdown = []
+    tier_incentive = 0.0
+    for lo, hi, rate in INCENTIVE_TIER_SLABS_1PH:
+        installs_in_slab = max(0, min(total_installs, hi) - min(total_installs, lo - 1))
+        slab_amount = installs_in_slab * rate
+        tier_incentive += slab_amount
+        slab_breakdown.append({"From": lo, "To": hi if hi < 9_999_999 else "∞", "Rate (Rs.)": rate, "Installs": installs_in_slab, "Amount (Rs.)": slab_amount})
+    base_cost = total_installs * INCENTIVE_UNIT_RATE_1PH
+    flat_addon = total_installs * INCENTIVE_FLAT_ADDON_1PH
+    total_cost = base_cost + tier_incentive + flat_addon
+    return {
+        "base_cost": base_cost, "tier_incentive": tier_incentive, "flat_addon": flat_addon,
+        "total_cost": total_cost, "blended_per_install": total_cost / total_installs,
+        "slabs": slab_breakdown,
+    }
 # A stable per-PIN token, remembered in the browser (localStorage) after a
 # successful login, so Streamlit Community Cloud's app-sleep / session-reset
 # behavior doesn't force a fresh PIN entry on a device that already unlocked
@@ -296,6 +339,126 @@ def build_map_snapshot_png(df: pd.DataFrame, title: str) -> bytes:
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
+
+
+# ── Real-basemap map snapshot (used by the weekly customer report) ──────────
+# The interactive Map tab's pydeck view shows real street-map tiles without
+# needing an API key (pydeck's default free tile provider). matplotlib can't
+# fetch map tiles on its own, so for a static PNG we fetch the same style of
+# free XYZ tiles directly (CARTO's "light_all" basemap, no key required) and
+# composite the filtered points on top — giving a snapshot that matches what
+# you see live on the Map tab, cropped tightly to just those points.
+TILE_SIZE = 256
+TILE_URL_TEMPLATE = "https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+TILE_MAX_ZOOM = 18
+TILE_MAX_GRID = 5  # cap how many tiles wide/tall we'll fetch, to keep requests fast
+
+
+def _lonlat_to_pixel(lon: float, lat: float, zoom: int) -> tuple:
+    """Web Mercator: absolute pixel coordinates at a given zoom (256px tiles)."""
+    lat_rad = math.radians(lat)
+    n = 2.0 ** zoom
+    x = (lon + 180.0) / 360.0 * n * TILE_SIZE
+    y = (1.0 - math.log(math.tan(lat_rad) + (1 / math.cos(lat_rad))) / math.pi) / 2.0 * n * TILE_SIZE
+    return x, y
+
+
+def build_basemap_snapshot_png(lats, lons, title: str = None, point_labels=None) -> bytes:
+    """Fetches real basemap tiles and plots the given lat/lon points on top,
+    auto-zoomed and cropped to fit just those points (with a little padding)
+    — a static equivalent of what the interactive Map tab shows live. Falls
+    back to the plain scatter-only style (build_map_snapshot_png) if tiles
+    can't be fetched (e.g. no internet access from wherever this runs)."""
+    import requests
+    from PIL import Image, ImageDraw, ImageFont
+
+    lats = list(lats)
+    lons = list(lons)
+    if not lats or not lons:
+        raise ValueError("No points to plot")
+
+    min_lat, max_lat = min(lats), max(lats)
+    min_lon, max_lon = min(lons), max(lons)
+    # Pad the bbox so points near the edge aren't flush against the border;
+    # enforce a minimum span so a tight cluster (or a single point) doesn't
+    # collapse to a zero-size box.
+    lat_span = max(max_lat - min_lat, 0.004)
+    lon_span = max(max_lon - min_lon, 0.004)
+    pad_lat, pad_lon = lat_span * 0.25, lon_span * 0.25
+    min_lat, max_lat = min_lat - pad_lat, max_lat + pad_lat
+    min_lon, max_lon = min_lon - pad_lon, max_lon + pad_lon
+
+    try:
+        # Pick the highest zoom where the padded bbox still fits within
+        # TILE_MAX_GRID tiles on each axis.
+        zoom = TILE_MAX_ZOOM
+        for z in range(TILE_MAX_ZOOM, 0, -1):
+            x1, y1 = _lonlat_to_pixel(min_lon, max_lat, z)  # top-left
+            x2, y2 = _lonlat_to_pixel(max_lon, min_lat, z)  # bottom-right
+            tiles_wide = (x2 - x1) / TILE_SIZE
+            tiles_tall = (y2 - y1) / TILE_SIZE
+            if tiles_wide <= TILE_MAX_GRID and tiles_tall <= TILE_MAX_GRID:
+                zoom = z
+                break
+        else:
+            zoom = 1
+
+        px1, py1 = _lonlat_to_pixel(min_lon, max_lat, zoom)
+        px2, py2 = _lonlat_to_pixel(max_lon, min_lat, zoom)
+
+        tile_x1, tile_y1 = int(px1 // TILE_SIZE), int(py1 // TILE_SIZE)
+        tile_x2, tile_y2 = int(px2 // TILE_SIZE), int(py2 // TILE_SIZE)
+
+        composite_w = (tile_x2 - tile_x1 + 1) * TILE_SIZE
+        composite_h = (tile_y2 - tile_y1 + 1) * TILE_SIZE
+        composite = Image.new("RGB", (composite_w, composite_h), "#E7E9EE")
+
+        for tx in range(tile_x1, tile_x2 + 1):
+            for ty in range(tile_y1, tile_y2 + 1):
+                try:
+                    resp = requests.get(TILE_URL_TEMPLATE.format(z=zoom, x=tx, y=ty), timeout=6,
+                                         headers={"User-Agent": "SmartMeterFieldTracker/1.0"})
+                    if resp.status_code == 200:
+                        tile_img = Image.open(io.BytesIO(resp.content)).convert("RGB")
+                        composite.paste(tile_img, ((tx - tile_x1) * TILE_SIZE, (ty - tile_y1) * TILE_SIZE))
+                except Exception:
+                    continue  # leave that tile blank rather than failing the whole snapshot
+
+        # Crop to the exact padded bbox (not the full tile grid).
+        origin_x, origin_y = tile_x1 * TILE_SIZE, tile_y1 * TILE_SIZE
+        crop_box = (int(px1 - origin_x), int(py1 - origin_y), int(px2 - origin_x), int(py2 - origin_y))
+        cropped = composite.crop(crop_box)
+
+        draw = ImageDraw.Draw(cropped)
+        for i, (lat, lon) in enumerate(zip(lats, lons)):
+            x, y = _lonlat_to_pixel(lon, lat, zoom)
+            x, y = x - origin_x - crop_box[0], y - origin_y - crop_box[1]
+            r = 6
+            draw.ellipse([x - r, y - r, x + r, y + r], fill="#0E9F6E", outline="white", width=2)
+            if point_labels and i < len(point_labels) and point_labels[i]:
+                draw.text((x + r + 3, y - r), str(point_labels[i]), fill="#10151F")
+
+        if title:
+            banner_h = 34
+            banner = Image.new("RGB", (cropped.width, cropped.height + banner_h), "white")
+            banner.paste(cropped, (0, banner_h))
+            d2 = ImageDraw.Draw(banner)
+            try:
+                font = ImageFont.load_default(size=16)
+            except Exception:
+                font = ImageFont.load_default()
+            d2.text((8, 8), title, fill="#10151F", font=font)
+            cropped = banner
+
+        buf = io.BytesIO()
+        cropped.save(buf, format="PNG")
+        buf.seek(0)
+        return buf.getvalue()
+    except Exception:
+        # Network unavailable or tile fetch failed — fall back to the plain
+        # scatter-only style rather than erroring out the whole report.
+        fallback_df = pd.DataFrame({"_lat": lats, "_long": lons})
+        return build_map_snapshot_png(fallback_df, title or "Install Locations")
 
 
 def build_kml(df: pd.DataFrame, doc_name: str = "Installed Meters") -> bytes:
@@ -749,6 +912,171 @@ def extract_detail_fields(ws, row: int, optional_map: dict) -> dict:
     return out
 
 
+def extract_section_code(sno) -> str:
+    """The 6th & 7th digit (1-indexed, from the left) of a 13-digit Consumer
+    No / SNO is its section code, e.g. 6436126250971 -> '26'. Returns
+    'Unclassified' for blank or non-13-digit SNOs rather than guessing."""
+    s = str(sno).strip()
+    if len(s) != 13 or not s.isdigit():
+        return "Unclassified"
+    return s[5:7]
+
+
+REPORT_MAX_MAP_SNIPPETS = 6  # keeps the report to one page — extra sections get a text note instead
+
+
+def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_type_filter: str = "All"):
+    """Builds a single-page PDF for sharing with the customer: install
+    quantities by date and section code (parsed from each record's
+    Consumer No / SNO), plus a small real-basemap snippet per section
+    showing where those installs are. Pulls only from UploadedInstallLog —
+    the same ledger the Dashboard/Installations totals are built from — so
+    the numbers here always match the official install counts, never
+    Map-only legacy data. Returns (pdf_bytes, error_message); pdf_bytes is
+    None if error_message is set."""
+    df = get_data("UploadedInstallLog")
+    if df.empty or not has_col(df, "date", "sno", "meter_type"):
+        return None, "No install data available yet."
+
+    df = df.copy()
+    df["_date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+    df = df[(df["_date"] >= date_start) & (df["_date"] <= date_end)]
+    if meter_type_filter != "All":
+        df = df[df["meter_type"].astype(str).str.strip() == meter_type_filter]
+    df["section_code"] = df["sno"].apply(extract_section_code)
+    if section_filter:
+        df = df[df["section_code"].isin(section_filter)]
+
+    if df.empty:
+        return None, "No records match the selected filters."
+
+    # Quantity table: dates (rows) x section codes (columns)
+    pivot = df.groupby(["_date", "section_code"]).size().unstack(fill_value=0)
+    pivot = pivot.sort_index()
+    present_codes = list(pivot.columns)
+    section_codes_sorted = sorted([s for s in present_codes if s != "Unclassified"]) + (["Unclassified"] if "Unclassified" in present_codes else [])
+    pivot = pivot[section_codes_sorted]
+    pivot["Total"] = pivot.sum(axis=1)
+    total_row = pivot.sum(axis=0)
+    total_row.name = "TOTAL"
+    pivot_display = pd.concat([pivot, pd.DataFrame([total_row])])
+
+    # Map snippet per section code, using only records with valid lat/long.
+    df["_lat"] = pd.to_numeric(df["lat"], errors="coerce")
+    df["_long"] = pd.to_numeric(df["long"], errors="coerce")
+    section_qty = df["section_code"].value_counts()
+    snippets = []  # (section_code, qty, png_bytes_or_None)
+    for sec in sorted(section_codes_sorted, key=lambda s: section_qty.get(s, 0), reverse=True):
+        sub = df[(df["section_code"] == sec) & df["_lat"].notna() & df["_long"].notna() & (df["_lat"] != 0) & (df["_long"] != 0)]
+        qty = int(section_qty.get(sec, 0))
+        png = None
+        if not sub.empty:
+            try:
+                png = build_basemap_snapshot_png(sub["_lat"].tolist(), sub["_long"].tolist(), title=f"Section {sec}")
+            except Exception:
+                png = None
+        snippets.append((sec, qty, png))
+
+    shown_snippets = [s for s in snippets if s[2] is not None][:REPORT_MAX_MAP_SNIPPETS]
+    omitted_count = len([s for s in snippets if s[2] is not None]) - len(shown_snippets)
+    no_geo_sections = [s[0] for s in snippets if s[2] is None]
+
+    # ── Build the PDF ────────────────────────────────────────────────────
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=False)
+    pdf.add_page()
+    pdf.set_margins(12, 12, 12)
+
+    pdf.set_font("Helvetica", "B", 17)
+    pdf.set_text_color(16, 21, 31)
+    pdf.cell(0, 9, "Weekly Installation Report", ln=1)
+
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(100, 105, 115)
+    sections_desc = "All Sections" if not section_filter else ", ".join(section_filter)
+    pdf.cell(0, 6, f"Period: {date_start.isoformat()} to {date_end.isoformat()}   |   Meter Type: {meter_type_filter}   |   Sections: {sections_desc}", ln=1)
+    pdf.cell(0, 5, f"Generated: {date.today().isoformat()}", ln=1)
+    pdf.ln(3)
+
+    # -- Quantity table --
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(16, 21, 31)
+    pdf.cell(0, 6, "Installation Quantities By Date & Section", ln=1)
+    col_labels = ["Date"] + section_codes_sorted + ["Total"]
+    n_cols = len(col_labels)
+    avail_w = pdf.w - pdf.l_margin - pdf.r_margin
+    col_w = avail_w / n_cols
+    row_h = 6.5
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(16, 21, 31)
+    pdf.set_text_color(255, 255, 255)
+    for label in col_labels:
+        pdf.cell(col_w, row_h, str(label), border=1, align="C", fill=True)
+    pdf.ln(row_h)
+
+    for i, (idx, row) in enumerate(pivot_display.iterrows()):
+        is_total = (idx == "TOTAL")
+        pdf.set_font("Helvetica", "B" if is_total else "", 9)
+        if is_total:
+            pdf.set_fill_color(230, 247, 240)
+        else:
+            pdf.set_fill_color(255, 255, 255) if i % 2 == 0 else pdf.set_fill_color(246, 247, 249)
+        pdf.set_text_color(16, 21, 31)
+        label = "TOTAL" if is_total else str(idx)
+        pdf.cell(col_w, row_h, label, border=1, align="C", fill=True)
+        for sec in section_codes_sorted:
+            pdf.cell(col_w, row_h, str(int(row[sec])), border=1, align="C", fill=True)
+        pdf.cell(col_w, row_h, str(int(row["Total"])), border=1, align="C", fill=True)
+        pdf.ln(row_h)
+
+    pdf.ln(3)
+
+    # -- Map snippets grid (fits remaining space on this one page) --
+    if shown_snippets:
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 6, "Section Locations", ln=1)
+
+        n_images = len(shown_snippets)
+        n_cols_grid = min(3, n_images)
+        n_rows_grid = math.ceil(n_images / n_cols_grid)
+        gap = 4
+        thumb_w = (avail_w - gap * (n_cols_grid - 1)) / n_cols_grid
+        remaining_h = pdf.h - pdf.get_y() - pdf.b_margin - 12  # leave room for a footer note
+        caption_h = 5
+        thumb_h = max(28, min(45, remaining_h / n_rows_grid - caption_h))
+
+        start_x, start_y = pdf.get_x(), pdf.get_y()
+        for i, (sec, qty, png) in enumerate(shown_snippets):
+            col, row = i % n_cols_grid, i // n_cols_grid
+            x = start_x + col * (thumb_w + gap)
+            y = start_y + row * (thumb_h + caption_h + gap)
+            try:
+                pdf.image(io.BytesIO(png), x=x, y=y, w=thumb_w, h=thumb_h)
+            except Exception:
+                pdf.set_xy(x, y)
+                pdf.set_font("Helvetica", "", 8)
+                pdf.multi_cell(thumb_w, 5, f"(Section {sec} map unavailable)", border=1)
+            pdf.set_xy(x, y + thumb_h + 0.5)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(16, 21, 31)
+            pdf.cell(thumb_w, caption_h, f"Section {sec} - {qty} installs", align="C")
+        pdf.set_y(start_y + n_rows_grid * (thumb_h + caption_h + gap))
+
+    notes = []
+    if omitted_count:
+        notes.append(f"+{omitted_count} more section(s) with location data not shown here (see the Map tab for the full picture).")
+    if no_geo_sections:
+        notes.append(f"No location data on file yet for section(s): {', '.join(no_geo_sections)}.")
+    if notes:
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_text_color(120, 125, 135)
+        for n in notes:
+            pdf.multi_cell(0, 4, n)
+
+    return bytes(pdf.output()), None
+
+
 def normalize_date_val(val):
     """Return an ISO date string (YYYY-MM-DD) or None."""
     if val is None:
@@ -814,9 +1142,14 @@ def compute_team_trend_multiplier(day_df: pd.DataFrame) -> float:
     in the last TREND_WINDOW_HOURS hours of activity, compared against the
     team's own average installs/hour for the day so far. Below 1.0 means the
     team has slowed down recently vs. its own day average; above 1.0 means
-    it's sped up. Requires at least TREND_MIN_SAMPLE team-wide installs in
-    the recent window to trust it (otherwise returns 1.0 — no adjustment,
-    too little data to read a trend from) and clamps to
+    it's sped up. The most recent active hour is almost always partial (data
+    only ever runs up to whenever the last install happened, not a clean
+    hour boundary) — both the day-average and the recent-window rates are
+    normalized by actual ELAPSED minutes rather than assuming a full 60
+    minutes for that hour, otherwise a normal pace in a half-elapsed hour
+    looks like a fake slowdown. Requires at least TREND_MIN_SAMPLE team-wide
+    installs in the recent window to trust it (otherwise returns 1.0 — no
+    adjustment, too little data to read a trend from) and clamps to
     [TREND_CLAMP_MIN, TREND_CLAMP_MAX] so one unusually slow or fast hour
     can't swing the whole day's forecast on its own."""
     valid = day_df.dropna(subset=["hour_int"])
@@ -826,16 +1159,25 @@ def compute_team_trend_multiplier(day_df: pd.DataFrame) -> float:
     if len(active_hours) < 2:
         return 1.0  # not enough distinct hours yet to compare "recent" vs "day so far"
 
-    day_avg_rate = len(valid) / len(active_hours)
-    if day_avg_rate <= 0:
+    last_hour = active_hours[-1]
+    last_time_in_hour = valid[valid["hour_int"] == last_hour]["time"].max()
+    _, mm, ss = last_time_in_hour.split(":")
+    elapsed_frac_last_hour = max((int(mm) + int(ss) / 60) / 60.0, 1 / 60)  # fraction of that hour actually elapsed
+
+    hours_elapsed_total = (len(active_hours) - 1) + elapsed_frac_last_hour
+    if hours_elapsed_total <= 0:
         return 1.0
+    day_avg_rate = len(valid) / hours_elapsed_total
 
     recent_hours = active_hours[-TREND_WINDOW_HOURS:]
     recent_count = len(valid[valid["hour_int"].isin(recent_hours)])
     if recent_count < TREND_MIN_SAMPLE:
         return 1.0  # too few recent installs team-wide to trust a trend read
 
-    recent_rate = recent_count / len(recent_hours)
+    hours_elapsed_recent = (len(recent_hours) - 1) + elapsed_frac_last_hour if last_hour in recent_hours else len(recent_hours)
+    hours_elapsed_recent = max(hours_elapsed_recent, elapsed_frac_last_hour)
+
+    recent_rate = recent_count / hours_elapsed_recent
     multiplier = recent_rate / day_avg_rate
     return max(TREND_CLAMP_MIN, min(TREND_CLAMP_MAX, multiplier))
 
@@ -867,7 +1209,9 @@ def forecast_total_installs(day_df: pd.DataFrame, installers: list, day_end_str:
         own_pace = None
         if n >= 2:
             span_min = time_to_minutes(last_t) - time_to_minutes(first_t)
-            own_pace = span_min / n  # same formula as the Avg Install Time table
+            # N installs span only N-1 gaps — dividing by N understates the
+            # true minutes-per-install and over-forecasts (worst at small N).
+            own_pace = span_min / (n - 1)
             if own_pace > 0:
                 paces.append(own_pace)
         per_installer.append((n, own_pace, last_min))
@@ -1398,9 +1742,7 @@ def render_map_legacy_upload_widget():
     then flags same-SNO-same-date duplicates for review."""
     st.markdown("""
     <div class="info-box">
-    📍 For map-only historical location data. This does <b>not</b> affect Installations,
-    inventory, or any counts elsewhere in the app — it only adds pins here. Same file format
-    as the Installs tab's bulk upload. Checked for duplicates against what's already on the map.
+    📍 Map-only. Adds pins here; does <b>not</b> affect Installations or inventory. Duplicates skipped.
     </div>
     """, unsafe_allow_html=True)
     legacy_file = st.file_uploader("Upload Legacy/Historical Excel (.xlsx) — Map Only", type=["xlsx"], key="map_legacy_uploader")
@@ -1520,9 +1862,7 @@ def render_legacy_upload_widget(key_prefix: str):
     (or missing details) are added."""
     st.markdown("""
     <div class="info-box">
-    For older records not already in the system. Same file format as the Installs tab's
-    bulk upload — every row is checked against what's already recorded (by date, time and
-    installer), so duplicates are skipped and only genuinely new records get added.
+    For older records. Duplicates are skipped — only new rows are added.
     </div>
     """, unsafe_allow_html=True)
     legacy_file = st.file_uploader("Upload Legacy/Historical Excel (.xlsx)", type=["xlsx"], key=f"{key_prefix}_legacy_uploader")
@@ -1663,6 +2003,22 @@ with tab_dash:
         tm2.metric("This Month — 3PH", int(this_month["qty_3ph"].sum()))
         tm3.metric("This Month — Total", int(this_month["qty_1ph"].sum() + this_month["qty_3ph"].sum()))
 
+        st.markdown('<div class="sub-hdr">💰 This Month — 1PH Billing</div>', unsafe_allow_html=True)
+        month_1ph_count = int(this_month["qty_1ph"].sum())
+        billing = calculate_1ph_incentive_billing(month_1ph_count)
+        tb1, tb2 = st.columns(2)
+        tb1.metric("Total Billing (Rs.)", f"{billing['total_cost']:,.0f}")
+        tb2.metric("Blended Cost / Install (Rs.)", f"{billing['blended_per_install']:,.2f}" if month_1ph_count > 0 else "—")
+        with st.expander("View slab breakdown"):
+            st.caption("Progressive slabs. 1PH only.")
+            slab_df = pd.DataFrame(billing["slabs"])
+            if not slab_df.empty:
+                st.dataframe(slab_df, use_container_width=True, hide_index=True)
+            cb1, cb2, cb3 = st.columns(3)
+            cb1.metric("Base Cost (Rs.)", f"{billing['base_cost']:,.0f}")
+            cb2.metric("Tiered Incentive (Rs.)", f"{billing['tier_incentive']:,.0f}")
+            cb3.metric("Flat Add-on (Rs.)", f"{billing['flat_addon']:,.0f}")
+
         st.markdown('<div class="sub-hdr">📍 This Month, By Location</div>', unsafe_allow_html=True)
         if this_month.empty:
             st.info("No installs recorded this month yet.")
@@ -1738,7 +2094,7 @@ with tab_dash:
                 ),
                 use_container_width=True, hide_index=True, height=dataframe_height(len(group_df)),
             )
-            st.caption("🟩 Green = strong Total · 🟨 Yellow = mid-range · 🟥 Red = below target.")
+            st.caption("🟩 Strong · 🟨 Mid · 🟥 Below target")
             download_image_button(
                 group_df, "Technician_Breakdown.png", key="dl_img_group_df",
                 color_grid=build_single_col_color_grid(group_df, "Total", lambda v: tier_colors(v, INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)),
@@ -1768,6 +2124,41 @@ with tab_dash:
             wa_text = "\n".join(wa_lines)
             wa_url = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
             st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Send to WhatsApp</a>', unsafe_allow_html=True)
+
+    st.divider()
+    st.markdown('<div class="sec-hdr">📄 Weekly Customer Report</div>', unsafe_allow_html=True)
+    st.caption("Quantities by date & section, with a location snippet per section. Pulls from Installs data only.")
+
+    rf1, rf2 = st.columns(2)
+    with rf1:
+        report_date_range = st.date_input("Date Range", [date.today() - timedelta(days=6), date.today()], key="report_date_range")
+    with rf2:
+        report_meter_type = st.selectbox("Meter Type", ["All", "1 PH", "3 PH"], key="report_meter_type")
+
+    df_log_for_report = get_data("UploadedInstallLog")
+    all_section_codes = sorted(df_log_for_report["sno"].apply(extract_section_code).unique()) if not df_log_for_report.empty and "sno" in df_log_for_report.columns else []
+    report_sections = st.multiselect("Sections (all if none picked)", all_section_codes, key="report_sections")
+
+    if st.button("📄 Generate Weekly Report", type="primary", use_container_width=True, key="generate_weekly_report_btn"):
+        if isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 2:
+            rd_start, rd_end = report_date_range
+        elif isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 1:
+            rd_start = rd_end = report_date_range[0]
+        else:
+            rd_start = rd_end = report_date_range
+        with st.spinner("Generating report..."):
+            pdf_bytes, err = build_weekly_report_pdf(rd_start, rd_end, section_filter=report_sections or None, meter_type_filter=report_meter_type)
+        if err:
+            st.error(f"❌ {err}")
+        else:
+            st.session_state["weekly_report_pdf"] = pdf_bytes
+            st.session_state["weekly_report_name"] = f"Weekly_Report_{rd_start}_to_{rd_end}.pdf"
+            st.success("✅ Report ready below.")
+
+    if "weekly_report_pdf" in st.session_state:
+        st.download_button("📥 Download Report (PDF)", data=st.session_state["weekly_report_pdf"],
+                            file_name=st.session_state["weekly_report_name"], mime="application/pdf",
+                            use_container_width=True, key="download_weekly_report")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ANALYTICS  (fully independent of Installations/Inventory/Technicians —
@@ -1888,18 +2279,13 @@ def process_analytics_upload(analytics_file) -> dict:
 with tab_analytics:
     st.markdown("""
     <div class="info-box">
-    📈 This tab is independent of the Installs/Inventory data elsewhere in the app.
-    Upload the raw MDM export (any layout — the app finds the header row automatically)
-    to see live installer-wise hourly counts, half-day split, and average install time,
-    even when you don't have laptop access. Uploading the same file again only adds
-    genuinely new rows — nothing is double counted. Reset at the end of the day to start fresh.
+    📈 Live installer performance. Independent of Installs/Inventory. Re-uploads add new rows only.
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="sec-hdr">⬆️ Upload Progress File</div>', unsafe_allow_html=True)
     analytics_file = st.file_uploader(
-        "Upload the MDM export (.xlsx) — only Installer LoginIDs starting with TL_ are counted. "
-        "Processing starts automatically once a file is selected.",
+        "Upload MDM export (.xlsx) — TL_ logins only. Processes automatically.",
         type=["xlsx"], key="analytics_uploader"
     )
 
@@ -1964,14 +2350,27 @@ with tab_analytics:
                 st.metric("Forecasted Total", "—")
         if forecast_total is not None:
             if trend_multiplier < 0.97:
-                trend_note = f"⬇️ Team pace is running ~{round((1 - trend_multiplier) * 100)}% below its own day average in the last {TREND_WINDOW_HOURS}h — forecast adjusted down accordingly."
+                trend_note = f"⬇️ pace {round((1 - trend_multiplier) * 100)}% below day avg"
             elif trend_multiplier > 1.03:
-                trend_note = f"⬆️ Team pace is running ~{round((trend_multiplier - 1) * 100)}% above its own day average in the last {TREND_WINDOW_HOURS}h — forecast adjusted up accordingly."
+                trend_note = f"⬆️ pace {round((trend_multiplier - 1) * 100)}% above day avg"
             else:
-                trend_note = "➡️ Team pace is steady vs. its own day average — no trend adjustment applied."
-            st.caption(f"Forecast projects each installer's pace forward to {FORECAST_DAY_END[:5]}, adjusted by recent team-wide trend. {trend_note} Based on the last uploaded data, not live time.")
+                trend_note = "➡️ pace steady"
+            st.caption(f"Projected to {FORECAST_DAY_END[:5]} · {trend_note}")
         else:
-            st.caption(f"Forecast projects each installer's pace forward to {FORECAST_DAY_END[:5]} once there's enough data — needs at least one installer with 2+ installs today.")
+            st.caption(f"Needs an installer with 2+ installs to project.")
+
+        # -- Section-wise summary (combines every section's uploaded file for this date) --
+        st.markdown('<div class="sec-hdr">📍 Section-Wise Summary</div>', unsafe_allow_html=True)
+        st.caption("All sections uploaded for this date, combined.")
+        if has_col(day_df, "location"):
+            section_df = day_df.copy()
+            section_df["location"] = section_df["location"].replace("", "Unspecified").fillna("Unspecified")
+            section_summary = section_df.groupby("location").size().reset_index(name="Installs")
+            section_summary.columns = ["Section", "Installs"]
+            section_summary = section_summary.sort_values("Installs", ascending=False)
+            st.dataframe(section_summary, use_container_width=True, hide_index=True, height=dataframe_height(len(section_summary)))
+        else:
+            st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
 
         # -- Hourly table --------------------------------------------------
         st.markdown('<div class="sec-hdr">⏱️ Installer-Wise Hourly Count</div>', unsafe_allow_html=True)
@@ -2005,7 +2404,7 @@ with tab_analytics:
             st.dataframe(style_hourly_table(hourly_df, hour_col_labels), use_container_width=True, hide_index=True, height=dataframe_height(len(hourly_df)))
         else:
             render_hourly_heatmap(hourly_df, hour_col_labels, build_hourly_color_grid(hourly_df, hour_col_labels))
-        st.caption("🟩 Green = strong count · 🟨 Yellow = mid-range · 🟥 Red = below target — thresholds set in the code's Conditional formatting section.")
+        st.caption("🟩 Strong · 🟨 Mid · 🟥 Below target")
         glance_line = (
             f"Total: {len(day_df)}  |  Active Installers: {len(installers)}  |  "
             f"Avg/Installer: {round(len(day_df) / len(installers), 1) if installers else 0}  |  "
@@ -2039,7 +2438,7 @@ with tab_analytics:
 
         # -- Average install time -------------------------------------------
         st.markdown('<div class="sec-hdr">⏳ Average Install Time / Installer</div>', unsafe_allow_html=True)
-        st.caption("Avg (min) = (last install time − first install time in minutes) ÷ total installs for that installer")
+        st.caption("Avg (min) between consecutive installs.")
         avg_rows = []
         for inst in installers:
             sub = day_df[day_df["installer_id"] == inst].sort_values("time")
@@ -2056,7 +2455,7 @@ with tab_analytics:
             _style_map(avg_df.style, avg_time_style, subset=["Avg Time/Install (min)"]),
             use_container_width=True, hide_index=True, height=dataframe_height(len(avg_df)),
         )
-        st.caption("🟩 Faster than target · 🟨 Mid-range · 🟥 Slower than target (lower minutes is better).")
+        st.caption("🟩 Faster · 🟨 Mid · 🟥 Slower")
         download_image_button(
             avg_df, f"Avg_Install_Time_{sel_date}.png", key="dl_img_avg",
             color_grid=build_single_col_color_grid(avg_df, "Avg Time/Install (min)", avg_time_colors),
@@ -2087,17 +2486,12 @@ with tab_analytics:
         st.markdown('<div class="sec-hdr">📥 Update Installs From Analytics</div>', unsafe_allow_html=True)
         st.markdown("""
         <div class="info-box">
-        Sends <b>this date's</b> Analytics records into the main Installations sheet used by
-        the Dashboard and Installs tab. Installer LoginIDs are matched to a technician's
-        display name using the <b>login_id</b> field set on that technician in Admin — anyone
-        without one gets recorded under their raw login ID (e.g. TL_Vinod), and it's called out
-        below so you know to map them. A record already pushed — from here or from the Installs
-        tab's bulk upload — is never counted twice.
+        Pushes this date's records into Installations. Never double-counts. Unmapped login IDs are flagged.
         </div>
         """, unsafe_allow_html=True)
 
         if not has_col(day_df, "location") or not has_col(day_df, "meter_type") or (day_df["location"].eq("").all() and day_df["meter_type"].eq("").all()):
-            st.caption("ℹ️ This date's records don't have Location/Meter Type on file (uploaded before this feature was added) — they'll be pushed under 'Unspecified' location and won't count toward 1PH/3PH totals.")
+            st.caption("No Location/Meter Type on these records — will push as 'Unspecified', not counted in 1PH/3PH.")
 
         if st.button(f"📥 Update Installs For {sel_date}", type="primary", use_container_width=True):
             push_records = []
@@ -2118,10 +2512,7 @@ with tab_analytics:
 with tab_map:
     st.markdown("""
     <div class="info-box">
-    🗺️ Install data pushed via the Installs tab's bulk upload, the Installs tab's Legacy Data
-    upload, or Analytics's "Update Installs" all mirror here automatically as pins. The Map
-    tab's own Legacy Data upload below is separate — it adds pins here only and never affects
-    Installations, inventory, or any counts elsewhere in the app.
+    🗺️ Installs data mirrors here automatically. The Map-only upload below never affects Installations.
     </div>
     """, unsafe_allow_html=True)
 
@@ -2148,22 +2539,38 @@ with tab_map:
 
         loc_options = sorted([l for l in df_map["location"].unique() if str(l).strip()]) if "location" in df_map.columns else []
         valid_dates = df_map["_date"].dropna()
-        min_d, max_d = (valid_dates.min(), valid_dates.max()) if not valid_dates.empty else (date.today(), date.today())
+        data_min_d, data_max_d = (valid_dates.min(), valid_dates.max()) if not valid_dates.empty else (date.today(), date.today())
+
+        # Default to today when today has data; otherwise start blank so the
+        # map isn't silently showing an unrelated historical range.
+        today = date.today()
+        has_today_data = (not valid_dates.empty) and (today in set(valid_dates))
+        default_range = [today, today] if has_today_data else []
+
+        # Give the picker a wide min/max so previous/next month navigation works.
+        picker_min = min(data_min_d, today) - timedelta(days=365)
+        picker_max = max(data_max_d, today) + timedelta(days=365)
 
         mf1, mf2 = st.columns(2)
         with mf1:
             map_loc_filter = st.multiselect("Section", loc_options, default=loc_options)
         with mf2:
-            map_date_range = st.date_input("Date Range", [min_d, max_d], key="map_date_range")
+            map_date_range = st.date_input("Date Range", default_range, min_value=picker_min, max_value=picker_max, key="map_date_range")
 
         if isinstance(map_date_range, (list, tuple)) and len(map_date_range) == 2:
             md_start, md_end = map_date_range[0], map_date_range[1]
         elif isinstance(map_date_range, (list, tuple)) and len(map_date_range) == 1:
             md_start = md_end = map_date_range[0]
+        elif isinstance(map_date_range, (list, tuple)):  # empty — nothing picked yet
+            md_start = md_end = None
         else:
             md_start = md_end = map_date_range
 
-        filtered_map = df_map[(df_map["_date"] >= md_start) & (df_map["_date"] <= md_end)]
+        if md_start is None:
+            st.info("Pick a date range to show pins." + ("" if has_today_data else f" No data for today — data runs {data_min_d} to {data_max_d}."))
+            filtered_map = df_map.iloc[0:0]
+        else:
+            filtered_map = df_map[(df_map["_date"] >= md_start) & (df_map["_date"] <= md_end)]
         if map_loc_filter:
             filtered_map = filtered_map[filtered_map["location"].isin(map_loc_filter)]
 
@@ -2240,7 +2647,7 @@ with tab_map:
             with ec1:
                 png_snapshot = build_map_snapshot_png(pinned, title=f"Install Locations\n{filter_desc}")
                 st.download_button("📷 Save Map View As PNG", data=png_snapshot, file_name="map_view.png", mime="image/png", use_container_width=True, key="map_png_export")
-                st.caption("A plot of pin positions (Lat/Long) — not a screenshot of the street map above, since no mapping API key is configured.")
+                st.caption("Pin positions only (no street basemap).")
             with ec2:
                 kml_bytes = build_kml(pinned, doc_name=f"Installed Meters — {filter_desc}")
                 st.download_button("🗺️ Share As KML File", data=kml_bytes, file_name="installed_meters.kml", mime="application/vnd.google-earth.kml+xml", use_container_width=True, key="map_kml_export")
@@ -2280,11 +2687,7 @@ with tab_inst:
     st.markdown('<div class="sec-hdr">📤 Bulk Upload From Excel</div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="info-box">
-    Upload the daily installation export instead of entering counts manually.
-    The app matches each row's <b>Installer LoginID</b>, <b>Date</b>, <b>Time</b> and
-    <b>New Meter Type</b>, counts by <b>Section</b> (used as Location), and skips anything
-    already saved — so uploading the same file twice won't double-count. If a new file has
-    a few extra rows for a date you've already uploaded, only the new ones get added.
+    Upload the daily export instead of entering counts manually. Re-uploads won't double-count.
     </div>
     """, unsafe_allow_html=True)
 
@@ -2337,7 +2740,7 @@ with tab_inst:
 
     st.divider()
     st.markdown('<div class="sec-hdr">🔍 Search By Meter / Service No</div>', unsafe_allow_html=True)
-    st.caption("Search by Old Meter Service No (SNO), New Meter No, or Old Meter No — handy for checking whether a specific SNO was already installed by your team.")
+    st.caption("Check if an SNO was installed by your team.")
     search_query = st.text_input("Search SNO / Old Meter No / New Meter No", key="meter_search_box", placeholder="e.g. 1234567890 or meter serial number")
 
     if search_query.strip():
@@ -2754,7 +3157,7 @@ with tab_admin:
         </script>
         """, height=0)
         st.rerun()
-    st.caption("Forgets this browser only — other devices that were remembered stay unlocked until they also log out (or you change the PIN, which invalidates every remembered browser at once).")
+    st.caption("Forgets this browser only.")
 
     st.markdown("""
     <div class="warn-box" style="background:#f8f9fa;border-color:#cbd5e1;color:#475569;">
@@ -2775,7 +3178,7 @@ with tab_admin:
         tv = st.session_state["tech_form_version"]
 
         st.markdown('<div class="sub-hdr">➕ Add Technicians (one or several)</div>', unsafe_allow_html=True)
-        st.caption("Login ID is optional — set it to match the 'Installer LoginID' column (e.g. TL_Vinod) in the MDM export so bulk uploads auto-map to this technician's name.")
+        st.caption("Login ID (e.g. TL_Vinod) maps uploads to this technician.")
         tc1, tc2, tc3, tc4 = st.columns([2, 1, 1, 1.3])
         with tc1:
             new_t_name = st.text_input("Name", key=f"new_t_name_{tv}")
@@ -3080,7 +3483,7 @@ with tab_admin:
             else:
                 st.warning(f"⚠️ Found {len(flagged)} row(s) where the Installations total exceeds what uploads alone account for.")
                 st.dataframe(flagged, use_container_width=True, hide_index=True, height=dataframe_height(len(flagged)))
-                st.caption("'Implied Manual Qty' is the portion NOT explained by uploads — likely the manually-entered amount, which may be duplicating the uploaded records.")
+                st.caption("'Implied Manual Qty' = portion not explained by uploads.")
                 csv_data = flagged.to_csv(index=False).encode("utf-8")
                 st.download_button("📥 Download This Report", data=csv_data, file_name="installations_discrepancy_report.csv", mime="text/csv", use_container_width=True)
 
@@ -3152,5 +3555,5 @@ with tab_admin:
         near_dups = find_near_time_duplicates()
         if not near_dups.empty:
             st.markdown('<div class="sub-hdr">⏱️ Lower-Confidence: Same Installer, Times Within 2 Minutes</div>', unsafe_allow_html=True)
-            st.caption("No SNO to cross-check, or same SNO not required for this check — review carefully, back-to-back installs can be genuine.")
+            st.caption("Review carefully — back-to-back installs can be genuine.")
             st.dataframe(near_dups, use_container_width=True, hide_index=True, height=dataframe_height(len(near_dups)))
