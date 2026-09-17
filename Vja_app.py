@@ -312,11 +312,23 @@ def dataframe_to_png_bytes(df: pd.DataFrame, color_grid=None, title: str = None)
 
 
 def download_image_button(df: pd.DataFrame, file_name: str, key: str, color_grid=None, title: str = None, label: str = "📷 Download as Image"):
-    """Renders a Download-as-Image button for the given table, right under it."""
+    """Download-as-Image button for the given table.
+
+    Rendering a table to PNG via matplotlib costs ~0.3s. Streamlit re-runs the
+    WHOLE script (every tab body, not just the visible one) on every widget
+    interaction, so eagerly building these made each click pay for every
+    export image in the app whether or not anyone wanted one. The PNG is now
+    built only after the user asks for it."""
     if df.empty:
         return
-    png_bytes = dataframe_to_png_bytes(df, color_grid=color_grid, title=title)
-    st.download_button(label, data=png_bytes, file_name=file_name, mime="image/png", use_container_width=True, key=key)
+    want_key = f"{key}__prepare"
+    if st.session_state.get(want_key):
+        png_bytes = dataframe_to_png_bytes(df, color_grid=color_grid, title=title)
+        st.download_button(label, data=png_bytes, file_name=file_name, mime="image/png", use_container_width=True, key=key)
+    else:
+        if st.button(label, use_container_width=True, key=f"{key}__btn"):
+            st.session_state[want_key] = True
+            st.rerun()
 
 
 def build_map_snapshot_png(df: pd.DataFrame, title: str) -> bytes:
@@ -805,11 +817,22 @@ except Exception as e:
     st.stop()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=READ_TTL, show_spinner=False)
+def _read_worksheet_cached(worksheet: str, _version: int) -> pd.DataFrame:
+    """Cached Sheets read. `_version` is bumped by safe_update() so writes
+    invalidate the cache immediately; otherwise the same worksheet is fetched
+    and string-converted once per TTL window instead of once per call site
+    (there are 30+ call sites, and Streamlit re-runs every tab body on each
+    interaction, so this was repeated work on every click)."""
+    df = conn.read(worksheet=worksheet, ttl=READ_TTL)
+    return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
+
+
 def get_data(worksheet: str, retries: int = 5) -> pd.DataFrame:
+    version = st.session_state.get("_sheet_version", 0)
     for attempt in range(retries):
         try:
-            df = conn.read(worksheet=worksheet, ttl=READ_TTL)
-            return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
+            return _read_worksheet_cached(worksheet, version).copy()
         except Exception:
             if attempt < retries - 1:
                 time.sleep(min(2 ** attempt, 8))  # 1s, 2s, 4s, 8s — rides out brief rate-limit/network blips
@@ -825,7 +848,9 @@ def safe_update(worksheet: str, data: pd.DataFrame, retries: int = 5) -> bool:
         try:
             with st.spinner(f"💾 Saving to {worksheet}..."):
                 conn.update(worksheet=worksheet, data=data.astype(str))
-            st.cache_data.clear()
+            # Bump the read-cache version so the next get_data() refetches,
+            # instead of clearing every cached value app-wide.
+            st.session_state["_sheet_version"] = st.session_state.get("_sheet_version", 0) + 1
             return True
         except Exception as e:
             if attempt < retries - 1:
@@ -1001,6 +1026,16 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     if df.empty:
         return None, "No records match the selected filters."
 
+    # Section name = the Location on the record; section code = the 2-digit
+    # code parsed out of the SNO under that location. Map each code to the
+    # location name(s) it appears under, for the report legend.
+    code_to_location = {}
+    if "location" in df.columns:
+        for code, grp in df.groupby("section_code"):
+            names = sorted({str(x).strip() for x in grp["location"] if str(x).strip() and str(x).strip() != "Unspecified"})
+            if names:
+                code_to_location[code] = " / ".join(names[:2]) + ("..." if len(names) > 2 else "")
+
     # Quantity table: dates (rows) x section codes (columns)
     pivot = df.groupby(["_date", "section_code"]).size().unstack(fill_value=0)
     pivot = pivot.sort_index()
@@ -1023,7 +1058,8 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
         png = None
         if not sub.empty:
             try:
-                png = build_basemap_snapshot_png(sub["_lat"].tolist(), sub["_long"].tolist(), title=f"Section {sec}")
+                loc_name = code_to_location.get(sec, "")
+                png = build_basemap_snapshot_png(sub["_lat"].tolist(), sub["_long"].tolist(), title=f"{sec} - {loc_name}" if loc_name else f"Section {sec}")
             except Exception:
                 png = None
         snippets.append((sec, qty, png))
@@ -1054,34 +1090,66 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     pdf.set_text_color(16, 21, 31)
     pdf.cell(0, 6, "Installation Quantities By Date & Section", ln=1)
     col_labels = ["Date"] + section_codes_sorted + ["Total"]
-    n_cols = len(col_labels)
     avail_w = pdf.w - pdf.l_margin - pdf.r_margin
-    col_w = avail_w / n_cols
     row_h = 6.5
 
-    pdf.set_font("Helvetica", "B", 9)
+    # The Date column needs a fixed width ("2026-09-06" won't fit in an even
+    # split once there are several sections); the rest share what's left.
+    date_col_w = 24.0
+    n_code_cols = len(section_codes_sorted) + 1  # + Total
+    code_col_w = max(11.0, (avail_w - date_col_w) / n_code_cols)
+    # If many sections push the table past the page, scale everything down
+    # rather than letting cells clip their text.
+    table_w = date_col_w + code_col_w * n_code_cols
+    if table_w > avail_w:
+        scale = avail_w / table_w
+        date_col_w *= scale
+        code_col_w *= scale
+    # Font small enough that the widest value still fits its cell.
+    body_font = 9 if code_col_w >= 14 else (8 if code_col_w >= 12 else 7)
+
+    def _fit(txt, width, size):
+        """Trim a label so it can't overflow (and visibly clip) its cell."""
+        txt = str(txt)
+        pdf.set_font_size(size)
+        while txt and pdf.get_string_width(txt) > width - 1.5:
+            txt = txt[:-1]
+        return txt
+
+    pdf.set_font("Helvetica", "B", body_font)
     pdf.set_fill_color(16, 21, 31)
     pdf.set_text_color(255, 255, 255)
-    for label in col_labels:
-        pdf.cell(col_w, row_h, str(label), border=1, align="C", fill=True)
+    pdf.cell(date_col_w, row_h, _fit("Date", date_col_w, body_font), border=1, align="C", fill=True)
+    for label in section_codes_sorted + ["Total"]:
+        pdf.cell(code_col_w, row_h, _fit(label, code_col_w, body_font), border=1, align="C", fill=True)
     pdf.ln(row_h)
 
     for i, (idx, row) in enumerate(pivot_display.iterrows()):
         is_total = (idx == "TOTAL")
-        pdf.set_font("Helvetica", "B" if is_total else "", 9)
+        pdf.set_font("Helvetica", "B" if is_total else "", body_font)
         if is_total:
             pdf.set_fill_color(230, 247, 240)
         else:
             pdf.set_fill_color(255, 255, 255) if i % 2 == 0 else pdf.set_fill_color(246, 247, 249)
         pdf.set_text_color(16, 21, 31)
         label = "TOTAL" if is_total else str(idx)
-        pdf.cell(col_w, row_h, label, border=1, align="C", fill=True)
+        pdf.cell(date_col_w, row_h, _fit(label, date_col_w, body_font), border=1, align="C", fill=True)
         for sec in section_codes_sorted:
-            pdf.cell(col_w, row_h, str(int(row[sec])), border=1, align="C", fill=True)
-        pdf.cell(col_w, row_h, str(int(row["Total"])), border=1, align="C", fill=True)
+            pdf.cell(code_col_w, row_h, str(int(row[sec])), border=1, align="C", fill=True)
+        pdf.cell(code_col_w, row_h, str(int(row["Total"])), border=1, align="C", fill=True)
         pdf.ln(row_h)
 
-    pdf.ln(3)
+    pdf.ln(2)
+
+    # Section code -> Section name (Location) legend, so the customer can read
+    # the coded columns above.
+    if code_to_location:
+        legend = "   ".join(f"{code} = {name}" for code, name in code_to_location.items() if code in section_codes_sorted)
+        if legend:
+            pdf.set_font("Helvetica", "", 7.5)
+            pdf.set_text_color(100, 105, 115)
+            pdf.multi_cell(avail_w, 4, f"Sections:  {legend}")
+            pdf.ln(1)
 
     # -- Map snippets grid (fits remaining space on this one page) --
     if shown_snippets:
@@ -1111,7 +1179,12 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
             pdf.set_xy(x, y + thumb_h + 0.5)
             pdf.set_font("Helvetica", "B", 8)
             pdf.set_text_color(16, 21, 31)
-            pdf.cell(thumb_w, caption_h, f"Section {sec} - {qty} installs", align="C")
+            cap_loc = code_to_location.get(sec, "")
+            cap = f"{sec} - {cap_loc} ({qty})" if cap_loc else f"Section {sec} - {qty} installs"
+            pdf.set_font_size(8)
+            while cap and pdf.get_string_width(cap) > thumb_w - 1 and len(cap) > 10:
+                cap = cap[:-1]
+            pdf.cell(thumb_w, caption_h, cap, align="C")
         pdf.set_y(start_y + n_rows_grid * (thumb_h + caption_h + gap))
 
     notes = []
@@ -2609,6 +2682,22 @@ with tab_map:
         picker_min = min(data_min_d, today) - timedelta(days=365)
         picker_max = max(data_max_d, today) + timedelta(days=365)
 
+        # Quick presets — the calendar's month arrows can sit off-screen on a
+        # narrow phone viewport, so these cover the common jumps without it.
+        qp1, qp2, qp3, qp4 = st.columns(4)
+        if qp1.button("Today", use_container_width=True, key="map_qp_today"):
+            st.session_state["map_date_range"] = (today, today)
+            st.rerun()
+        if qp2.button("Last 7d", use_container_width=True, key="map_qp_7d"):
+            st.session_state["map_date_range"] = (today - timedelta(days=6), today)
+            st.rerun()
+        if qp3.button("This month", use_container_width=True, key="map_qp_month"):
+            st.session_state["map_date_range"] = (today.replace(day=1), today)
+            st.rerun()
+        if qp4.button("All data", use_container_width=True, key="map_qp_all"):
+            st.session_state["map_date_range"] = (data_min_d, data_max_d)
+            st.rerun()
+
         mf1, mf2 = st.columns(2)
         with mf1:
             map_loc_filter = st.multiselect("Section", loc_options, default=loc_options)
@@ -2699,17 +2788,28 @@ with tab_map:
                 st.caption(" · ".join(detail_bits))
 
             # -- Save view + share ---------------------------------------------
+            # Both exports are built on demand: Streamlit re-runs every tab body
+            # on each interaction, so generating these eagerly made every click
+            # in the app pay for a matplotlib render plus a full KML build.
             st.markdown('<div class="sub-hdr">📤 Export This View</div>', unsafe_allow_html=True)
             filter_desc = f"{', '.join(map_loc_filter) if map_loc_filter and len(map_loc_filter) < len(loc_options) else 'All Sections'} · {md_start} to {md_end}"
             ec1, ec2 = st.columns(2)
             with ec1:
-                png_snapshot = build_map_snapshot_png(pinned, title=f"Install Locations\n{filter_desc}")
-                st.download_button("📷 Save Map View As PNG", data=png_snapshot, file_name="map_view.png", mime="image/png", use_container_width=True, key="map_png_export")
+                if st.session_state.get("map_png_ready"):
+                    png_snapshot = build_map_snapshot_png(pinned, title=f"Install Locations\n{filter_desc}")
+                    st.download_button("📷 Save Map View As PNG", data=png_snapshot, file_name="map_view.png", mime="image/png", use_container_width=True, key="map_png_export")
+                elif st.button("📷 Save Map View As PNG", use_container_width=True, key="map_png_prep"):
+                    st.session_state["map_png_ready"] = True
+                    st.rerun()
                 st.caption("Pin positions only (no street basemap).")
             with ec2:
-                kml_bytes = build_kml(pinned, doc_name=f"Installed Meters — {filter_desc}")
-                st.download_button("🗺️ Share As KML File", data=kml_bytes, file_name="installed_meters.kml", mime="application/vnd.google-earth.kml+xml", use_container_width=True, key="map_kml_export")
-                st.caption("Opens in Google Earth, Google My Maps, QGIS, or any GIS tool your field team already has.")
+                if st.session_state.get("map_kml_ready"):
+                    kml_bytes = build_kml(pinned, doc_name=f"Installed Meters — {filter_desc}")
+                    st.download_button("🗺️ Share As KML File", data=kml_bytes, file_name="installed_meters.kml", mime="application/vnd.google-earth.kml+xml", use_container_width=True, key="map_kml_export")
+                elif st.button("🗺️ Share As KML File", use_container_width=True, key="map_kml_prep"):
+                    st.session_state["map_kml_ready"] = True
+                    st.rerun()
+                st.caption("Opens in Google Earth, My Maps, or QGIS.")
 
             with st.expander(f"📋 View {len(pinned)} record(s) as a table"):
                 map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
@@ -2725,17 +2825,20 @@ with tab_map:
     st.markdown('<div class="sec-hdr">🧹 Map Data Maintenance</div>', unsafe_allow_html=True)
     with st.expander("🔎 Check & Remove Duplicate Map Records"):
         st.caption("Scoped entirely to Map data — never touches Installations/inventory.")
-        map_dups = find_map_duplicates()
-        if map_dups.empty:
-            st.success("✅ No same-SNO-same-date duplicates found in Map data.")
-        else:
-            st.warning(f"⚠️ Found {len(map_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
-            edited_map_dups = st.data_editor(map_dups, use_container_width=True, hide_index=True, key="map_dups_editor", disabled=[c for c in map_dups.columns if c != "Keep?"])
-            to_remove = edited_map_dups[~edited_map_dups["Keep?"]]["Key"].tolist()
-            if st.button(f"🗑️ Remove {len(to_remove)} Unchecked Record(s)", type="primary", use_container_width=True, disabled=not to_remove, key="remove_map_dups_btn"):
-                removed = remove_map_records(to_remove)
-                st.success(f"✅ Removed {removed} duplicate record(s) from the Map.")
-                st.rerun()
+        if st.button("🔎 Scan For Duplicates", use_container_width=True, key="scan_map_dups_btn"):
+            st.session_state["map_dups_scanned"] = True
+        if st.session_state.get("map_dups_scanned"):
+            map_dups = find_map_duplicates()
+            if map_dups.empty:
+                st.success("✅ No same-SNO-same-date duplicates found in Map data.")
+            else:
+                st.warning(f"⚠️ Found {len(map_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
+                edited_map_dups = st.data_editor(map_dups, use_container_width=True, hide_index=True, key="map_dups_editor", disabled=[c for c in map_dups.columns if c != "Keep?"])
+                to_remove = edited_map_dups[~edited_map_dups["Keep?"]]["Key"].tolist()
+                if st.button(f"🗑️ Remove {len(to_remove)} Unchecked Record(s)", type="primary", use_container_width=True, disabled=not to_remove, key="remove_map_dups_btn"):
+                    removed = remove_map_records(to_remove)
+                    st.success(f"✅ Removed {removed} duplicate record(s) from the Map.")
+                    st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  INSTALLS
@@ -3589,13 +3692,17 @@ with tab_admin:
     with st.expander("🔁 Find & Remove Duplicate Installs (SNO-based)"):
         st.markdown("""
         <div class="info-box">
-        The same Consumer No (SNO) appearing more than once in Installs data on the SAME date
-        is a strong sign the same real install was uploaded twice. This is scoped to Installs
-        data — for Map-only duplicates, use the Map tab's own Data Maintenance section.
+        Same SNO twice on the same date usually means one install was uploaded twice.
+        Scoped to Installs data — for Map-only duplicates use the Map tab.
         </div>
         """, unsafe_allow_html=True)
-        sno_dups = find_sno_duplicates()
-        if sno_dups.empty:
+        if st.button("🔎 Scan For Duplicates", use_container_width=True, key="scan_sno_dups_btn"):
+            st.session_state["sno_dups_scanned"] = True
+        scanned = st.session_state.get("sno_dups_scanned", False)
+        sno_dups = find_sno_duplicates() if scanned else pd.DataFrame()
+        if not scanned:
+            pass
+        elif sno_dups.empty:
             st.success("✅ No same-SNO-same-date duplicates found in Installs data.")
         else:
             st.warning(f"⚠️ Found {len(sno_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
@@ -3610,7 +3717,7 @@ with tab_admin:
             elif dup_pin:
                 st.error("❌ Incorrect PIN.")
 
-        near_dups = find_near_time_duplicates()
+        near_dups = find_near_time_duplicates() if scanned else pd.DataFrame()
         if not near_dups.empty:
             st.markdown('<div class="sub-hdr">⏱️ Lower-Confidence: Same Installer, Times Within 2 Minutes</div>', unsafe_allow_html=True)
             st.caption("Review carefully — back-to-back installs can be genuine.")
