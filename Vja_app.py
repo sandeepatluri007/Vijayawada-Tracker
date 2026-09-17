@@ -349,9 +349,16 @@ def build_map_snapshot_png(df: pd.DataFrame, title: str) -> bytes:
 # composite the filtered points on top — giving a snapshot that matches what
 # you see live on the Map tab, cropped tightly to just those points.
 TILE_SIZE = 256
-TILE_URL_TEMPLATE = "https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+# OpenStreetMap's standard tiles need no API key. (CARTO's basemaps.cartocdn.com
+# now stamps an "API key missing" watermark across its tiles, which was showing
+# up in generated reports.) OSM's usage policy requires a real User-Agent and
+# only permits modest volumes — fine for a handful of report snippets, but
+# don't raise TILE_MAX_GRID much or generate reports in bulk.
+TILE_URL_TEMPLATE = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+TILE_ATTRIBUTION = "(c) OpenStreetMap contributors"
 TILE_MAX_ZOOM = 18
 TILE_MAX_GRID = 5  # cap how many tiles wide/tall we'll fetch, to keep requests fast
+TILE_MIN_ASPECT = 0.55  # keep snippets from rendering as a squashed letterbox strip
 
 
 def _lonlat_to_pixel(lon: float, lat: float, zoom: int) -> tuple:
@@ -384,7 +391,22 @@ def build_basemap_snapshot_png(lats, lons, title: str = None, point_labels=None)
     # collapse to a zero-size box.
     lat_span = max(max_lat - min_lat, 0.004)
     lon_span = max(max_lon - min_lon, 0.004)
-    pad_lat, pad_lon = lat_span * 0.25, lon_span * 0.25
+
+    # Installs strung along a road produce a very wide, very short bbox, which
+    # renders as an unreadable letterbox strip. Widen whichever axis is too
+    # thin so the snippet keeps a sensible shape.
+    lat_extent = lat_span * math.cos(math.radians((min_lat + max_lat) / 2))  # deg lon are narrower away from equator
+    if lat_span > 0 and lon_span > 0:
+        aspect = lat_extent / lon_span if lon_span else 1.0
+        if aspect < TILE_MIN_ASPECT:
+            lat_span = (lon_span * TILE_MIN_ASPECT) / max(math.cos(math.radians((min_lat + max_lat) / 2)), 1e-6)
+        elif aspect > 1 / TILE_MIN_ASPECT:
+            lon_span = lat_extent / TILE_MIN_ASPECT
+        center_lat, center_lon = (min_lat + max_lat) / 2, (min_lon + max_lon) / 2
+        min_lat, max_lat = center_lat - lat_span / 2, center_lat + lat_span / 2
+        min_lon, max_lon = center_lon - lon_span / 2, center_lon + lon_span / 2
+
+    pad_lat, pad_lon = lat_span * 0.15, lon_span * 0.15
     min_lat, max_lat = min_lat - pad_lat, max_lat + pad_lat
     min_lon, max_lon = min_lon - pad_lon, max_lon + pad_lon
 
@@ -437,6 +459,15 @@ def build_basemap_snapshot_png(lats, lons, title: str = None, point_labels=None)
             draw.ellipse([x - r, y - r, x + r, y + r], fill="#0E9F6E", outline="white", width=2)
             if point_labels and i < len(point_labels) and point_labels[i]:
                 draw.text((x + r + 3, y - r), str(point_labels[i]), fill="#10151F")
+
+        # OSM's tile usage policy requires visible attribution.
+        try:
+            attr_font = ImageFont.load_default(size=11)
+        except Exception:
+            attr_font = ImageFont.load_default()
+        attr_w = draw.textlength(TILE_ATTRIBUTION, font=attr_font) if hasattr(draw, "textlength") else 140
+        draw.rectangle([cropped.width - attr_w - 8, cropped.height - 16, cropped.width, cropped.height], fill="white")
+        draw.text((cropped.width - attr_w - 4, cropped.height - 14), TILE_ATTRIBUTION, fill="#64748B", font=attr_font)
 
         if title:
             banner_h = 34
@@ -914,12 +945,32 @@ def extract_detail_fields(ws, row: int, optional_map: dict) -> dict:
 
 def extract_section_code(sno) -> str:
     """The 6th & 7th digit (1-indexed, from the left) of a 13-digit Consumer
-    No / SNO is its section code, e.g. 6436126250971 -> '26'. Returns
-    'Unclassified' for blank or non-13-digit SNOs rather than guessing."""
+    No / SNO is its section code, e.g. 6436126250971 -> '26'.
+
+    Deliberately tolerant about how the SNO arrives: Google Sheets hands back
+    numeric cells as '6436126250971.0', sometimes in scientific notation
+    ('6.436126250971E+12'), and pasted values can carry a leading apostrophe
+    or stray spaces. All of those are the same real service number, so strip
+    down to digits first rather than rejecting them as unparseable."""
     s = str(sno).strip()
-    if len(s) != 13 or not s.isdigit():
+    if not s:
         return "Unclassified"
-    return s[5:7]
+
+    # Scientific notation (e.g. 6.436126250971E+12) -> expand to a plain integer.
+    if "e" in s.lower():
+        try:
+            s = f"{int(float(s)):d}"
+        except Exception:
+            return "Unclassified"
+
+    # Drop a trailing float ".0" that Sheets/pandas adds to whole numbers.
+    if s.endswith(".0"):
+        s = s[:-2]
+
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if len(digits) < 7:
+        return "Unclassified"
+    return digits[5:7]
 
 
 REPORT_MAX_MAP_SNIPPETS = 6  # keeps the report to one page — extra sections get a text note instead
@@ -2138,6 +2189,13 @@ with tab_dash:
     df_log_for_report = get_data("UploadedInstallLog")
     all_section_codes = sorted(df_log_for_report["sno"].apply(extract_section_code).unique()) if not df_log_for_report.empty and "sno" in df_log_for_report.columns else []
     report_sections = st.multiselect("Sections (all if none picked)", all_section_codes, key="report_sections")
+
+    if not df_log_for_report.empty and "sno" in df_log_for_report.columns:
+        codes = df_log_for_report["sno"].apply(extract_section_code)
+        unclassified_n = int((codes == "Unclassified").sum())
+        if unclassified_n:
+            sample = df_log_for_report.loc[codes == "Unclassified", "sno"].astype(str).head(3).tolist()
+            st.warning(f"⚠️ {unclassified_n} record(s) have an unreadable Consumer No and can't be assigned a section code. Examples: {', '.join(repr(s) for s in sample)}")
 
     if st.button("📄 Generate Weekly Report", type="primary", use_container_width=True, key="generate_weekly_report_btn"):
         if isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 2:
