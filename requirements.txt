@@ -6,3 +6,5 @@ streamlit-geolocation
 openpyxl
 matplotlib
 pydeck
+fpdf2
+requests
