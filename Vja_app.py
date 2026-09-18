@@ -135,7 +135,16 @@ HOURLY_TOTAL_RED_MAX, HOURLY_TOTAL_YELLOW_MIN, HOURLY_TOTAL_YELLOW_MAX = 10, 15,
 # Grand total for the day (M14): <150 red, 150-200 yellow, >200 green
 GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX = 150, 200
 # Avg install time in minutes (V32:V42): <20 green (fast), 20-30 yellow, >30 red (slow)
-AVG_TIME_GREEN_MAX, AVG_TIME_YELLOW_MAX = 20, 30
+# "Active pace" thresholds, calibrated to the field reality that even the
+# slowest installer completes a 1PH install in ~25 min hands-on. Because
+# breaks/travel are now excluded from this figure, the old 20/30 bands (which
+# were measured against break-inflated numbers) would have shown everyone green.
+AVG_TIME_GREEN_MAX, AVG_TIME_YELLOW_MAX = 15, 25
+
+# Any gap longer than this between two consecutive installs is treated as a
+# break / travel / waiting, not install work, and is excluded from the
+# Avg Time/Install figure. NOT used by the forecast — see forecast_total_installs.
+BREAK_GAP_THRESHOLD_MIN = 60
 
 
 def tier_colors(v, red_max, yellow_min, yellow_max):
@@ -1355,6 +1364,30 @@ def time_to_minutes(hhmmss: str) -> float:
     return int(h) * 60 + int(m) + int(s) / 60.0
 
 
+def compute_active_pace(sorted_times, break_threshold: float = BREAK_GAP_THRESHOLD_MIN):
+    """Hands-on pace: the mean gap between consecutive installs, EXCLUDING any
+    gap longer than break_threshold (lunch, travel between sections, waiting
+    for consumer access). Answers "how fast is this installer actually
+    working?" — so one long break can't make a fast installer look slow.
+
+    Note this is deliberately NOT what the forecast uses: a forecast projects
+    over future wall-clock time that will itself contain breaks, so it needs
+    the break-inclusive throughput rate instead (see forecast_total_installs).
+
+    Returns (active_pace_min, break_minutes, working_gap_count); active_pace
+    is None when there aren't at least two installs, or when every gap was a
+    break — in both cases there's no observed working rhythm to report."""
+    mins = [time_to_minutes(t) for t in sorted_times]
+    if len(mins) < 2:
+        return None, 0.0, 0
+    gaps = [mins[i] - mins[i - 1] for i in range(1, len(mins))]
+    working = [g for g in gaps if g <= break_threshold]
+    break_minutes = sum(g for g in gaps if g > break_threshold)
+    if not working:
+        return None, break_minutes, 0
+    return sum(working) / len(working), break_minutes, len(working)
+
+
 TREND_WINDOW_HOURS = 1      # how many of the most-recent hours count as "recent" for the trend signal
 TREND_MIN_SAMPLE = 5        # minimum team-wide installs in that window before trusting it
 TREND_CLAMP_MIN, TREND_CLAMP_MAX = 0.5, 1.5  # caps how much one hot/slow spell can swing the forecast
@@ -1434,6 +1467,13 @@ def forecast_total_installs(day_df: pd.DataFrame, installers: list, day_end_str:
             span_min = time_to_minutes(last_t) - time_to_minutes(first_t)
             # N installs span only N-1 gaps — dividing by N understates the
             # true minutes-per-install and over-forecasts (worst at small N).
+            #
+            # This is the BREAK-INCLUSIVE throughput rate, deliberately
+            # different from the Avg Time/Install table's active pace: we're
+            # projecting over remaining wall-clock time that will itself
+            # contain breaks and travel, so the pace applied to it has to
+            # include them. Using the break-free active pace here would assume
+            # the team installs nonstop to day-end and over-forecast badly.
             own_pace = span_min / (n - 1)
             if own_pace > 0:
                 paces.append(own_pace)
@@ -2680,18 +2720,20 @@ with tab_analytics:
         download_image_button(half_display_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half", title=f"Half-Day Split — {sel_date}")
 
         # -- Average install time -------------------------------------------
-        st.markdown('<div class="sec-hdr">⏳ Average Install Time / Installer</div>', unsafe_allow_html=True)
-        st.caption("Avg (min) between consecutive installs.")
+        st.markdown('<div class="sec-hdr">⏳ Active Pace / Installer</div>', unsafe_allow_html=True)
+        st.caption(f"Hands-on pace — gaps over {int(BREAK_GAP_THRESHOLD_MIN)} min are treated as breaks/travel and excluded.")
         avg_rows = []
         for inst in installers:
             sub = day_df[day_df["installer_id"] == inst].sort_values("time")
             first_t, last_t = sub["time"].iloc[0], sub["time"].iloc[-1]
             n = len(sub)
-            span_min = time_to_minutes(last_t) - time_to_minutes(first_t)
-            avg_min = round(span_min / n, 1) if n > 0 else 0
+            active_pace, _break_min, _gaps = compute_active_pace(sub["time"].tolist())
             avg_rows.append({
                 "Installer": inst, "First Install": first_t, "Last Install": last_t,
-                "Total Installs": n, "Avg Time/Install (min)": avg_min,
+                "Total Installs": n,
+                # "—" rather than 0.0: a lone install has no measurable rhythm,
+                # and 0.0 would read as "instant" and colour as fastest.
+                "Avg Time/Install (min)": round(active_pace, 1) if active_pace is not None else "—",
             })
         avg_df = pd.DataFrame(avg_rows).sort_values("Total Installs", ascending=False)
         st.dataframe(
