@@ -18,6 +18,8 @@ the app creates and appends data automatically):
   Inventory            - date, type, qty, mrn, make
   Technicians           - name, phone, aadhar, is_active, login_id, supervisor
   Locations             - location_name
+  Supervisors           - supervisor_id, name, phone, is_active
+                           (Technicians.supervisor holds the supervisor_id)
   UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type,
                            sno, old_meter_no, new_meter_no, lat, long, source
   AnalyticsRaw          - key, date, time, installer_id, hour, location, meter_type,
@@ -1472,6 +1474,7 @@ df_installations_master = get_data("Installations")
 df_inventory_master = get_data("Inventory")
 df_technicians_master = get_data("Technicians")
 df_locations_master = get_data("Locations")
+df_supervisors_master = get_data("Supervisors")
 
 active_techs = []
 if not df_technicians_master.empty and has_col(df_technicians_master, "is_active", "name"):
@@ -1494,23 +1497,61 @@ tech_login_lookup = {}
 # Reverse of the above: technician display name -> their login_id, used to
 # standardize manual entries onto the same login-ID identity as uploads.
 name_to_login_id = {}
-# Installer LoginID -> supervisor, from the optional "supervisor" column on the
-# Technicians sheet. Lets Analytics split the team by who manages whom.
-login_to_supervisor = {}
 UNASSIGNED_SUPERVISOR = "Unassigned"
+
+# ── Supervisors ────────────────────────────────────────────────────────────
+# Supervisors live in their own sheet so they exist independently of any
+# technician: you can create one before assigning anybody, and renaming one
+# doesn't orphan existing mappings. Technicians.supervisor stores the stable
+# supervisor_id, not the display name.
+#   Supervisors sheet: supervisor_id, name, phone, is_active
+sup_id_to_name = {}
+sup_name_to_id = {}
+if not df_supervisors_master.empty and has_col(df_supervisors_master, "supervisor_id", "name"):
+    for _, r in df_supervisors_master.iterrows():
+        sid = str(r.get("supervisor_id", "")).strip()
+        snm = str(r.get("name", "")).strip()
+        if sid and snm:
+            sup_id_to_name[sid] = snm
+            sup_name_to_id[snm] = sid
+
+
+def resolve_supervisor_name(stored_value) -> str:
+    """Technicians.supervisor holds a supervisor_id. Older rows (written before
+    the Supervisors sheet existed) hold the supervisor's NAME instead, so fall
+    back to matching on name rather than showing those as Unassigned."""
+    v = str(stored_value).strip()
+    if not v:
+        return ""
+    if v in sup_id_to_name:
+        return sup_id_to_name[v]
+    if v in sup_name_to_id:       # legacy row stored the name directly
+        return v
+    return v                       # unknown id/name — surface it as-is
+
+
+# Installer LoginID -> supervisor display name.
+login_to_supervisor = {}
 if not df_technicians_master.empty and has_col(df_technicians_master, "login_id", "name"):
     for _, r in df_technicians_master.iterrows():
         lid = str(r.get("login_id", "")).strip()
         nm = str(r.get("name", "")).strip()
-        sup = str(r.get("supervisor", "")).strip() if "supervisor" in df_technicians_master.columns else ""
+        sup_raw = str(r.get("supervisor", "")).strip() if "supervisor" in df_technicians_master.columns else ""
         if lid and nm:
             tech_login_lookup[lid.lower()] = nm
             name_to_login_id[nm] = lid
-            if sup:
-                login_to_supervisor[lid.lower()] = sup
+            sup_name = resolve_supervisor_name(sup_raw)
+            if sup_name:
+                login_to_supervisor[lid.lower()] = sup_name
 
-# Supervisors currently on file, for the Analytics filter and Admin dropdown.
-known_supervisors = sorted({s for s in login_to_supervisor.values() if s})
+# Active supervisors, for the Analytics filter and Admin dropdowns.
+known_supervisors = sorted([
+    nm for sid, nm in sup_id_to_name.items()
+    if str(df_supervisors_master.loc[df_supervisors_master["supervisor_id"] == sid, "is_active"].iloc[0]).strip().lower() in ("1", "1.0", "true", "yes", "")
+] if not df_supervisors_master.empty and "is_active" in df_supervisors_master.columns else list(sup_id_to_name.values()))
+# Any supervisor names referenced by technicians but missing from the sheet
+# still need to appear, or those technicians would silently drop out of filters.
+known_supervisors = sorted(set(known_supervisors) | set(login_to_supervisor.values()))
 
 
 def supervisor_of(installer_id) -> str:
@@ -3519,7 +3560,7 @@ with tab_admin:
     </div>
     """, unsafe_allow_html=True)
 
-    subtab_tech, subtab_loc = st.tabs(["👷 Technicians", "📍 Locations"])
+    subtab_tech, subtab_sup, subtab_loc = st.tabs(["👷 Technicians", "🧑‍💼 Supervisors", "📍 Locations"])
 
     # ── Technicians ───────────────────────────────────────────────────────────
     with subtab_tech:
@@ -3533,7 +3574,7 @@ with tab_admin:
         st.caption("Login ID (e.g. TL_Vinod) maps uploads to this technician.")
         tc1, tc2, tc3, tc4 = st.columns([2, 1, 1, 1.3])
         with tc1:
-            new_t_name = st.text_input("Name", key=f"new_t_name_{tv}")
+            new_t_name = st.text_input("Technician Name", key=f"new_t_name_{tv}")
         with tc2:
             new_t_phone = st.text_input("Phone (optional)", key=f"new_t_phone_{tv}")
         with tc3:
@@ -3542,16 +3583,16 @@ with tab_admin:
             new_t_login = st.text_input("Login ID (optional)", key=f"new_t_login_{tv}", placeholder="TL_Vinod")
         # Pick an existing supervisor to avoid typo-created duplicate groups,
         # or type a new one.
-        sup_choice = st.selectbox("Supervisor (optional)", ["— none —"] + known_supervisors + ["+ Add new supervisor"], key=f"new_t_sup_{tv}")
-        new_t_sup = ""
-        if sup_choice == "+ Add new supervisor":
-            new_t_sup = st.text_input("New supervisor name", key=f"new_t_sup_new_{tv}").strip()
-        elif sup_choice != "— none —":
-            new_t_sup = sup_choice
+        sup_names_avail = sorted(sup_name_to_id.keys())
+        sup_choice = st.selectbox("Reports to supervisor (optional)", ["— none —"] + sup_names_avail, key=f"new_t_sup_{tv}",
+                                  help="Create supervisors in the Supervisors tab.")
+        # Store the stable id, not the name, so renaming a supervisor later
+        # doesn't orphan this technician.
+        new_t_sup = sup_name_to_id.get(sup_choice, "") if sup_choice != "— none —" else ""
 
         if st.button("➕ Add To Batch", key="add_tech_batch_btn", type="primary", use_container_width=True):
             if not new_t_name.strip():
-                st.error("❌ Name is required.")
+                st.error("❌ Technician Name is required.")
             elif any(b["name"] == new_t_name.strip() for b in st.session_state["tech_batch"]):
                 st.error("❌ Already added to this batch.")
             else:
@@ -3621,7 +3662,7 @@ with tab_admin:
                     detail = " · ".join([x for x in [
                         str(row.get("phone", "")), str(row.get("aadhar", "")),
                         (f"Login: {row.get('login_id','')}" if str(row.get("login_id","")).strip() else ""),
-                        f"Sup: {row.get('supervisor','').strip() or '—'}",
+                        f"Sup: {resolve_supervisor_name(row.get('supervisor','')) or '—'}",
                     ] if x]) or "no details on file"
                     st.markdown(f"""
                     <div class="item-card">
@@ -3649,7 +3690,11 @@ with tab_admin:
                         e_phone = st.text_input("Phone (optional)", value=str(row.get("phone", "")))
                         e_aadhar = st.text_input("Aadhar (optional)", value=str(row.get("aadhar", "")))
                         e_login = st.text_input("Login ID (optional)", value=str(row.get("login_id", "")), placeholder="TL_Vinod")
-                        e_sup = st.text_input("Supervisor (optional)", value=str(row.get("supervisor", "")))
+                        _cur_sup_name = resolve_supervisor_name(row.get("supervisor", ""))
+                        _sup_opts = ["— none —"] + sorted(sup_name_to_id.keys())
+                        _sup_idx = _sup_opts.index(_cur_sup_name) if _cur_sup_name in _sup_opts else 0
+                        e_sup_name = st.selectbox("Reports to supervisor", _sup_opts, index=_sup_idx)
+                        e_sup = sup_name_to_id.get(e_sup_name, "") if e_sup_name != "— none —" else ""
                         e_active = st.selectbox("Status", ["Active", "Inactive"], index=0 if is_active else 1)
                         sv, cn = st.columns(2)
                         with sv:
@@ -3685,6 +3730,112 @@ with tab_admin:
                         if st.button("❌ Cancel", key=f"cancel_del_tech_{idx}"):
                             del st.session_state["deleting_tech_idx"]
                             st.rerun()
+
+    # ── Supervisors ───────────────────────────────────────────────────────────
+    with subtab_sup:
+        st.caption("Supervisors are stored in their own sheet, so one can exist before any technician is assigned. Technicians are linked by a stable ID — renaming a supervisor keeps their team intact.")
+
+        df_sup = df_supervisors_master.copy()
+        if df_sup.empty:
+            df_sup = pd.DataFrame(columns=["supervisor_id", "name", "phone", "is_active"])
+        for col in ["supervisor_id", "name", "phone", "is_active"]:
+            if col not in df_sup.columns:
+                df_sup[col] = ""
+
+        # -- Add a supervisor --
+        st.markdown('<div class="sub-hdr">➕ Add Supervisor</div>', unsafe_allow_html=True)
+        if "sup_form_version" not in st.session_state:
+            st.session_state["sup_form_version"] = 0
+        sv_v = st.session_state["sup_form_version"]
+        sc1, sc2 = st.columns([2, 1])
+        with sc1:
+            new_sup_name = st.text_input("Supervisor Name", key=f"new_sup_name_{sv_v}")
+        with sc2:
+            new_sup_phone = st.text_input("Phone (optional)", key=f"new_sup_phone_{sv_v}")
+        if st.button("➕ Add Supervisor", type="primary", use_container_width=True, key="add_sup_btn"):
+            nm = new_sup_name.strip()
+            if not nm:
+                st.error("❌ Supervisor Name is required.")
+            elif nm in set(df_sup["name"].astype(str).str.strip()):
+                st.error(f"❌ '{nm}' already exists.")
+            else:
+                new_id = f"S{int(time.time())}"  # stable id, never reused
+                updated_sup = pd.concat([df_sup, pd.DataFrame([{
+                    "supervisor_id": new_id, "name": nm, "phone": new_sup_phone.strip(), "is_active": "1",
+                }])], ignore_index=True)
+                if safe_update("Supervisors", updated_sup):
+                    st.session_state["sup_form_version"] += 1
+                    st.success(f"✅ Added {nm}.")
+                    st.rerun()
+
+        # -- Existing supervisors + team assignment --
+        st.markdown('<div class="sec-hdr">🧑‍💼 Supervisors & Their Teams</div>', unsafe_allow_html=True)
+        df_t_all = df_technicians_master.copy()
+        if not df_t_all.empty:
+            df_t_all = df_t_all.rename(columns={x: str(x).strip().lower() for x in df_t_all.columns})
+        for col in ["name", "login_id", "supervisor", "is_active"]:
+            if col not in df_t_all.columns:
+                df_t_all[col] = ""
+
+        if df_sup.empty or df_sup["name"].astype(str).str.strip().eq("").all():
+            st.info("No supervisors yet — add one above.")
+        else:
+            all_tech_names = sorted([n for n in df_t_all["name"].astype(str).str.strip() if n])
+            for s_idx, s_row in df_sup.iterrows():
+                s_id = str(s_row.get("supervisor_id", "")).strip()
+                s_name = str(s_row.get("name", "")).strip()
+                if not s_name:
+                    continue
+
+                # Technicians currently pointing at this supervisor (by id, or
+                # legacy by name).
+                assigned_mask = df_t_all["supervisor"].astype(str).str.strip().isin([s_id, s_name])
+                assigned = sorted([n for n in df_t_all.loc[assigned_mask, "name"].astype(str).str.strip() if n])
+
+                with st.expander(f"🧑‍💼 {s_name} — {len(assigned)} technician(s)"):
+                    picked = st.multiselect(
+                        "Assigned technicians", all_tech_names, default=assigned,
+                        key=f"sup_assign_{s_id or s_idx}",
+                        help="Add or remove technicians here. Removing one leaves them unassigned, it does not delete them.",
+                    )
+                    ac1, ac2 = st.columns(2)
+                    with ac1:
+                        if st.button("💾 Save Team", type="primary", use_container_width=True, key=f"save_team_{s_id or s_idx}"):
+                            df_new = df_t_all.copy()
+                            # Clear anyone previously under this supervisor, then
+                            # set the current picks — handles unassignment too.
+                            df_new.loc[df_new["supervisor"].astype(str).str.strip().isin([s_id, s_name]), "supervisor"] = ""
+                            df_new.loc[df_new["name"].astype(str).str.strip().isin(picked), "supervisor"] = s_id
+                            if safe_update("Technicians", df_new):
+                                st.success(f"✅ {s_name}'s team updated ({len(picked)} technician(s)).")
+                                st.rerun()
+                    with ac2:
+                        if st.button("🗑️ Delete Supervisor", use_container_width=True, key=f"del_sup_{s_id or s_idx}"):
+                            st.session_state["deleting_sup"] = s_id or str(s_idx)
+
+                    if st.session_state.get("deleting_sup") == (s_id or str(s_idx)):
+                        st.markdown(f'<div class="warn-box">⚠️ Delete <b>{s_name}</b>? Their {len(assigned)} technician(s) stay, but become unassigned.</div>', unsafe_allow_html=True)
+                        dy, dn = st.columns(2)
+                        with dy:
+                            if st.button("✅ Yes, Delete", key=f"conf_del_sup_{s_id or s_idx}"):
+                                df_t_clear = df_t_all.copy()
+                                df_t_clear.loc[df_t_clear["supervisor"].astype(str).str.strip().isin([s_id, s_name]), "supervisor"] = ""
+                                df_sup_new = df_sup.drop(index=s_idx).reset_index(drop=True)
+                                if safe_update("Supervisors", df_sup_new) and safe_update("Technicians", df_t_clear):
+                                    del st.session_state["deleting_sup"]
+                                    st.success(f"Deleted {s_name}.")
+                                    st.rerun()
+                        with dn:
+                            if st.button("❌ Cancel", key=f"cancel_del_sup_{s_id or s_idx}"):
+                                del st.session_state["deleting_sup"]
+                                st.rerun()
+
+            # Anyone not under any supervisor — surfaced so nobody is forgotten.
+            known_ids_names = set(df_sup["supervisor_id"].astype(str).str.strip()) | set(df_sup["name"].astype(str).str.strip())
+            unassigned_mask = ~df_t_all["supervisor"].astype(str).str.strip().isin(known_ids_names - {""})
+            unassigned_names = sorted([n for n in df_t_all.loc[unassigned_mask, "name"].astype(str).str.strip() if n])
+            if unassigned_names:
+                st.markdown(f'<div class="warn-box">⚠️ Not assigned to any supervisor: <b>{", ".join(unassigned_names)}</b></div>', unsafe_allow_html=True)
 
     # ── Locations ─────────────────────────────────────────────────────────────
     with subtab_loc:
