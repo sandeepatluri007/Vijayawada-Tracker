@@ -2691,19 +2691,6 @@ with tab_analytics:
         else:
             st.caption("Not enough data yet to project.")
 
-        # -- Section-wise summary (combines every section's uploaded file for this date) --
-        st.markdown('<div class="sec-hdr">📍 Section-Wise Summary</div>', unsafe_allow_html=True)
-        st.caption("All sections uploaded for this date, combined.")
-        if has_col(day_df, "location"):
-            section_df = day_df.copy()
-            section_df["location"] = section_df["location"].replace("", "Unspecified").fillna("Unspecified")
-            section_summary = section_df.groupby("location").size().reset_index(name="Installs")
-            section_summary.columns = ["Section", "Installs"]
-            section_summary = section_summary.sort_values("Installs", ascending=False)
-            st.dataframe(section_summary, use_container_width=True, hide_index=True, height=dataframe_height(len(section_summary)))
-        else:
-            st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
-
         # -- Hourly table --------------------------------------------------
         st.markdown('<div class="sec-hdr">⏱️ Installer-Wise Hourly Count</div>', unsafe_allow_html=True)
         if day_df["hour_int"].notna().any():
@@ -2721,62 +2708,80 @@ with tab_analytics:
             row["Total"] = len(sub)
             return row
 
-        group_by_supervisor = (sel_supervisor == "All supervisors") and len(sups_today) > 1
-        hourly_rows = []
-        if group_by_supervisor:
-            # Installers grouped under their supervisor, each group followed by
-            # a subtotal — so a supervisor can find their own team at a glance
-            # without filtering, and totals per team are directly comparable.
-            sup_order = (day_df.groupby("supervisor").size().sort_values(ascending=False).index.tolist())
-            for sup in sup_order:
-                sup_df = day_df[day_df["supervisor"] == sup]
-                sup_installers = (sup_df.groupby("installer_id").size().sort_values(ascending=False).index.tolist())
-                for inst in sup_installers:
-                    hourly_rows.append(_hour_row(inst, sup_df[sup_df["installer_id"] == inst]))
-                hourly_rows.append(_hour_row(f"— {sup} subtotal", sup_df))
-            hourly_df = pd.DataFrame(hourly_rows)
-        else:
-            for inst in installers:
-                hourly_rows.append(_hour_row(inst, day_df[day_df["installer_id"] == inst]))
-            hourly_df = pd.DataFrame(hourly_rows).sort_values("Total", ascending=False)
-        # Sum only the per-installer rows. With supervisor grouping on, the
-        # frame also holds subtotal rows, and summing everything would count
-        # each install twice.
-        installer_rows_only = hourly_df[~hourly_df["Installer"].apply(_is_aggregate_row)]
-        total_row = {"Installer": "TOTAL"}
-        for h in hour_cols:
-            total_row[f"{h}-{h+1}"] = int(installer_rows_only[f"{h}-{h+1}"].sum())
-        total_row["Total"] = int(installer_rows_only["Total"].sum())
-        hourly_df = pd.concat([hourly_df, pd.DataFrame([total_row])], ignore_index=True)
         hour_col_labels = [f"{h}-{h+1}" for h in hour_cols]
+        last_install_time = max(day_df["time"]) if not day_df.empty else "—"
+
+        def _build_hourly_df(scope_df):
+            """Per-installer rows for a scope, plus its own TOTAL row."""
+            rows = [
+                _hour_row(inst, scope_df[scope_df["installer_id"] == inst])
+                for inst in scope_df.groupby("installer_id").size().sort_values(ascending=False).index
+            ]
+            hdf = pd.DataFrame(rows)
+            tot = {"Installer": "TOTAL"}
+            for h in hour_cols:
+                tot[f"{h}-{h+1}"] = int(hdf[f"{h}-{h+1}"].sum())
+            tot["Total"] = int(hdf["Total"].sum())
+            return pd.concat([hdf, pd.DataFrame([tot])], ignore_index=True)
+
         hourly_view_mode = st.radio(
             "Hourly table view", ["📋 Table", "🔲 Heatmap (no horizontal scroll)"],
             horizontal=True, key="hourly_view_mode", label_visibility="collapsed",
         )
-        if hourly_view_mode.startswith("📋"):
-            st.dataframe(style_hourly_table(hourly_df, hour_col_labels), use_container_width=True, hide_index=True, height=dataframe_height(len(hourly_df)))
+
+        def _render_hourly_block(scope_df, scope_label, key_suffix):
+            """One heading + table + download button for a given scope. Each
+            supervisor gets their own self-contained block so the image can be
+            shared with just that team, without other teams' numbers in it."""
+            hdf = _build_hourly_df(scope_df)
+            grid = build_hourly_color_grid(hdf, hour_col_labels)
+            if hourly_view_mode.startswith("📋"):
+                st.dataframe(style_hourly_table(hdf, hour_col_labels), use_container_width=True,
+                             hide_index=True, height=dataframe_height(len(hdf)))
+            else:
+                render_hourly_heatmap(hdf, hour_col_labels, grid)
+
+            n_inst = scope_df["installer_id"].nunique()
+            glance = (
+                f"Total: {len(scope_df)}  |  Active Installers: {n_inst}  |  "
+                f"Avg/Installer: {round(len(scope_df) / n_inst, 1) if n_inst else 0}"
+            )
+            scope_line = f"{scope_label}  |  " if scope_label else ""
+            title = (f"Installer-Wise Hourly Count — {sel_date}\n"
+                     f"{scope_line}Last install: {str(max(scope_df['time']))[:5]}\n{glance}")
+            safe_label = (scope_label or "All").replace(" ", "_").replace(":", "")
+            download_image_button(
+                hdf, f"Hourly_Count_{sel_date}_{safe_label}.png", key=f"dl_img_hourly_{key_suffix}",
+                color_grid=grid, title=title,
+            )
+
+        if sel_supervisor == "All supervisors" and len(sups_today) > 1:
+            # A separate table per supervisor: each team reads on its own and
+            # can be shared as its own image, rather than one combined table.
+            for i, sup in enumerate(day_df.groupby("supervisor").size().sort_values(ascending=False).index):
+                sup_df = day_df[day_df["supervisor"] == sup]
+                st.markdown(f'<div class="sub-hdr">🧑‍💼 {sup} — {len(sup_df)} installs</div>', unsafe_allow_html=True)
+                _render_hourly_block(sup_df, f"Supervisor: {sup}", f"sup{i}")
+            st.markdown('<div class="sub-hdr">📊 All Teams Combined</div>', unsafe_allow_html=True)
+            _render_hourly_block(day_df, "All supervisors", "all")
         else:
-            render_hourly_heatmap(hourly_df, hour_col_labels, build_hourly_color_grid(hourly_df, hour_col_labels))
+            scope_label = "" if sel_supervisor == "All supervisors" else f"Supervisor: {sel_supervisor}"
+            _render_hourly_block(day_df, scope_label, "single")
+
         st.caption("🟩 Strong · 🟨 Mid · 🟥 Below target")
-        # Last install time makes a shared image self-dating: whoever receives it
-        # can see how current the data is, not just which day it covers.
-        last_install_time = max(day_df["time"]) if not day_df.empty else "—"
-        glance_line = (
-            f"Total: {len(day_df)}  |  Active Installers: {len(installers)}  |  "
-            f"Avg/Installer: {round(len(day_df) / len(installers), 1) if installers else 0}  |  "
-            f"Forecasted Total: {forecast_total if forecast_total is not None else 'N/A'}"
-        )
-        scope_line = "" if sel_supervisor == "All supervisors" else f"Supervisor: {sel_supervisor}  |  "
-        img_title = (
-            f"Installer-Wise Hourly Count — {sel_date}\n"
-            f"{scope_line}Last install: {str(last_install_time)[:5]}\n{glance_line}"
-        )
-        img_name = f"Hourly_Count_{sel_date}" + ("" if sel_supervisor == "All supervisors" else f"_{sel_supervisor.replace(' ', '_')}") + ".png"
-        download_image_button(
-            hourly_df, img_name, key="dl_img_hourly",
-            color_grid=build_hourly_color_grid(hourly_df, hour_col_labels),
-            title=img_title,
-        )
+
+        # -- Section-wise summary (combines every section's uploaded file for this date) --
+        st.markdown('<div class="sec-hdr">📍 Section-Wise Summary</div>', unsafe_allow_html=True)
+        st.caption("All sections uploaded for this date, combined.")
+        if has_col(day_df, "location"):
+            section_df = day_df.copy()
+            section_df["location"] = section_df["location"].replace("", "Unspecified").fillna("Unspecified")
+            section_summary = section_df.groupby("location").size().reset_index(name="Installs")
+            section_summary.columns = ["Section", "Installs"]
+            section_summary = section_summary.sort_values("Installs", ascending=False)
+            st.dataframe(section_summary, use_container_width=True, hide_index=True, height=dataframe_height(len(section_summary)))
+        else:
+            st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
 
         # -- Half-day split --------------------------------------------------
         st.markdown('<div class="sec-hdr">🌓 Half-Day Split</div>', unsafe_allow_html=True)
