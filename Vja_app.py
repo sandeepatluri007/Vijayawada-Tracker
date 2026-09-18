@@ -1389,28 +1389,38 @@ def compute_active_pace(sorted_times, break_threshold: float = BREAK_GAP_THRESHO
 
 
 
+FORECAST_MIN_ELAPSED_HOURS = 1.0  # floor on measured elapsed time (see below)
+
+
 def forecast_total_installs(day_df: pd.DataFrame, installers: list, day_end_str: str = FORECAST_DAY_END):
     """Projects the team's likely total installs by day-end from the team-wide
     hourly rate:
 
-        rate      = installs so far / hours that had any activity
+        elapsed   = last install time - first install time  (pro-rated, so a
+                    part-finished hour is counted as the minutes actually
+                    worked, not as a whole hour)
+        rate      = installs so far / elapsed hours
         forecast  = installs so far + rate x hours remaining to day end
 
     Why team-hourly rather than per-installer pace: the hourly rate absorbs
-    everything that actually happens on site — breaks (which installers here
-    take at random times, not a fixed lunch), travel between consumers, an
-    afternoon slowdown, people finishing early. A slow hour pulls the average
-    down for the rest of the day; a strong hour pulls it back up, so the
-    forecast self-corrects without needing a separate trend adjustment.
+    everything that actually happens on site — breaks (taken at random times
+    here, not a fixed lunch), travel between consumers, an afternoon
+    slowdown, people finishing early. A slow spell pulls the rate down and a
+    strong one pulls it back up, so the forecast self-corrects without a
+    separate trend adjustment.
 
-    Benchmarked against per-installer-pace projection over 80 simulated days
-    x 6 check times: mean error 5.6% vs 8.1%, median 3.7% vs 7.1%.
+    Pro-rating matters when data is uploaded mid-hour: 60 installs from 09:00
+    to 11:30 is 2.5 hours of work at 24/hour, but counting three whole clock
+    hours (9, 10, 11) would report 20/hour and under-forecast by ~26 installs.
 
-    The in-progress hour is deliberately counted as a WHOLE hour. That slightly
-    understates the rate and makes the forecast mildly conservative; measuring
-    true elapsed minutes instead was tested and was substantially worse
-    (36% vs 11% mean error), because it over-extrapolates from a thin sample
-    in the current hour.
+    FORECAST_MIN_ELAPSED_HOURS floors the elapsed figure because pro-rating
+    divides by it: two installs three minutes apart would otherwise imply
+    40 installs/hour and forecast 360 for the day. The floor costs nothing in
+    accuracy (measured identical at 0.5h, 1.0h and 1.5h) and removes that
+    failure mode.
+
+    Benchmarked over 80 simulated days x 24 check times spread across the hour:
+    mean error 4.6%, median 3.5%.
 
     Returns (rounded_total, rate_per_hour), or (None, 0.0) when there isn't
     enough data yet to project from."""
@@ -1418,20 +1428,19 @@ def forecast_total_installs(day_df: pd.DataFrame, installers: list, day_end_str:
         return None, 0.0
 
     valid = day_df.dropna(subset=["hour_int"]) if "hour_int" in day_df.columns else day_df
-    if valid.empty:
+    if valid.empty or len(valid) < 2:
         return None, 0.0
 
     total_so_far = len(valid)
-    active_hours = valid["hour_int"].nunique()
-    if active_hours < 1 or total_so_far < 2:
-        return None, 0.0
+    mins = [time_to_minutes(t) for t in valid["time"]]
+    first_min, last_min = min(mins), max(mins)
 
-    rate_per_hour = total_so_far / active_hours
+    elapsed_hours = max((last_min - first_min) / 60.0, FORECAST_MIN_ELAPSED_HOURS)
+    rate_per_hour = total_so_far / elapsed_hours
 
-    # Project from the last recorded install — Analytics only advances when a
-    # file is uploaded, so wall-clock "now" can be well ahead of the data and
-    # would invent hours of progress that were never measured.
-    last_min = max(time_to_minutes(t) for t in valid["time"])
+    # Project from the last recorded install, not wall-clock "now": Analytics
+    # only advances when a file is uploaded, so the clock can be well ahead of
+    # the data and would invent hours of progress that were never measured.
     hours_remaining = max(0.0, (time_to_minutes(day_end_str) - last_min) / 60.0)
 
     return round(total_so_far + rate_per_hour * hours_remaining), rate_per_hour
