@@ -905,8 +905,15 @@ def safe_update(worksheet: str, data: pd.DataFrame, retries: int = 5) -> bool:
         try:
             with st.spinner(f"💾 Saving to {worksheet}..."):
                 conn.update(worksheet=worksheet, data=data.astype(str))
-            # Bump the read-cache version so the next get_data() refetches,
-            # instead of clearing every cached value app-wide.
+            # Two cache layers have to be invalidated here, and missing either
+            # one makes a fresh write look like it never happened:
+            #   1. our _read_worksheet_cached wrapper (keyed on _sheet_version)
+            #   2. conn.read()'s OWN internal st.cache_data cache inside
+            #      streamlit-gsheets-connection, which otherwise keeps serving
+            #      its stale copy for the rest of the TTL window.
+            # Writes are rare compared to reads, so a full clear here costs
+            # little and is the only reliable way to flush layer 2.
+            st.cache_data.clear()
             st.session_state["_sheet_version"] = st.session_state.get("_sheet_version", 0) + 1
             return True
         except Exception as e:
@@ -2394,6 +2401,13 @@ def process_analytics_upload(analytics_file) -> dict:
     highlighted); 'wrote' is True only if AnalyticsRaw was actually updated
     (drives whether to rerun and refresh the tables below)."""
     try:
+        # Rewind first — the same upload object may already have been read once
+        # this run (auto-process, then a manual retry), and a consumed stream
+        # would fail to open the second time.
+        try:
+            analytics_file.seek(0)
+        except Exception:
+            pass
         ws = load_first_data_sheet(analytics_file)
     except Exception as e:
         st.error(f"❌ Could not open the file: {e}")
@@ -2515,7 +2529,13 @@ with tab_analytics:
     SLOW_PROCESS_SECONDS = 5
 
     if analytics_file is not None:
-        file_fp = f"{analytics_file.name}_{analytics_file.size}"
+        # Hash the actual bytes rather than name+size: the MDM export keeps the
+        # same filename every day, and two different days' files can coincide
+        # on size — which would make a genuinely new upload look "already
+        # processed" and silently skip it.
+        _fp_bytes = analytics_file.getvalue()
+        file_fp = hashlib.sha256(_fp_bytes).hexdigest()[:16]
+        analytics_file.seek(0)
 
         if st.session_state.get("analytics_last_fp") != file_fp:
             t0 = time.time()
