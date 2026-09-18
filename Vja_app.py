@@ -1422,14 +1422,14 @@ def forecast_total_installs(day_df: pd.DataFrame, installers: list, day_end_str:
     Benchmarked over 80 simulated days x 24 check times spread across the hour:
     mean error 4.6%, median 3.5%.
 
-    Returns (rounded_total, rate_per_hour), or (None, 0.0) when there isn't
-    enough data yet to project from."""
+    Returns (rounded_total, rate_per_hour, effective_day_end), or
+    (None, 0.0, day_end_str) when there isn't enough data yet to project."""
     if not installers or day_df.empty:
-        return None, 0.0
+        return None, 0.0, day_end_str
 
     valid = day_df.dropna(subset=["hour_int"]) if "hour_int" in day_df.columns else day_df
     if valid.empty or len(valid) < 2:
-        return None, 0.0
+        return None, 0.0, day_end_str
 
     total_so_far = len(valid)
     mins = [time_to_minutes(t) for t in valid["time"]]
@@ -1441,9 +1441,21 @@ def forecast_total_installs(day_df: pd.DataFrame, installers: list, day_end_str:
     # Project from the last recorded install, not wall-clock "now": Analytics
     # only advances when a file is uploaded, so the clock can be well ahead of
     # the data and would invent hours of progress that were never measured.
-    hours_remaining = max(0.0, (time_to_minutes(day_end_str) - last_min) / 60.0)
+    day_end_min = time_to_minutes(day_end_str)
 
-    return round(total_so_far + rate_per_hour * hours_remaining), rate_per_hour
+    # If the team is still installing past the assumed finish time, the day
+    # plainly hasn't ended. Without this the forecast silently collapses to
+    # "whatever has been done so far" and stops predicting anything — at 19:00
+    # on a 18:00 day-end it would report the current count as the final total.
+    # Roll the horizon forward to the next whole hour after the last install
+    # so it keeps projecting while work is evidently ongoing.
+    if last_min >= day_end_min:
+        day_end_min = (math.floor(last_min / 60) + 1) * 60
+
+    hours_remaining = max(0.0, (day_end_min - last_min) / 60.0)
+    effective_end = f"{int(day_end_min // 60):02d}:{int(day_end_min % 60):02d}"
+
+    return round(total_so_far + rate_per_hour * hours_remaining), rate_per_hour, effective_end
 
 
 # ── Shared data fetched once per run (avoids repeat reads across tabs) ──────
@@ -2571,7 +2583,15 @@ with tab_analytics:
         installers = sorted(day_df["installer_id"].unique())
 
         st.markdown('<div class="sec-hdr">📌 Today At A Glance</div>', unsafe_allow_html=True)
-        forecast_total, rate_per_hour = forecast_total_installs(day_df, installers) if installers else (None, 0.0)
+        day_end_choice = st.selectbox(
+            "Assume work continues until", ["17:00", "18:00", "19:00", "20:00", "21:00"],
+            index=1, key="forecast_day_end",
+            help="Used only for the forecast. If installs are still coming in past this time, the forecast extends automatically.",
+        )
+        forecast_total, rate_per_hour, effective_end = (
+            forecast_total_installs(day_df, installers, f"{day_end_choice}:00")
+            if installers else (None, 0.0, f"{day_end_choice}:00")
+        )
         g1, g2, g3, g4 = st.columns(4)
         with g1:
             render_colored_metric("Total Installs", len(day_df), GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
@@ -2583,7 +2603,9 @@ with tab_analytics:
             else:
                 st.metric("Forecasted Total", "—")
         if forecast_total is not None:
-            st.caption(f"Projected to {FORECAST_DAY_END[:5]} at the current team rate of {rate_per_hour:.0f} installs/hour.")
+            extended = effective_end[:5] != day_end_choice
+            note = f" (extended past {day_end_choice} — installs still coming in)" if extended else ""
+            st.caption(f"Projected to {effective_end[:5]} at the current team rate of {rate_per_hour:.0f} installs/hour{note}.")
         else:
             st.caption("Not enough data yet to project.")
 
