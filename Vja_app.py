@@ -554,7 +554,7 @@ def build_kml(df: pd.DataFrame, doc_name: str = "Installed Meters") -> bytes:
     ]
     placemarks = []
     for _, r in df.iterrows():
-        name = str(r.get("sno") or r.get("tech_name") or "Install").strip()
+        name = clean_id_value(r.get("sno")) or str(r.get("tech_name") or "Install").strip()
         desc_lines = [f"{label}: {esc(r.get(col))}" for label, col in detail_labels if col in df.columns and str(r.get(col, "")).strip()]
         description = "&#10;".join(desc_lines)
         placemarks.append(
@@ -1057,6 +1057,23 @@ def extract_detail_fields(ws, row: int, optional_map: dict) -> dict:
     return out
 
 
+def clean_id_value(v) -> str:
+    """Strip the trailing ".0" Google Sheets adds to numeric cells, so meter and
+    consumer numbers read as 643612600001 rather than 643612600001.0. Also
+    expands scientific notation, which Sheets uses for long numbers."""
+    s = str(v).strip()
+    if not s or s.lower() in ("nan", "none"):
+        return ""
+    if "e" in s.lower():
+        try:
+            return f"{int(float(s)):d}"
+        except Exception:
+            return s
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s
+
+
 def extract_section_code(sno) -> str:
     """The 6th & 7th digit (1-indexed, from the left) of a 13-digit Consumer
     No / SNO is its section code, e.g. 6436126250971 -> '26'.
@@ -1340,7 +1357,7 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     # table, which matters when a week can run to hundreds of installs.
     listing = df.sort_values(["_date", "time"]) if "time" in df.columns else df.sort_values("_date")
     records = [
-        (str(r.get("sno", "")).strip(), str(r.get("installer_id", "")).strip())
+        (clean_id_value(r.get("sno", "")), str(r.get("installer_id", "")).strip())
         for _, r in listing.iterrows()
     ]
     records = [(s, i) for s, i in records if s]
@@ -1973,10 +1990,14 @@ def find_sno_duplicates():
     dups["Keep?"] = ~dups.duplicated(subset=["sno", "date"], keep="first")
     cols = ["key", "sno", "date", "time", "tech_name", "location", "meter_type", "old_meter_no", "new_meter_no", "Keep?"]
     cols = [c for c in cols if c in dups.columns]
-    return dups[cols].rename(columns={
+    out = dups[cols].rename(columns={
         "key": "Key", "sno": "SNO", "date": "Date", "time": "Time", "tech_name": "Technician",
         "location": "Location", "meter_type": "Meter Type", "old_meter_no": "Old Meter No", "new_meter_no": "New Meter No",
     })
+    for _idc in ["SNO", "Old Meter No", "New Meter No"]:
+        if _idc in out.columns:
+            out[_idc] = out[_idc].apply(clean_id_value)
+    return out
 
 
 def find_near_time_duplicates(threshold_seconds: int = 120):
@@ -2010,10 +2031,13 @@ def find_near_time_duplicates(threshold_seconds: int = 120):
     near["Keep?"] = True  # no default removal suggestion — pure review
     cols = ["key", "installer_id", "tech_name", "date", "time", "location", "sno", "meter_type", "Keep?"]
     cols = [c for c in cols if c in near.columns]
-    return near[cols].rename(columns={
+    out = near[cols].rename(columns={
         "key": "Key", "installer_id": "Installer LoginID", "tech_name": "Technician", "date": "Date",
         "time": "Time", "location": "Location", "sno": "SNO", "meter_type": "Meter Type",
     })
+    if "SNO" in out.columns:
+        out["SNO"] = out["SNO"].apply(clean_id_value)
+    return out
 
 
 def find_matching_log_keys_from_file(uploaded_file):
@@ -2105,10 +2129,14 @@ def find_map_duplicates():
     dups["Keep?"] = ~dups.duplicated(subset=["sno", "date"], keep="first")
     cols = ["key", "sno", "date", "time", "tech_name", "location", "old_meter_no", "new_meter_no", "Keep?"]
     cols = [c for c in cols if c in dups.columns]
-    return dups[cols].rename(columns={
+    out = dups[cols].rename(columns={
         "key": "Key", "sno": "SNO", "date": "Date", "time": "Time", "tech_name": "Technician",
         "location": "Location", "old_meter_no": "Old Meter No", "new_meter_no": "New Meter No",
     })
+    for _idc in ["SNO", "Old Meter No", "New Meter No"]:
+        if _idc in out.columns:
+            out[_idc] = out[_idc].apply(clean_id_value)
+    return out
 
 
 def remove_map_records(keys_to_remove) -> int:
@@ -2421,6 +2449,8 @@ with tab_dash:
             loc_month = this_month.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
             loc_month["Total"] = loc_month["qty_1ph"] + loc_month["qty_3ph"]
             loc_month.columns = ["Location", "1PH", "3PH", "Total"]
+            for _qc in ["1PH", "3PH", "Total"]:
+                loc_month[_qc] = loc_month[_qc].astype(int)
             loc_month = loc_month.sort_values("Total", ascending=False)
             st.dataframe(loc_month, use_container_width=True, hide_index=True)
             download_image_button(loc_month, "This_Month_By_Location.png", key="dl_img_loc_month", title="This Month, By Location")
@@ -2479,6 +2509,10 @@ with tab_dash:
             group_df = filtered.groupby(["tech_name", "location"])[["qty_1ph", "qty_3ph"]].sum().reset_index()
             group_df["Total"] = group_df["qty_1ph"] + group_df["qty_3ph"]
             group_df.columns = ["Technician", "Location", "1PH", "3PH", "Total"]
+            # Counts are whole meters — the upstream to_numeric leaves them as
+            # floats, which renders as "12.0".
+            for _qc in ["1PH", "3PH", "Total"]:
+                group_df[_qc] = group_df[_qc].astype(int)
             st.dataframe(
                 group_df.style.apply(
                     lambda data: pd.DataFrame(
@@ -3098,10 +3132,12 @@ with tab_map:
             st.warning("⚠️ None of the filtered records have latitude/longitude on file.")
         else:
             center_lat, center_lon = pinned["_lat"].mean(), pinned["_long"].mean()
-            tooltip_df = pinned.rename(columns={"_lat": "lat", "_long": "lon"})
+            tooltip_df = pinned.rename(columns={"_lat": "lat", "_long": "lon"}).copy()
             for col in ["sno", "old_meter_no", "new_meter_no", "tech_name", "location", "date"]:
                 if col not in tooltip_df.columns:
                     tooltip_df[col] = ""
+            for col in ["sno", "old_meter_no", "new_meter_no"]:
+                tooltip_df[col] = tooltip_df[col].apply(clean_id_value)
 
             layer = pdk.Layer(
                 "ScatterplotLayer",
@@ -3148,8 +3184,8 @@ with tab_map:
                         f'<a href="https://www.google.com/maps?q={pin_lat},{pin_lon}" target="_blank" class="wa-btn" style="background:var(--accent);">📍 Open In Maps</a>',
                         unsafe_allow_html=True,
                     )
-                detail_bits = [f"**SNO:** {pin_row.get('sno','—') or '—'}", f"**Installer:** {pin_row.get('tech_name','—') or '—'}",
-                               f"**Old Meter:** {pin_row.get('old_meter_no','—') or '—'}", f"**New Meter:** {pin_row.get('new_meter_no','—') or '—'}"]
+                detail_bits = [f"**SNO:** {clean_id_value(pin_row.get('sno')) or '—'}", f"**Installer:** {pin_row.get('tech_name','—') or '—'}",
+                               f"**Old Meter:** {clean_id_value(pin_row.get('old_meter_no')) or '—'}", f"**New Meter:** {clean_id_value(pin_row.get('new_meter_no')) or '—'}"]
                 st.caption(" · ".join(detail_bits))
 
             # -- Save view + share ---------------------------------------------
@@ -3179,7 +3215,11 @@ with tab_map:
             with st.expander(f"📋 View {len(pinned)} record(s) as a table"):
                 map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
                 map_table_cols = [c for c in map_table_cols if c in pinned.columns]
-                st.dataframe(pinned[map_table_cols], use_container_width=True, hide_index=True,
+                map_table = pinned[map_table_cols].copy()
+                for _idc in ["sno", "old_meter_no", "new_meter_no"]:
+                    if _idc in map_table.columns:
+                        map_table[_idc] = map_table[_idc].apply(clean_id_value)
+                st.dataframe(map_table, use_container_width=True, hide_index=True,
                              height=dataframe_height(len(pinned), max_px=500))
 
     st.divider()
@@ -3293,7 +3333,10 @@ with tab_inst:
                     "lat": "Latitude", "long": "Longitude",
                 }
                 cols_present = [c for c in display_cols_map if c in results.columns]
-                results_display = results[cols_present].rename(columns=display_cols_map)
+                results_display = results[cols_present].rename(columns=display_cols_map).copy()
+                for _idc in ["SNO", "Old Meter No", "New Meter No"]:
+                    if _idc in results_display.columns:
+                        results_display[_idc] = results_display[_idc].apply(clean_id_value)
                 st.success(f"✅ Found {len(results)} match(es).")
                 st.dataframe(results_display, use_container_width=True, hide_index=True,
                              height=dataframe_height(len(results_display), max_px=500))
