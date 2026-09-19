@@ -1085,15 +1085,22 @@ def extract_section_code(sno) -> str:
 REPORT_MAX_MAP_SNIPPETS = 6  # keeps the report to one page — extra sections get a text note instead
 
 
-def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_type_filter: str = "All"):
+def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_type_filter: str = "All",
+                            location_filter=None):
     """Builds a single-page PDF for sharing with the customer: install
-    quantities by date and section code (parsed from each record's
-    Consumer No / SNO), plus a small real-basemap snippet per section
-    showing where those installs are. Pulls only from UploadedInstallLog —
-    the same ledger the Dashboard/Installations totals are built from — so
-    the numbers here always match the official install counts, never
-    Map-only legacy data. Returns (pdf_bytes, error_message); pdf_bytes is
-    None if error_message is set."""
+    quantities by date and section code, plus a small real-basemap snippet
+    per section code showing where those installs are.
+
+    Two levels of "section" exist and they are not the same thing:
+      * Section (Location) — the named area on the record, e.g. CHITTINAGAR
+      * Section code       — the 2-digit code parsed from the Consumer No/SNO,
+                             several of which sit under one Location
+    location_filter narrows by the former, section_filter by the latter.
+
+    Pulls only from UploadedInstallLog — the same ledger the Dashboard/
+    Installations totals are built from — so the numbers here always match
+    the official install counts, never Map-only legacy data. Returns
+    (pdf_bytes, error_message); pdf_bytes is None if error_message is set."""
     df = get_data("UploadedInstallLog")
     if df.empty or not has_col(df, "date", "sno", "meter_type"):
         return None, "No install data available yet."
@@ -1103,6 +1110,8 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     df = df[(df["_date"] >= date_start) & (df["_date"] <= date_end)]
     if meter_type_filter != "All":
         df = df[df["meter_type"].astype(str).str.strip() == meter_type_filter]
+    if location_filter and "location" in df.columns:
+        df = df[df["location"].astype(str).str.strip().isin(location_filter)]
     df["section_code"] = df["sno"].apply(extract_section_code)
     if section_filter:
         df = df[df["section_code"].isin(section_filter)]
@@ -1183,8 +1192,10 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     pdf.set_y(max(pdf.get_y(), header_top + 14) + 1)
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(100, 105, 115)
-    sections_desc = "All Sections" if not section_filter else ", ".join(section_filter)
-    pdf.cell(0, 6, f"Period: {date_start.isoformat()} to {date_end.isoformat()}   |   Meter Type: {meter_type_filter}   |   Sections: {sections_desc}", ln=1)
+    loc_desc = "All Sections" if not location_filter else ", ".join(location_filter)
+    code_desc = "All Codes" if not section_filter else ", ".join(section_filter)
+    pdf.cell(0, 6, f"Period: {date_start.isoformat()} to {date_end.isoformat()}   |   Meter Type: {meter_type_filter}", ln=1)
+    pdf.cell(0, 5, f"Section: {loc_desc}   |   Section Codes: {code_desc}", ln=1)
     pdf.cell(0, 5, f"Generated: {date.today().isoformat()}", ln=1)
     pdf.ln(2)
     # Brand rule under the letterhead.
@@ -1198,7 +1209,7 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     # -- Quantity table --
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(16, 21, 31)
-    pdf.cell(0, 6, "Installation Quantities By Date & Section", ln=1)
+    pdf.cell(0, 6, "Installation Quantities By Date & Section Code", ln=1)
     col_labels = ["Date"] + section_codes_sorted + ["Total"]
     avail_w = pdf.w - pdf.l_margin - pdf.r_margin
     row_h = 6.5
@@ -1258,13 +1269,13 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
         if legend:
             pdf.set_font("Helvetica", "", 7.5)
             pdf.set_text_color(100, 105, 115)
-            pdf.multi_cell(avail_w, 4, f"Sections:  {legend}")
+            pdf.multi_cell(avail_w, 4, f"Section codes:  {legend}")
             pdf.ln(1)
 
     # -- Map snippets grid (fits remaining space on this one page) --
     if shown_snippets:
         pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 6, "Section Locations", ln=1)
+        pdf.cell(0, 6, "Install Locations By Section Code", ln=1)
 
         n_images = len(shown_snippets)
         n_cols_grid = min(3, n_images)
@@ -2417,7 +2428,7 @@ with tab_dash:
 
     st.divider()
     st.markdown('<div class="sec-hdr">📄 Weekly Customer Report</div>', unsafe_allow_html=True)
-    st.caption("Quantities by date & section, with a location snippet per section. Pulls from Installs data only.")
+    st.caption("Quantities by date & section code, with a map snippet per code. Pulls from Installs data only.")
 
     rf1, rf2 = st.columns(2)
     with rf1:
@@ -2426,8 +2437,25 @@ with tab_dash:
         report_meter_type = st.selectbox("Meter Type", ["All", "1 PH", "3 PH"], key="report_meter_type")
 
     df_log_for_report = get_data("UploadedInstallLog")
-    all_section_codes = sorted(df_log_for_report["sno"].apply(extract_section_code).unique()) if not df_log_for_report.empty and "sno" in df_log_for_report.columns else []
-    report_sections = st.multiselect("Sections (all if none picked)", all_section_codes, key="report_sections")
+
+    # Two levels: Section = the named Location (e.g. CHITTINAGAR); Section Code
+    # = the 2-digit code from the SNO, several of which sit under one Location.
+    all_locations = (
+        sorted([l for l in df_log_for_report["location"].astype(str).str.strip().unique() if l and l != "Unspecified"])
+        if not df_log_for_report.empty and "location" in df_log_for_report.columns else []
+    )
+    rf3, rf4 = st.columns(2)
+    with rf3:
+        report_locations = st.multiselect("Section (all if none picked)", all_locations, key="report_locations")
+
+    # Codes offered are limited to the chosen Sections, so you can't pick a
+    # combination that returns nothing.
+    scoped = df_log_for_report
+    if report_locations and not scoped.empty and "location" in scoped.columns:
+        scoped = scoped[scoped["location"].astype(str).str.strip().isin(report_locations)]
+    all_section_codes = sorted(scoped["sno"].apply(extract_section_code).unique()) if not scoped.empty and "sno" in scoped.columns else []
+    with rf4:
+        report_sections = st.multiselect("Section Code (all if none picked)", all_section_codes, key="report_sections")
 
     if not df_log_for_report.empty and "sno" in df_log_for_report.columns:
         codes = df_log_for_report["sno"].apply(extract_section_code)
@@ -2444,7 +2472,12 @@ with tab_dash:
         else:
             rd_start = rd_end = report_date_range
         with st.spinner("Generating report..."):
-            pdf_bytes, err = build_weekly_report_pdf(rd_start, rd_end, section_filter=report_sections or None, meter_type_filter=report_meter_type)
+            pdf_bytes, err = build_weekly_report_pdf(
+                rd_start, rd_end,
+                section_filter=report_sections or None,
+                meter_type_filter=report_meter_type,
+                location_filter=report_locations or None,
+            )
         if err:
             st.error(f"❌ {err}")
         else:
