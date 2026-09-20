@@ -625,6 +625,155 @@ def render_hourly_heatmap(df: pd.DataFrame, hour_cols, color_grid):
     plt.close(fig)
 
 
+# ── TLIS Design System components ──────────────────────────────────────────
+# Built to the system's StatTile / TechnicianCard / HeroStat / StatusBadge
+# specs. Streamlit's own st.metric and st.dataframe can't express these, so
+# they are rendered as HTML against the token variables.
+
+ICON_PATHS = {
+    # All drawn on the 24px grid with round caps, per the design system.
+    "bolt": '<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/>',
+    "alert": '<path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>',
+    "box": '<path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="M3 8l9 5 9-5"/>',
+    "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    "gauge": '<path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/>',
+    "plus": '<path d="M12 5v14M5 12h14"/>',
+    "upload": '<path d="M12 19V7m0 0-4 4m4-4 4 4"/><path d="M4 21h16"/>',
+    "download": '<path d="M12 5v12m0 0 4-4m-4 4-4-4"/><path d="M4 21h16"/>',
+    "half": '<circle cx="12" cy="12" r="9"/><path d="M12 3v18"/><path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none" opacity=".25"/>',
+    "users": '<circle cx="9" cy="8" r="3"/><path d="M2.5 20c0-3.3 2.9-6 6.5-6s6.5 2.7 6.5 6"/><circle cx="17.5" cy="9" r="2.3"/><path d="M15.7 14.3c2.6.5 4.8 2.5 4.8 5.7"/>',
+    "file": '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/>',
+    "calendar": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 11h18"/>',
+    "chart": '<path d="M4 20V10M12 20V4M20 20v-7"/>',
+    "list": '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+    "target": '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/>',
+    "pin": '<path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.4"/>',
+    "search": '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
+    "lock": '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+    "broom": '<path d="M4 20 14 10"/><path d="M13 5 19 11"/><path d="m11 13 6-6 3 3-6 6-3-3Z"/>',
+    "rupee": '<path d="M7 5h10M7 9h10M15 5c0 4-3.5 4-8 4l8 10"/>',
+    "receipt": '<path d="M5 3v18l2.5-1.6L10 21l2-1.6L14 21l2.5-1.6L19 21V3Z"/><path d="M9 8h6M9 12h6"/>',
+    "plug": '<path d="M9 3v6M15 3v6"/><path d="M6 9h12v3a6 6 0 0 1-12 0Z"/><path d="M12 18v3"/>',
+}
+
+
+SEC_ICON_SIZE, SUB_ICON_SIZE = 16, 13
+
+
+def sec_hdr(icon: str, text: str):
+    """Section heading with a line icon. The system uses no emoji as interface
+    icons — they render differently on every device."""
+    st.markdown(
+        f'<div class="sec-hdr">{_icon(icon, "--brand-700", SEC_ICON_SIZE)}'
+        f'<span>{text}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def sub_hdr(icon: str, text: str):
+    st.markdown(
+        f'<div class="sub-hdr">{_icon(icon, "--ink-600", SUB_ICON_SIZE)}'
+        f'<span>{text}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _icon(name: str, color_var: str, size: int = 14) -> str:
+    """Line icon on the 24px grid. The system uses no emoji as interface icons."""
+    return (f'<svg viewBox="0 0 24 24" fill="none" stroke="var({color_var})" stroke-width="2" '
+            f'stroke-linecap="round" stroke-linejoin="round" width="{size}" height="{size}">'
+            f'{ICON_PATHS.get(name, ICON_PATHS["box"])}</svg>')
+
+
+def render_stat_tiles(tiles):
+    """StatTile row. tiles = [(icon, value, line1, line2, tone)] where tone is
+    'normal' or 'danger'. Four fit across a phone; the two-line label is what
+    keeps the tile narrow without dropping the label under the 11px floor."""
+    cells = []
+    for icon, value, l1, l2, tone in tiles:
+        ink = "--danger-700" if tone == "danger" else "--ink-900"
+        stroke = "--danger-700" if tone == "danger" else "--brand-500"
+        cells.append(
+            f'<div style="background:var(--surface-100);border-radius:var(--radius-md);'
+            f'padding:10px 8px;display:flex;flex-direction:column;gap:6px;">'
+            f'{_icon(icon, stroke)}'
+            f'<div style="font-size:18px;font-weight:800;color:var({ink});">{value}</div>'
+            f'<div style="font-size:11px;color:var(--ink-600);font-weight:700;line-height:1.15;">{l1}<br/>{l2}</div>'
+            f'</div>'
+        )
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat({len(tiles)},minmax(0,1fr));'
+        f'gap:var(--space-3);margin-bottom:var(--space-5);">{"".join(cells)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _tone_token(value, red_max, yellow_max) -> str:
+    if value < red_max:
+        return "--danger-700"
+    if value <= yellow_max:
+        return "--warning-700"
+    return "--success-700"
+
+
+def render_hero_stat(label: str, value, context: str, pct: float):
+    """HeroStat — one per screen. The ring is a second reading of the same
+    number, never a second metric."""
+    pct = max(0.0, min(100.0, float(pct)))
+    dash = 113.0
+    offset = dash * (1 - pct / 100.0)
+    st.markdown(f"""
+    <div style="border-radius:var(--radius-lg);padding:var(--space-6);
+        background:linear-gradient(135deg,var(--brand-500),var(--brand-700));
+        color:var(--on-brand);display:flex;align-items:center;gap:var(--space-5);
+        margin-bottom:var(--space-5);">
+      <svg viewBox="0 0 44 44" width="52" height="52" style="flex-shrink:0;">
+        <circle cx="22" cy="22" r="18" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="5"/>
+        <circle cx="22" cy="22" r="18" fill="none" stroke="#FFFFFF" stroke-width="5"
+                stroke-linecap="round" stroke-dasharray="{dash:.0f}" stroke-dashoffset="{offset:.0f}"
+                transform="rotate(-90 22 22)"/>
+      </svg>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <div style="font-size:11px;font-weight:700;opacity:0.92;letter-spacing:0.3px;">{label}</div>
+        <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;">{value}</div>
+        <div style="font-size:11px;font-weight:600;opacity:0.95;">{context}</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_technician_cards(rows, red_max, yellow_max, columns: int = 2):
+    """TechnicianCard grid. rows = [(name, location, count)].
+    Two per row roughly halves scroll depth versus one row each, at the same
+    type size — density from arrangement, not from shrinking."""
+    if not rows:
+        return
+    cards = []
+    for name, loc, count in rows:
+        tone = _tone_token(count, red_max, yellow_max)
+        initials = "".join(w[0] for w in str(name).split()[:2]).upper() or "?"
+        cards.append(
+            f'<div style="background:var(--surface-100);border-radius:var(--radius-md);'
+            f'padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-2);">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;">'
+            f'<div style="width:25px;height:25px;border-radius:var(--radius-pill);background:var({tone});'
+            f'color:var(--on-brand);font-size:10.5px;font-weight:800;display:flex;align-items:center;'
+            f'justify-content:center;">{initials}</div>'
+            f'<div style="min-width:34px;text-align:center;padding:3px 10px;border-radius:var(--radius-pill);'
+            f'background:var({tone});color:var(--on-brand);font-size:13px;font-weight:800;">{count}</div>'
+            f'</div>'
+            f'<div style="font-size:13px;font-weight:700;color:var(--ink-900);line-height:1.2;'
+            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{name}</div>'
+            f'<div style="font-size:11px;color:var(--ink-600);font-weight:600;">{loc}</div>'
+            f'</div>'
+        )
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat({columns},minmax(0,1fr));'
+        f'gap:var(--space-3);">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def render_colored_metric(label: str, value: int, red_max: int, yellow_max: int):
     """A st.metric look-alike whose background/text colour reflects thresholds
     (mirrors the M14 grand-total cell colouring in the source sheet)."""
@@ -750,10 +899,12 @@ html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, 'Se
     display:flex; align-items:center; gap:8px;
     margin: 1.6rem 0 .9rem;
 }
-.sec-hdr::before { content:""; width:5px; height:16px; background:var(--accent); border-radius:3px; display:inline-block; }
+/* The icon now occupies this slot — the old accent bar would double up. */
+.sec-hdr svg, .sub-hdr svg { flex-shrink:0; }
 .sub-hdr {
     font-size:.85rem; font-weight:700; color:var(--ink-600);
     text-transform:uppercase; letter-spacing:.4px;
+    display:flex; align-items:center; gap:7px;
     margin: 1.1rem 0 .5rem;
 }
 
@@ -835,6 +986,42 @@ button[data-testid="baseButton-primary"]:hover, .stButton>button[type="primary"]
 hr { margin: 0.9rem 0 !important; }
 [data-testid="stExpander"] { border-radius: var(--radius); border:1px solid var(--card-border); }
 
+/* ── Bottom tab bar (mobile) ──────────────────────────────────────────────
+   Streamlit renders tabs at the top; on a phone that is the hardest part of
+   the screen to reach one-handed at a meter. Pin the tab list to the bottom
+   there and style it as the design system's TabBar. Desktop keeps top tabs,
+   where reach is not a constraint. */
+@media (max-width: 640px) {
+    .stTabs [data-baseweb="tab-list"] {
+        position: fixed !important;
+        left: 0; right: 0; bottom: 0;
+        z-index: 999;
+        background: var(--surface-100) !important;
+        border-top: 1px solid var(--hairline) !important;
+        border-radius: 0 !important;
+        padding: 6px 4px calc(14px + env(safe-area-inset-bottom, 0px)) !important;
+        gap: 0 !important;
+        box-shadow: 0 -1px 3px rgba(16,21,31,0.06);
+        justify-content: space-around;
+    }
+    .stTabs [data-baseweb="tab"] {
+        flex: 1 1 0; min-width: 0;
+        padding: 8px 2px !important;
+        font-size: 11px !important;      /* the system's floor, never under */
+        font-weight: 600 !important;
+        color: var(--ink-600) !important;
+        text-align: center;
+        border-radius: var(--radius-sm) !important;
+    }
+    .stTabs [aria-selected="true"] {
+        color: var(--brand-700) !important;
+        font-weight: 700 !important;
+        background: var(--brand-050) !important;
+    }
+    /* Clear the fixed bar so the last control is never trapped under it. */
+    .block-container { padding-bottom: 88px !important; }
+}
+
 /* ── Mobile ──────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
     .block-container { padding-left: 0.7rem !important; padding-right: 0.7rem !important; }
@@ -906,7 +1093,7 @@ if not st.session_state["authenticated"]:
     </script>
     """, height=0)
 
-    st.markdown('<div class="sec-hdr">🔒 Supervisor Login</div>', unsafe_allow_html=True)
+    sec_hdr("lock", "Supervisor Login")
     with st.form("login_form"):
         st.info("Please enter the daily operations PIN to access the system. This browser will stay unlocked going forward.")
         pin_entry = st.text_input("Enter PIN", type="password")
@@ -2409,8 +2596,10 @@ if "pending_push" in st.session_state:
 
 
 # ── Tabs Configuration ────────────────────────────────────────────────────────
+# Plain labels — the design system uses no emoji as interface icons, and they
+# render differently on every device.
 tab_dash, tab_analytics, tab_map, tab_inst, tab_inv, tab_admin = st.tabs([
-    "📊 Dashboard", "📈 Analytics", "🗺️ Map", "🛠️ Installs", "📦 Store", "⚙️ Admin"
+    "Dashboard", "Analytics", "Map", "Installs", "Store", "Admin"
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2420,7 +2609,7 @@ with tab_dash:
     df_inst = df_installations_master
     df_inv = df_inventory_master
 
-    st.markdown('<div class="sec-hdr">📦 Live Inventory Stock</div>', unsafe_allow_html=True)
+    sec_hdr("box", "Live Inventory Stock")
 
     if not df_inv.empty and has_col(df_inv, "type", "qty"):
         total_in_1ph = safe_numeric_col(df_inv[df_inv["type"] == "1 PH"], "qty").sum()
@@ -2437,15 +2626,21 @@ with tab_dash:
     pending_1ph = int(total_in_1ph - total_out_1ph)
     pending_3ph = int(total_in_3ph - total_out_3ph)
 
-    sc1, sc2, sc3, sc4 = st.columns(4)
-    sc1.metric("Received 1PH", int(total_in_1ph))
-    sc2.metric("Received 3PH", int(total_in_3ph))
-    sc3.metric("Pending 1PH", pending_1ph, delta="⚠️ Deficit!" if pending_1ph < 0 else None, delta_color="inverse")
-    sc4.metric("Pending 3PH", pending_3ph, delta="⚠️ Deficit!" if pending_3ph < 0 else None, delta_color="inverse")
+    render_stat_tiles([
+        ("bolt",  f"{int(total_in_1ph):,}", "Recv", "1PH", "normal"),
+        ("bolt",  f"{int(total_in_3ph):,}", "Recv", "3PH", "normal"),
+        ("alert" if pending_1ph < 0 else "bolt", f"{pending_1ph:,}", "Pend", "1PH",
+         "danger" if pending_1ph < 0 else "normal"),
+        ("alert" if pending_3ph < 0 else "bolt", f"{pending_3ph:,}", "Pend", "3PH",
+         "danger" if pending_3ph < 0 else "normal"),
+    ])
+    if pending_1ph < 0 or pending_3ph < 0:
+        deficits = [t for t, v in (("1PH", pending_1ph), ("3PH", pending_3ph)) if v < 0]
+        st.markdown(f'<div class="danger-box">More {" and ".join(deficits)} meters installed than received — check Inventory entries.</div>', unsafe_allow_html=True)
 
     # ── Monthly Installs Overview ────────────────────────────────────────────
     st.divider()
-    st.markdown('<div class="sec-hdr">📅 Monthly Installs Overview</div>', unsafe_allow_html=True)
+    sec_hdr("calendar", "Monthly Installs Overview")
 
     if df_inst.empty or not has_col(df_inst, "date", "qty_1ph", "qty_3ph", "location"):
         st.info("No installation data yet.")
@@ -2458,13 +2653,28 @@ with tab_dash:
         today = date.today()
         this_month = df_month[(df_month["_date"].dt.month == today.month) & (df_month["_date"].dt.year == today.year)]
 
-        tm1, tm2, tm3 = st.columns(3)
-        tm1.metric("This Month — 1PH", int(this_month["qty_1ph"].sum()))
-        tm2.metric("This Month — 3PH", int(this_month["qty_3ph"].sum()))
-        tm3.metric("This Month — Total", int(this_month["qty_1ph"].sum() + this_month["qty_3ph"].sum()))
+        m_1ph = int(this_month["qty_1ph"].sum())
+        m_3ph = int(this_month["qty_3ph"].sum())
+        m_total = m_1ph + m_3ph
 
-        st.markdown('<div class="sub-hdr">💰 This Month — 1PH Billing</div>', unsafe_allow_html=True)
-        month_1ph_count = int(this_month["qty_1ph"].sum())
+        # HeroStat: one per screen, and only for a figure with a natural
+        # denominator — here, installs against stock actually received.
+        received_total = int(total_in_1ph + total_in_3ph)
+        if received_total > 0:
+            pct = m_total / received_total * 100
+            render_hero_stat("THIS MONTH · TOTAL INSTALLS", f"{m_total:,}",
+                             f"{pct:.0f}% of received stock installed", pct)
+        else:
+            render_hero_stat("THIS MONTH · TOTAL INSTALLS", f"{m_total:,}",
+                             "No stock receipts recorded yet", 0)
+
+        render_stat_tiles([
+            ("bolt", f"{m_1ph:,}", "1PH", "month", "normal"),
+            ("bolt", f"{m_3ph:,}", "3PH", "month", "normal"),
+        ])
+
+        sub_hdr("rupee", "This Month — 1PH Billing")
+        month_1ph_count = m_1ph
         billing = calculate_1ph_incentive_billing(month_1ph_count)
         tb1, tb2 = st.columns(2)
         tb1.metric("Total Billing (Rs.)", f"{billing['total_cost']:,.0f}")
@@ -2479,7 +2689,7 @@ with tab_dash:
             cb2.metric("Tiered Incentive (Rs.)", f"{billing['tier_incentive']:,.0f}")
             cb3.metric("Flat Add-on (Rs.)", f"{billing['flat_addon']:,.0f}")
 
-        st.markdown('<div class="sub-hdr">📍 This Month, By Location</div>', unsafe_allow_html=True)
+        sub_hdr("pin", "This Month, By Location")
         if this_month.empty:
             st.info("No installs recorded this month yet.")
         else:
@@ -2493,7 +2703,7 @@ with tab_dash:
             download_image_button(loc_month, "This_Month_By_Location.png", key="dl_img_loc_month", title="This Month, By Location")
 
     st.divider()
-    st.markdown('<div class="sec-hdr">🔌 Installation Summary</div>', unsafe_allow_html=True)
+    sec_hdr("plug", "Installation Summary")
 
     if df_inst.empty or not has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
         st.info("No installation data yet. Add entries in the Installs tab.")
@@ -2542,7 +2752,7 @@ with tab_dash:
         m3.metric("Grand Total", sum_1ph + sum_3ph)
 
         if not filtered.empty:
-            st.markdown('<div class="sec-hdr">👷 Technician Breakdown</div>', unsafe_allow_html=True)
+            sec_hdr("users", "Technician Breakdown")
             group_df = filtered.groupby(["tech_name", "location"])[["qty_1ph", "qty_3ph"]].sum().reset_index()
             group_df["Total"] = group_df["qty_1ph"] + group_df["qty_3ph"]
             group_df.columns = ["Technician", "Location", "1PH", "3PH", "Total"]
@@ -2550,24 +2760,25 @@ with tab_dash:
             # floats, which renders as "12.0".
             for _qc in ["1PH", "3PH", "Total"]:
                 group_df[_qc] = group_df[_qc].astype(int)
-            st.dataframe(
-                group_df.style.apply(
-                    lambda data: pd.DataFrame(
-                        {c: (data["Total"].apply(lambda v: tier_style(v, INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)) if c == "Total" else "") for c in data.columns},
-                        index=data.index,
-                    ),
-                    axis=None,
-                ),
-                use_container_width=True, hide_index=True, height=dataframe_height(len(group_df)),
+            group_df = group_df.sort_values("Total", ascending=False)
+            st.caption(f"{len(group_df)} technician(s) · sorted by total")
+            # Two-up card grid rather than one row each: at 30-50 technicians a
+            # full-width list is a scroll marathon, and the fix is arrangement,
+            # not smaller type.
+            render_technician_cards(
+                [(r["Technician"], r["Location"], int(r["Total"])) for _, r in group_df.iterrows()],
+                INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MAX,
             )
-            st.caption("🟩 Strong · 🟨 Mid · 🟥 Below target")
+            with st.expander("View as table (1PH / 3PH split)"):
+                st.dataframe(group_df, use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(group_df)))
             download_image_button(
                 group_df, "Technician_Breakdown.png", key="dl_img_group_df",
                 color_grid=build_single_col_color_grid(group_df, "Total", lambda v: tier_colors(v, INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)),
                 title="Technician Breakdown",
             )
 
-            st.markdown('<div class="sec-hdr">📤 Export & Share</div>', unsafe_allow_html=True)
+            sec_hdr("download", "Export & Share")
             export_df = group_df.copy()
             export_df.loc[len(export_df)] = ["---", "---", "---", "---", "---"]
             export_df.loc[len(export_df)] = ["GRAND TOTAL", "", sum_1ph, sum_3ph, sum_1ph + sum_3ph]
@@ -2592,7 +2803,7 @@ with tab_dash:
             st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Send to WhatsApp</a>', unsafe_allow_html=True)
 
     st.divider()
-    st.markdown('<div class="sec-hdr">📄 Weekly Customer Report</div>', unsafe_allow_html=True)
+    sec_hdr("file", "Weekly Customer Report")
     st.caption("Quantities by date & section code, with a map snippet per code. Pulls from Installs data only.")
 
     rf1, rf2 = st.columns(2)
@@ -2785,7 +2996,7 @@ with tab_analytics:
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="sec-hdr">⬆️ Upload Progress File</div>', unsafe_allow_html=True)
+    sec_hdr("upload", "Upload Progress File")
     analytics_file = st.file_uploader(
         "Upload MDM export (.xlsx) — TL_ logins only. Processes automatically.",
         type=["xlsx"], key="analytics_uploader"
@@ -2862,7 +3073,7 @@ with tab_analytics:
             unassigned_ids = sorted(day_df.loc[day_df["supervisor"] == UNASSIGNED_SUPERVISOR, "installer_id"].unique())
             st.caption(f"⚠️ Not mapped to a supervisor: {', '.join(unassigned_ids)} — set their Supervisor in Admin → Technicians.")
 
-        st.markdown('<div class="sec-hdr">📌 Today At A Glance</div>', unsafe_allow_html=True)
+        sec_hdr("target", "Today At A Glance")
         day_end_choice = st.selectbox(
             "Assume work continues until", ["17:00", "18:00", "19:00", "20:00", "21:00"],
             index=1, key="forecast_day_end",
@@ -2890,7 +3101,7 @@ with tab_analytics:
             st.caption("Not enough data yet to project.")
 
         # -- Hourly table --------------------------------------------------
-        st.markdown('<div class="sec-hdr">⏱️ Installer-Wise Hourly Count</div>', unsafe_allow_html=True)
+        sec_hdr("clock", "Installer-Wise Hourly Count")
         if day_df["hour_int"].notna().any():
             hr_min = int(day_df["hour_int"].min())
             hr_max = int(day_df["hour_int"].max())
@@ -2958,9 +3169,9 @@ with tab_analytics:
             # can be shared as its own image, rather than one combined table.
             for i, sup in enumerate(day_df.groupby("supervisor").size().sort_values(ascending=False).index):
                 sup_df = day_df[day_df["supervisor"] == sup]
-                st.markdown(f'<div class="sub-hdr">🧑‍💼 {sup} — {len(sup_df)} installs</div>', unsafe_allow_html=True)
+                sub_hdr("users", f"{sup} — {len(sup_df)} installs")
                 _render_hourly_block(sup_df, f"Supervisor: {sup}", f"sup{i}")
-            st.markdown('<div class="sub-hdr">📊 All Teams Combined</div>', unsafe_allow_html=True)
+            sub_hdr("chart", "All Teams Combined")
             _render_hourly_block(day_df, "All supervisors", "all")
         else:
             scope_label = "" if sel_supervisor == "All supervisors" else f"Supervisor: {sel_supervisor}"
@@ -2969,7 +3180,7 @@ with tab_analytics:
         st.caption("🟩 Strong · 🟨 Mid · 🟥 Below target")
 
         # -- Section-wise summary (combines every section's uploaded file for this date) --
-        st.markdown('<div class="sec-hdr">📍 Section-Wise Summary</div>', unsafe_allow_html=True)
+        sec_hdr("pin", "Section-Wise Summary")
         st.caption("All sections uploaded for this date, combined.")
         if has_col(day_df, "location"):
             section_df = day_df.copy()
@@ -2982,7 +3193,7 @@ with tab_analytics:
             st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
 
         # -- Half-day split --------------------------------------------------
-        st.markdown('<div class="sec-hdr">🌓 Half-Day Split</div>', unsafe_allow_html=True)
+        sec_hdr("half", "Half-Day Split")
         half_rows = []
         for inst in installers:
             sub = day_df[day_df["installer_id"] == inst]
@@ -3002,7 +3213,7 @@ with tab_analytics:
         download_image_button(half_display_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half", title=f"Half-Day Split — {sel_date}")
 
         # -- Average install time -------------------------------------------
-        st.markdown('<div class="sec-hdr">⏳ Active Pace / Installer</div>', unsafe_allow_html=True)
+        sec_hdr("gauge", "Active Pace / Installer")
         st.caption(f"Hands-on pace — gaps over {int(BREAK_GAP_THRESHOLD_MIN)} min are treated as breaks/travel and excluded.")
         avg_rows = []
         for inst in installers:
@@ -3030,7 +3241,7 @@ with tab_analytics:
         )
 
         # -- Quick visual ------------------------------------------------------
-        st.markdown('<div class="sec-hdr">📊 Total Installs By Installer</div>', unsafe_allow_html=True)
+        sec_hdr("chart", "Total Installs By Installer")
         chart_df = half_df.set_index("Installer")[["Total"]]
         st.bar_chart(chart_df)
 
@@ -3050,7 +3261,7 @@ with tab_analytics:
                 st.error("❌ Incorrect PIN.")
 
         # -- Push this date's Analytics data into Installations ---------------
-        st.markdown('<div class="sec-hdr">📥 Update Installs From Analytics</div>', unsafe_allow_html=True)
+        sec_hdr("download", "Update Installs From Analytics")
         st.markdown("""
         <div class="info-box">
         Pushes this date's records into Installations. Never double-counts. Unmapped login IDs are flagged.
@@ -3203,7 +3414,7 @@ with tab_map:
             st.pydeck_chart(deck, use_container_width=True)
 
             # -- Select a pin: see lat/long as copyable text -----------------
-            st.markdown('<div class="sub-hdr">📍 Select A Pin</div>', unsafe_allow_html=True)
+            sub_hdr("pin", "Select A Pin")
             pin_labels = {}
             for idx, r in pinned.reset_index(drop=True).iterrows():
                 label = f"{r.get('sno') or r.get('tech_name') or 'Install'} — {r.get('date','')} {r.get('time','')} ({r.get('location','')})"
@@ -3229,7 +3440,7 @@ with tab_map:
             # Both exports are built on demand: Streamlit re-runs every tab body
             # on each interaction, so generating these eagerly made every click
             # in the app pay for a matplotlib render plus a full KML build.
-            st.markdown('<div class="sub-hdr">📤 Export This View</div>', unsafe_allow_html=True)
+            sub_hdr("download", "Export This View")
             filter_desc = f"{', '.join(map_loc_filter) if map_loc_filter and len(map_loc_filter) < len(loc_options) else 'All Sections'} · {md_start} to {md_end}"
             ec1, ec2 = st.columns(2)
             with ec1:
@@ -3264,7 +3475,7 @@ with tab_map:
         render_map_legacy_upload_widget()
 
     st.divider()
-    st.markdown('<div class="sec-hdr">🧹 Map Data Maintenance</div>', unsafe_allow_html=True)
+    sec_hdr("broom", "Map Data Maintenance")
     with st.expander("🔎 Check & Remove Duplicate Map Records"):
         st.caption("Scoped entirely to Map data — never touches Installations/inventory.")
         if st.button("🔎 Scan For Duplicates", use_container_width=True, key="scan_map_dups_btn"):
@@ -3287,7 +3498,7 @@ with tab_map:
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inst:
     # ── Bulk Upload from MDM Excel export ────────────────────────────────────
-    st.markdown('<div class="sec-hdr">📤 Bulk Upload From Excel</div>', unsafe_allow_html=True)
+    sec_hdr("upload", "Bulk Upload From Excel")
     st.markdown("""
     <div class="info-box">
     Upload the daily export instead of entering counts manually. Re-uploads won't double-count.
@@ -3342,7 +3553,7 @@ with tab_inst:
                         push_parsed_records_to_installations(parsed, source_label="install(s)")
 
     st.divider()
-    st.markdown('<div class="sec-hdr">🔍 Search By Meter / Service No</div>', unsafe_allow_html=True)
+    sec_hdr("search", "Search By Meter / Service No")
     st.caption("Check if an SNO was installed by your team.")
     search_query = st.text_input("Search SNO / Old Meter No / New Meter No", key="meter_search_box", placeholder="e.g. 1234567890 or meter serial number")
 
@@ -3382,7 +3593,7 @@ with tab_inst:
         render_legacy_upload_widget(key_prefix="installs")
 
     st.divider()
-    st.markdown('<div class="sec-hdr">➕ Daily Entry</div>', unsafe_allow_html=True)
+    sec_hdr("plus", "Daily Entry")
 
     if not active_techs or not active_locs:
         st.warning("⚠️ Please add active Technicians and Locations in the **Admin** tab first.")
@@ -3394,7 +3605,7 @@ with tab_inst:
         v = st.session_state["qm_version"]
 
         # ── Quick Add: same day, same location, multiple technicians ────────
-        st.markdown('<div class="sub-hdr">⚡ Quick Add — Same Day &amp; Location, Multiple Technicians</div>', unsafe_allow_html=True)
+        sub_hdr("bolt", "Quick Add — Same Day &amp; Location, Multiple Technicians")
         qc1, qc2 = st.columns(2)
         with qc1:
             qm_date = st.date_input("Date", value=None, key="qm_date")
@@ -3474,7 +3685,7 @@ with tab_inst:
                     st.rerun()
 
         # ── Batch preview cards + Save All ───────────────────────────────────
-        st.markdown('<div class="sub-hdr">🧾 Batch Ready To Save</div>', unsafe_allow_html=True)
+        sub_hdr("receipt", "Batch Ready To Save")
         batch = st.session_state["installs_batch"]
         if not batch:
             st.info("No entries yet — add some above.")
@@ -3547,7 +3758,7 @@ with tab_inst:
                 else:
                     st.error(f"❌ All entries were duplicates (already exist for that tech/date): {', '.join(skipped)}")
 
-    st.markdown('<div class="sec-hdr">📋 Installation Log</div>', unsafe_allow_html=True)
+    sec_hdr("list", "Installation Log")
     log_data = get_data("Installations")
 
     if log_data.empty:
@@ -3629,7 +3840,7 @@ with tab_inst:
 #  INVENTORY (STORE)
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inv:
-    st.markdown('<div class="sec-hdr">📥 Inward Store Material</div>', unsafe_allow_html=True)
+    sec_hdr("download", "Inward Store Material")
     with st.form("inv_form", clear_on_submit=True):
         iv1, iv2 = st.columns(2)
         with iv1:
@@ -3652,7 +3863,7 @@ with tab_inv:
                 st.success(f"✅ Inwarded {iqty} × {itype} ({imake}) — MRN {imrn.strip()}")
                 st.rerun()
 
-    st.markdown('<div class="sec-hdr">📊 Live Stock Summary</div>', unsafe_allow_html=True)
+    sec_hdr("chart", "Live Stock Summary")
     df_inv_t = get_data("Inventory")
     df_inst_s = df_installations_master
 
@@ -3670,7 +3881,7 @@ with tab_inv:
     sm3.metric("1PH Pending Stock", max(r_1ph - u_1ph, 0))
     sm4.metric("3PH Pending Stock", max(r_3ph - u_3ph, 0))
 
-    st.markdown('<div class="sec-hdr">📋 Inventory Log</div>', unsafe_allow_html=True)
+    sec_hdr("list", "Inventory Log")
     if df_inv_t.empty:
         st.info("No inventory entries yet.")
     else:
@@ -3782,7 +3993,7 @@ with tab_admin:
             st.session_state["tech_form_version"] = 0
         tv = st.session_state["tech_form_version"]
 
-        st.markdown('<div class="sub-hdr">➕ Add Technicians (one or several)</div>', unsafe_allow_html=True)
+        sub_hdr("plus", "Add Technicians (one or several)")
         st.caption("Login ID (e.g. TL_Vinod) maps uploads to this technician.")
         tc1, tc2, tc3, tc4 = st.columns([2, 1, 1, 1.3])
         with tc1:
@@ -3817,7 +4028,7 @@ with tab_admin:
                 st.rerun()
 
         if st.session_state["tech_batch"]:
-            st.markdown('<div class="sub-hdr">🧾 Batch Ready To Save</div>', unsafe_allow_html=True)
+            sub_hdr("receipt", "Batch Ready To Save")
             for i, b in enumerate(st.session_state["tech_batch"]):
                 bcard, bdel = st.columns([5, 1])
                 with bcard:
@@ -3852,7 +4063,7 @@ with tab_admin:
                 else:
                     st.error(f"❌ All names already exist: {', '.join(skipped)}")
 
-        st.markdown('<div class="sec-hdr">👷 Existing Technicians</div>', unsafe_allow_html=True)
+        sec_hdr("users", "Existing Technicians")
         df_t = df_technicians_master.copy()
         if not df_t.empty:
             df_t = df_t.rename(columns={c: str(c).strip().lower() for c in df_t.columns})
@@ -3955,7 +4166,7 @@ with tab_admin:
                 df_sup[col] = ""
 
         # -- Add a supervisor --
-        st.markdown('<div class="sub-hdr">➕ Add Supervisor</div>', unsafe_allow_html=True)
+        sub_hdr("plus", "Add Supervisor")
         if "sup_form_version" not in st.session_state:
             st.session_state["sup_form_version"] = 0
         sv_v = st.session_state["sup_form_version"]
@@ -3981,7 +4192,7 @@ with tab_admin:
                     st.rerun()
 
         # -- Existing supervisors + team assignment --
-        st.markdown('<div class="sec-hdr">🧑‍💼 Supervisors & Their Teams</div>', unsafe_allow_html=True)
+        sec_hdr("users", "Supervisors &amp; Their Teams")
         df_t_all = df_technicians_master.copy()
         if not df_t_all.empty:
             df_t_all = df_t_all.rename(columns={x: str(x).strip().lower() for x in df_t_all.columns})
@@ -4057,7 +4268,7 @@ with tab_admin:
             st.session_state["loc_form_version"] = 0
         lv = st.session_state["loc_form_version"]
 
-        st.markdown('<div class="sub-hdr">➕ Add Locations (one or several)</div>', unsafe_allow_html=True)
+        sub_hdr("plus", "Add Locations (one or several)")
         new_loc_name = st.text_input("Location Name", key=f"new_loc_name_{lv}")
 
         if st.button("➕ Add To Batch", key="add_loc_batch_btn", type="primary", use_container_width=True):
@@ -4071,7 +4282,7 @@ with tab_admin:
                 st.rerun()
 
         if st.session_state["loc_batch"]:
-            st.markdown('<div class="sub-hdr">🧾 Batch Ready To Save</div>', unsafe_allow_html=True)
+            sub_hdr("receipt", "Batch Ready To Save")
             for i, l in enumerate(st.session_state["loc_batch"]):
                 bcard, bdel = st.columns([5, 1])
                 with bcard:
@@ -4105,7 +4316,7 @@ with tab_admin:
                 else:
                     st.error(f"❌ All locations already exist: {', '.join(skipped)}")
 
-        st.markdown('<div class="sec-hdr">📍 Existing Locations</div>', unsafe_allow_html=True)
+        sec_hdr("pin", "Existing Locations")
         df_l = df_locations_master.copy()
         if not df_l.empty:
             df_l = df_l.rename(columns={c: str(c).strip().lower() for c in df_l.columns})
@@ -4173,7 +4384,7 @@ with tab_admin:
 
     # ── Data Maintenance ──────────────────────────────────────────────────────
     st.divider()
-    st.markdown('<div class="sec-hdr">🧹 Data Maintenance</div>', unsafe_allow_html=True)
+    sec_hdr("broom", "Data Maintenance")
     with st.expander(f"🔒 Remove Non-{INSTALLER_ID_PREFIX} Installer Records"):
         st.markdown(f"""
         <div class="danger-box">
@@ -4285,6 +4496,6 @@ with tab_admin:
 
         near_dups = find_near_time_duplicates() if scanned else pd.DataFrame()
         if not near_dups.empty:
-            st.markdown('<div class="sub-hdr">⏱️ Lower-Confidence: Same Installer, Times Within 2 Minutes</div>', unsafe_allow_html=True)
+            sub_hdr("clock", "Lower-Confidence: Same Installer, Times Within 2 Minutes")
             st.caption("Review carefully — back-to-back installs can be genuine.")
             st.dataframe(near_dups, use_container_width=True, hide_index=True, height=dataframe_height(len(near_dups)))
