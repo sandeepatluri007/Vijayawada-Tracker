@@ -90,20 +90,33 @@ def working_days_in_month(year: int, month: int) -> int:
     return max(0, min(WORK_DAY_END, last) - WORK_DAY_START + 1)
 
 
-def working_days_remaining(today: date) -> int:
-    """Working days left INCLUDING today, since today's installs still count."""
+def working_days_remaining(today: date, last_install_date=None) -> int:
+    """Working days still available to install in.
+
+    Counted from the day AFTER the most recent recorded install, because those
+    installs are already in the completed total — counting their day again
+    would pair work already done with time still to come and understate the
+    per-day rate needed. Falls back to counting today inclusive when the month
+    has no installs recorded yet."""
     import calendar
     last = calendar.monthrange(today.year, today.month)[1]
     end = min(WORK_DAY_END, last)
-    if today.day > end:
+
+    if last_install_date and last_install_date.year == today.year and last_install_date.month == today.month:
+        first_open = last_install_date.day + 1      # that day's work is banked
+    else:
+        first_open = today.day                      # nothing recorded yet, today is still open
+
+    first_open = max(first_open, WORK_DAY_START)
+    if first_open > end:
         return 0
-    return end - max(today.day, WORK_DAY_START) + 1
+    return end - first_open + 1
 
 
-def monthly_target_status(installed: int, target: int, today: date) -> dict:
+def monthly_target_status(installed: int, target: int, today: date, last_install_date=None) -> dict:
     """Progress against target, plus the per-day rate needed to still land it."""
     remaining = max(0, target - installed)
-    days_left = working_days_remaining(today)
+    days_left = working_days_remaining(today, last_install_date)
     total_days = working_days_in_month(today.year, today.month)
     per_day_needed = (remaining / days_left) if days_left > 0 else 0.0
     # The pace originally required, for comparison.
@@ -2741,7 +2754,12 @@ with tab_dash:
         # HeroStat measures against the monthly TARGET (set in Admin), not
         # against stock received — stock on hand says nothing about whether
         # the month is on course.
-        tgt = monthly_target_status(m_total, MONTHLY_TARGET, date.today())
+        # Days remaining are counted from the last date that actually has
+        # installs recorded, so a day already counted in m_total is not also
+        # counted as a day still available.
+        last_install_dt = this_month["_date"].max() if not this_month.empty else None
+        last_install_date = last_install_dt.date() if pd.notna(last_install_dt) else None
+        tgt = monthly_target_status(m_total, MONTHLY_TARGET, today, last_install_date)
         render_hero_stat(
             "THIS MONTH · INSTALLS VS TARGET",
             f"{m_total:,} / {MONTHLY_TARGET:,}",
@@ -2756,17 +2774,6 @@ with tab_dash:
             ("gauge", f"{tgt['per_day_needed']:.0f}", "Need", "per day",
              "normal" if tgt["on_track"] else "danger"),
         ])
-        if tgt["days_left"] == 0:
-            st.caption(f"Working month (day {WORK_DAY_START}–{WORK_DAY_END}) has ended.")
-        elif tgt["remaining"] == 0:
-            st.caption("Monthly target reached.")
-        else:
-            pace_note = "on pace" if tgt["on_track"] else f"above the {tgt['original_per_day']:.0f}/day this month started at"
-            st.caption(
-                f"{tgt['per_day_needed']:.0f} installs/day across the remaining "
-                f"{tgt['days_left']} working day(s) to reach {MONTHLY_TARGET:,} — {pace_note}."
-            )
-
         sub_hdr("rupee", "This Month — 1PH Billing")
         month_1ph_count = m_1ph
         billing = calculate_1ph_incentive_billing(month_1ph_count)
@@ -2774,7 +2781,6 @@ with tab_dash:
         tb1.metric("Total Billing (Rs.)", f"{billing['total_cost']:,.0f}")
         tb2.metric("Blended Cost / Install (Rs.)", f"{billing['blended_per_install']:,.2f}" if month_1ph_count > 0 else "—")
         with st.expander("View slab breakdown"):
-            st.caption("Progressive slabs. 1PH only.")
             slab_df = pd.DataFrame(billing["slabs"])
             if not slab_df.empty:
                 st.dataframe(slab_df, use_container_width=True, hide_index=True)
@@ -2903,7 +2909,6 @@ with tab_dash:
 
     st.divider()
     sec_hdr("file", "Customer Report")
-    st.caption("Quantities by date & section code, with a map snippet per code. Pulls from Installs data only.")
 
     rf1, rf2 = st.columns(2)
     with rf1:
@@ -3277,11 +3282,9 @@ with tab_analytics:
             scope_label = "" if sel_supervisor == "All supervisors" else f"Supervisor: {sel_supervisor}"
             _render_hourly_block(day_df, scope_label, "single")
 
-        st.caption("🟩 Strong · 🟨 Mid · 🟥 Below target")
 
         # -- Section-wise summary (combines every section's uploaded file for this date) --
         sec_hdr("pin", "Section-Wise Summary")
-        st.caption("All sections uploaded for this date, combined.")
         if has_col(day_df, "location"):
             section_df = day_df.copy()
             section_df["location"] = section_df["location"].replace("", "Unspecified").fillna("Unspecified")
@@ -3317,7 +3320,6 @@ with tab_analytics:
 
         # -- Average install time -------------------------------------------
         sec_hdr("gauge", "Active Pace / Installer")
-        st.caption(f"Hands-on pace — gaps over {int(BREAK_GAP_THRESHOLD_MIN)} min are treated as breaks/travel and excluded.")
         avg_rows = []
         for inst in installers:
             sub = day_df[day_df["installer_id"] == inst].sort_values("time")
@@ -3336,7 +3338,6 @@ with tab_analytics:
             _style_map(avg_df.style, avg_time_style, subset=["Avg Time/Install (min)"]),
             use_container_width=True, hide_index=True, height=dataframe_height(len(avg_df)),
         )
-        st.caption("🟩 Faster · 🟨 Mid · 🟥 Slower")
         download_image_button(
             avg_df, f"Avg_Install_Time_{sel_date}.png", key="dl_img_avg",
             color_grid=build_single_col_color_grid(avg_df, "Avg Time/Install (min)", avg_time_colors),
@@ -3559,7 +3560,6 @@ with tab_map:
                 elif st.button("📷 Save Map View As PNG", use_container_width=True, key="map_png_prep"):
                     st.session_state["map_png_ready"] = True
                     st.rerun()
-                st.caption("Pin positions only (no street basemap).")
             with ec2:
                 if st.session_state.get("map_kml_ready"):
                     kml_bytes = build_kml(pinned, doc_name=f"Installed Meters — {filter_desc}")
@@ -3567,7 +3567,6 @@ with tab_map:
                 elif st.button("🗺️ Share As KML File", use_container_width=True, key="map_kml_prep"):
                     st.session_state["map_kml_ready"] = True
                     st.rerun()
-                st.caption("Opens in Google Earth, My Maps, or QGIS.")
 
             with st.expander(f"📋 View {len(pinned)} record(s) as a table"):
                 map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
@@ -3586,7 +3585,6 @@ with tab_map:
     st.divider()
     sec_hdr("broom", "Map Data Maintenance")
     with st.expander("🔎 Check & Remove Duplicate Map Records"):
-        st.caption("Scoped entirely to Map data — never touches Installations/inventory.")
         if st.button("🔎 Scan For Duplicates", use_container_width=True, key="scan_map_dups_btn"):
             st.session_state["map_dups_scanned"] = True
         if st.session_state.get("map_dups_scanned"):
@@ -3664,7 +3662,6 @@ with tab_inst:
 
     st.divider()
     sec_hdr("search", "Search By Meter / Service No")
-    st.caption("Check if an SNO was installed by your team.")
     search_query = st.text_input("Search SNO / Old Meter No / New Meter No", key="meter_search_box", placeholder="e.g. 1234567890 or meter serial number")
 
     if search_query.strip():
@@ -3747,7 +3744,6 @@ with tab_inst:
 
         qty_map = {}
         if qm_techs:
-            st.caption("Enter quantities for each technician:")
             for t in qm_techs:
                 cc1, cc2, cc3 = st.columns([2, 1, 1])
                 with cc1:
@@ -3907,7 +3903,6 @@ with tab_inst:
             disp_log["Total"] = disp_log["qty_1ph"] + disp_log["qty_3ph"]
         st.dataframe(disp_log, use_container_width=True, hide_index=True)
 
-        st.caption("Select a record to edit or delete:")
         log_options_map = {}
         for idx, row in log_sorted.iterrows():
             label = f"#{idx+1}  {row['date']} | {row['tech_name']}"
@@ -4027,7 +4022,6 @@ with tab_inv:
         si, ei = (inv_page - 1) * ITEMS_INV, inv_page * ITEMS_INV
         st.dataframe(inv_sorted.iloc[si:ei], use_container_width=True, hide_index=True)
 
-        st.caption("Select an inventory entry to edit or delete:")
         inv_options_map = {}
         for idx, row in inv_sorted.iterrows():
             label = f"#{idx+1}  {row.get('date','')} | {row.get('type','')} | MRN:{row.get('mrn','')}"
@@ -4106,7 +4100,6 @@ with tab_admin:
         </script>
         """, height=0)
         st.rerun()
-    st.caption("Forgets this browser only.")
 
     st.markdown("""
     <div class="warn-box" style="background:var(--surface-000);border-color:var(--hairline);color:var(--ink-600);">
@@ -4118,11 +4111,6 @@ with tab_admin:
 
     # ── Monthly install target ────────────────────────────────────────────────
     sec_hdr("target", "Monthly Install Target")
-    _tgt_now = monthly_target_status(0, MONTHLY_TARGET, date.today())
-    st.caption(
-        f"Working month runs day {WORK_DAY_START}–{WORK_DAY_END} "
-        f"({_tgt_now['total_days']} working days this month). Used by the Dashboard progress ring."
-    )
     tg1, tg2 = st.columns([2, 1])
     with tg1:
         new_target = st.number_input("Installs target for this month", min_value=0, step=100,
@@ -4133,8 +4121,6 @@ with tab_admin:
             if save_setting("monthly_install_target", int(new_target)):
                 st.success(f"Monthly target set to {int(new_target):,}.")
                 st.rerun()
-    if _tgt_now["total_days"] > 0:
-        st.caption(f"That is {new_target / _tgt_now['total_days']:.0f} installs/day across the working month.")
 
     st.divider()
 
@@ -4149,7 +4135,6 @@ with tab_admin:
         tv = st.session_state["tech_form_version"]
 
         sub_hdr("plus", "Add Technicians (one or several)")
-        st.caption("Login ID (e.g. TL_Vinod) maps uploads to this technician.")
         tc1, tc2, tc3, tc4 = st.columns([2, 1, 1, 1.3])
         with tc1:
             new_t_name = st.text_input("Technician Name", key=f"new_t_name_{tv}")
@@ -4311,7 +4296,6 @@ with tab_admin:
 
     # ── Supervisors ───────────────────────────────────────────────────────────
     with subtab_sup:
-        st.caption("Supervisors are stored in their own sheet, so one can exist before any technician is assigned. Technicians are linked by a stable ID — renaming a supervisor keeps their team intact.")
 
         df_sup = df_supervisors_master.copy()
         if df_sup.empty:
@@ -4578,7 +4562,6 @@ with tab_admin:
             else:
                 st.warning(f"⚠️ Found {len(flagged)} row(s) where the Installations total exceeds what uploads alone account for.")
                 st.dataframe(flagged, use_container_width=True, hide_index=True, height=dataframe_height(len(flagged)))
-                st.caption("'Implied Manual Qty' = portion not explained by uploads.")
                 csv_data = flagged.to_csv(index=False).encode("utf-8")
                 st.download_button("📥 Download This Report", data=csv_data, file_name="installations_discrepancy_report.csv", mime="text/csv", use_container_width=True)
 
@@ -4652,5 +4635,4 @@ with tab_admin:
         near_dups = find_near_time_duplicates() if scanned else pd.DataFrame()
         if not near_dups.empty:
             sub_hdr("clock", "Lower-Confidence: Same Installer, Times Within 2 Minutes")
-            st.caption("Review carefully — back-to-back installs can be genuine.")
             st.dataframe(near_dups, use_container_width=True, hide_index=True, height=dataframe_height(len(near_dups)))
