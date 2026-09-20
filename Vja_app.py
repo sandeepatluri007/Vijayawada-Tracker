@@ -19,6 +19,7 @@ the app creates and appends data automatically):
   Technicians           - name, phone, aadhar, is_active, login_id, supervisor
   Locations             - location_name
   Supervisors           - supervisor_id, name, phone, is_active
+  Settings              - key, value   (holds monthly_install_target)
                            (Technicians.supervisor holds the supervisor_id)
   UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type,
                            sno, old_meter_no, new_meter_no, lat, long, source
@@ -75,6 +76,47 @@ PIN_CODE = "1323"
 # Dashboard tile is explicitly labeled "1PH Billing" rather than guessing at
 # a 3PH rate. Update these constants (and INCENTIVE_TIER_SLABS_1PH) if the
 # approved rates change.
+# ── Monthly install target ─────────────────────────────────────────────────
+# The working month runs 3rd to 27th inclusive; the 1st/2nd and 28th-31st are
+# not install days, so "days remaining" must never count them or the per-day
+# target comes out too low to actually hit.
+WORK_DAY_START, WORK_DAY_END = 3, 27
+DEFAULT_MONTHLY_TARGET = 5000   # fallback until one is set in Admin
+
+
+def working_days_in_month(year: int, month: int) -> int:
+    import calendar
+    last = calendar.monthrange(year, month)[1]
+    return max(0, min(WORK_DAY_END, last) - WORK_DAY_START + 1)
+
+
+def working_days_remaining(today: date) -> int:
+    """Working days left INCLUDING today, since today's installs still count."""
+    import calendar
+    last = calendar.monthrange(today.year, today.month)[1]
+    end = min(WORK_DAY_END, last)
+    if today.day > end:
+        return 0
+    return end - max(today.day, WORK_DAY_START) + 1
+
+
+def monthly_target_status(installed: int, target: int, today: date) -> dict:
+    """Progress against target, plus the per-day rate needed to still land it."""
+    remaining = max(0, target - installed)
+    days_left = working_days_remaining(today)
+    total_days = working_days_in_month(today.year, today.month)
+    per_day_needed = (remaining / days_left) if days_left > 0 else 0.0
+    # The pace originally required, for comparison.
+    original_per_day = (target / total_days) if total_days > 0 else 0.0
+    return {
+        "installed": installed, "target": target, "remaining": remaining,
+        "days_left": days_left, "total_days": total_days,
+        "per_day_needed": per_day_needed, "original_per_day": original_per_day,
+        "pct": (installed / target * 100) if target > 0 else 0.0,
+        "on_track": per_day_needed <= original_per_day * 1.05 if target > 0 else True,
+    }
+
+
 INCENTIVE_UNIT_RATE_1PH = 165.0     # Rs./install — proposed unit rate
 INCENTIVE_FLAT_ADDON_1PH = 15.0     # Rs./install — flat add-on
 INCENTIVE_TIER_SLABS_1PH = [
@@ -685,6 +727,24 @@ def _icon(name: str, color_var: str, size: int = 14) -> str:
             f'{ICON_PATHS.get(name, ICON_PATHS["box"])}</svg>')
 
 
+def tab_action_bar(key: str, show_upload: bool = False):
+    """Left-aligned action row at the top of a tab. Refresh sits on every tab;
+    the upload action only where it means something (Analytics), since
+    st.tabs gives no way to know the active tab from the page header."""
+    widths = [1.15, 1.6, 6] if show_upload else [1.15, 7.6]
+    cols = st.columns(widths)
+    with cols[0]:
+        if st.button("Refresh", use_container_width=True, key=f"refresh_{key}",
+                     help="Reload data from Google Sheets"):
+            st.cache_data.clear()
+            st.rerun()
+    if show_upload:
+        with cols[1]:
+            if st.button("Update Installs", use_container_width=True, key=f"push_{key}",
+                         help="Push this date's Analytics records into Installations"):
+                st.session_state["trigger_analytics_push"] = True
+
+
 def render_stat_tiles(tiles):
     """StatTile row. tiles = [(icon, value, line1, line2, tone)] where tone is
     'normal' or 'danger'. Four fit across a phone; the two-line label is what
@@ -706,6 +766,37 @@ def render_stat_tiles(tiles):
         f'gap:var(--space-3);margin-bottom:var(--space-5);">{"".join(cells)}</div>',
         unsafe_allow_html=True,
     )
+
+
+def render_count_cards(rows, columns: int = 3, total_label: str = None):
+    """Compact label + count cards for simple summaries (section totals, month
+    by location). Replaces small Excel-style tables that are read to spot the
+    biggest and smallest, not to cross-reference."""
+    if not rows:
+        return
+    biggest = max(v for _, v in rows) or 1
+    cards = []
+    for label, value in rows:
+        share = value / biggest * 100
+        cards.append(
+            f'<div style="background:var(--surface-100);border-radius:var(--radius-md);'
+            f'padding:var(--space-4);display:flex;flex-direction:column;gap:6px;">'
+            f'<div style="font-size:11px;color:var(--ink-600);font-weight:700;white-space:nowrap;'
+            f'overflow:hidden;text-overflow:ellipsis;">{label}</div>'
+            f'<div style="font-size:18px;font-weight:800;color:var(--ink-900);">{value:,}</div>'
+            # A proportion bar instead of a coloured cell: shows relative size
+            # without putting text on a tinted background.
+            f'<div style="height:4px;border-radius:999px;background:var(--surface-200);overflow:hidden;">'
+            f'<div style="width:{share:.0f}%;height:100%;background:var(--brand-500);"></div></div>'
+            f'</div>'
+        )
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat({columns},minmax(0,1fr));'
+        f'gap:var(--space-3);">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
+    if total_label:
+        st.caption(f"{total_label}: {sum(v for _, v in rows):,}")
 
 
 def _tone_token(value, red_max, yellow_max) -> str:
@@ -1006,23 +1097,15 @@ hr { margin: 0.9rem 0 !important; }
 
 
 # ── Top banner & Refresh Button ───────────────────────────────────────────────
-head_col1, head_col2 = st.columns([3.5, 1.2])
-with head_col1:
-    st.markdown(f"""
-    <div class="top-banner">
-      <img class="logo" src="data:image/png;base64,{LOGO_B64}" alt="TLIS" />
-      <div>
-        <p class="t">Meter Tracker</p>
-        <p class="s">{COMPANY_NAME} &middot; Vijayawada Field Ops &middot; v{APP_VERSION}</p>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-with head_col2:
-    if st.button("🔄 Refresh", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-
-st.write("")
+st.markdown(f"""
+<div class="top-banner">
+  <img class="logo" src="data:image/png;base64,{LOGO_B64}" alt="TLIS" />
+  <div>
+    <p class="t">Meter Tracker</p>
+    <p class="s">{COMPANY_NAME} &middot; Vijayawada Field Ops &middot; v{APP_VERSION}</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ── Authentication / PIN Protection (persists until the app/tab is closed, ──
 # and now also survives a Streamlit Community Cloud app-sleep / session reset
@@ -1392,7 +1475,7 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     pdf.set_xy(text_x, header_top)
     pdf.set_font("Helvetica", "B", 17)
     pdf.set_text_color(16, 21, 31)
-    pdf.cell(0, 8, "Weekly Installation Report", ln=1)
+    pdf.cell(0, 8, "Installation Report", ln=1)
 
     pdf.set_x(text_x)
     pdf.set_font("Helvetica", "", 9)
@@ -1785,6 +1868,39 @@ df_inventory_master = get_data("Inventory")
 df_technicians_master = get_data("Technicians")
 df_locations_master = get_data("Locations")
 df_supervisors_master = get_data("Supervisors")
+df_settings_master = get_data("Settings")
+
+
+def get_setting(key: str, default):
+    """App settings live in a simple key/value sheet so they can be changed in
+    Admin without a redeploy.  Settings sheet: key, value"""
+    if df_settings_master.empty or not has_col(df_settings_master, "key", "value"):
+        return default
+    row = df_settings_master[df_settings_master["key"].astype(str).str.strip() == key]
+    if row.empty:
+        return default
+    raw = str(row.iloc[0]["value"]).strip()
+    if raw == "":
+        return default
+    try:
+        return type(default)(float(raw)) if isinstance(default, (int, float)) else raw
+    except Exception:
+        return default
+
+
+def save_setting(key: str, value) -> bool:
+    df = df_settings_master.copy()
+    if df.empty or not has_col(df, "key", "value"):
+        df = pd.DataFrame(columns=["key", "value"])
+    mask = df["key"].astype(str).str.strip() == key if not df.empty else pd.Series([], dtype=bool)
+    if not df.empty and mask.any():
+        df.loc[mask, "value"] = str(value)
+    else:
+        df = pd.concat([df, pd.DataFrame([{"key": key, "value": str(value)}])], ignore_index=True)
+    return safe_update("Settings", df)
+
+
+MONTHLY_TARGET = int(get_setting("monthly_install_target", DEFAULT_MONTHLY_TARGET))
 
 active_techs = []
 if not df_technicians_master.empty and has_col(df_technicians_master, "is_active", "name"):
@@ -2570,6 +2686,7 @@ tab_dash, tab_analytics, tab_map, tab_inst, tab_inv, tab_admin = st.tabs([
 #  DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_dash:
+    tab_action_bar("dash")
     df_inst = df_installations_master
     df_inv = df_inventory_master
 
@@ -2621,21 +2738,34 @@ with tab_dash:
         m_3ph = int(this_month["qty_3ph"].sum())
         m_total = m_1ph + m_3ph
 
-        # HeroStat: one per screen, and only for a figure with a natural
-        # denominator — here, installs against stock actually received.
-        received_total = int(total_in_1ph + total_in_3ph)
-        if received_total > 0:
-            pct = m_total / received_total * 100
-            render_hero_stat("THIS MONTH · TOTAL INSTALLS", f"{m_total:,}",
-                             f"{pct:.0f}% of received stock installed", pct)
-        else:
-            render_hero_stat("THIS MONTH · TOTAL INSTALLS", f"{m_total:,}",
-                             "No stock receipts recorded yet", 0)
+        # HeroStat measures against the monthly TARGET (set in Admin), not
+        # against stock received — stock on hand says nothing about whether
+        # the month is on course.
+        tgt = monthly_target_status(m_total, MONTHLY_TARGET, date.today())
+        render_hero_stat(
+            "THIS MONTH · INSTALLS VS TARGET",
+            f"{m_total:,} / {MONTHLY_TARGET:,}",
+            f"{tgt['pct']:.0f}% of target · {tgt['days_left']} working day(s) left",
+            tgt["pct"],
+        )
 
         render_stat_tiles([
             ("bolt", f"{m_1ph:,}", "1PH", "month", "normal"),
             ("bolt", f"{m_3ph:,}", "3PH", "month", "normal"),
+            ("target", f"{tgt['remaining']:,}", "Still", "to go", "normal"),
+            ("gauge", f"{tgt['per_day_needed']:.0f}", "Need", "per day",
+             "normal" if tgt["on_track"] else "danger"),
         ])
+        if tgt["days_left"] == 0:
+            st.caption(f"Working month (day {WORK_DAY_START}–{WORK_DAY_END}) has ended.")
+        elif tgt["remaining"] == 0:
+            st.caption("Monthly target reached.")
+        else:
+            pace_note = "on pace" if tgt["on_track"] else f"above the {tgt['original_per_day']:.0f}/day this month started at"
+            st.caption(
+                f"{tgt['per_day_needed']:.0f} installs/day across the remaining "
+                f"{tgt['days_left']} working day(s) to reach {MONTHLY_TARGET:,} — {pace_note}."
+            )
 
         sub_hdr("rupee", "This Month — 1PH Billing")
         month_1ph_count = m_1ph
@@ -2651,7 +2781,7 @@ with tab_dash:
             cb1, cb2, cb3 = st.columns(3)
             cb1.metric("Base Cost (Rs.)", f"{billing['base_cost']:,.0f}")
             cb2.metric("Tiered Incentive (Rs.)", f"{billing['tier_incentive']:,.0f}")
-            cb3.metric("Flat Add-on (Rs.)", f"{billing['flat_addon']:,.0f}")
+            cb3.metric("Survey (Rs.)", f"{billing['flat_addon']:,.0f}")
 
         sub_hdr("pin", "This Month, By Location")
         if this_month.empty:
@@ -2663,8 +2793,13 @@ with tab_dash:
             for _qc in ["1PH", "3PH", "Total"]:
                 loc_month[_qc] = loc_month[_qc].astype(int)
             loc_month = loc_month.sort_values("Total", ascending=False)
-            st.dataframe(loc_month, use_container_width=True, hide_index=True)
-            download_image_button(loc_month, "This_Month_By_Location.png", key="dl_img_loc_month", title="This Month, By Location")
+            render_count_cards(
+                [(r["Location"], int(r["Total"])) for _, r in loc_month.iterrows()],
+                columns=3, total_label="Month total",
+            )
+            with st.expander("View as table (1PH / 3PH split)"):
+                st.dataframe(loc_month, use_container_width=True, hide_index=True)
+                download_image_button(loc_month, "This_Month_By_Location.png", key="dl_img_loc_month", title="This Month, By Location")
 
     st.divider()
     sec_hdr("plug", "Installation Summary")
@@ -2767,7 +2902,7 @@ with tab_dash:
             st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Send to WhatsApp</a>', unsafe_allow_html=True)
 
     st.divider()
-    sec_hdr("file", "Weekly Customer Report")
+    sec_hdr("file", "Customer Report")
     st.caption("Quantities by date & section code, with a map snippet per code. Pulls from Installs data only.")
 
     rf1, rf2 = st.columns(2)
@@ -2804,7 +2939,7 @@ with tab_dash:
             sample = df_log_for_report.loc[codes == "Unclassified", "sno"].astype(str).head(3).tolist()
             st.warning(f"⚠️ {unclassified_n} record(s) have an unreadable Consumer No and can't be assigned a section code. Examples: {', '.join(repr(s) for s in sample)}")
 
-    if st.button("📄 Generate Weekly Report", type="primary", use_container_width=True, key="generate_weekly_report_btn"):
+    if st.button("Generate Report", type="primary", use_container_width=True, key="generate_weekly_report_btn"):
         if isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 2:
             rd_start, rd_end = report_date_range
         elif isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 1:
@@ -2826,7 +2961,7 @@ with tab_dash:
             st.success("✅ Report ready below.")
 
     if "weekly_report_pdf" in st.session_state:
-        st.download_button("📥 Download Report (PDF)", data=st.session_state["weekly_report_pdf"],
+        st.download_button("Download Report (PDF)", data=st.session_state["weekly_report_pdf"],
                             file_name=st.session_state["weekly_report_name"], mime="application/pdf",
                             use_container_width=True, key="download_weekly_report")
 
@@ -2954,6 +3089,7 @@ def process_analytics_upload(analytics_file) -> dict:
 
 
 with tab_analytics:
+    tab_action_bar("analytics", show_upload=True)
     st.markdown("""
     <div class="info-box">
     📈 Live installer performance. Independent of Installs/Inventory. Re-uploads add new rows only.
@@ -3152,7 +3288,10 @@ with tab_analytics:
             section_summary = section_df.groupby("location").size().reset_index(name="Installs")
             section_summary.columns = ["Section", "Installs"]
             section_summary = section_summary.sort_values("Installs", ascending=False)
-            st.dataframe(section_summary, use_container_width=True, hide_index=True, height=dataframe_height(len(section_summary)))
+            render_count_cards(
+                [(r["Section"], int(r["Installs"])) for _, r in section_summary.iterrows()],
+                columns=3, total_label="Total",
+            )
         else:
             st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
 
@@ -3235,7 +3374,12 @@ with tab_analytics:
         if not has_col(day_df, "location") or not has_col(day_df, "meter_type") or (day_df["location"].eq("").all() and day_df["meter_type"].eq("").all()):
             st.caption("No Location/Meter Type on these records — will push as 'Unspecified', not counted in 1PH/3PH.")
 
-        if st.button(f"📥 Update Installs For {sel_date}", type="primary", use_container_width=True):
+        # Triggered either from this button or the Update Installs action in the
+        # tab's top bar, which sets the flag before this block runs.
+        _push_now = st.button(f"Update Installs For {sel_date}", type="primary", use_container_width=True)
+        if st.session_state.pop("trigger_analytics_push", False):
+            _push_now = True
+        if _push_now:
             push_records = []
             for _, r in day_df.iterrows():
                 rec = {"date": r["date"], "time": r["time"], "installer_id": r["installer_id"]}
@@ -3252,6 +3396,7 @@ with tab_analytics:
 #  Installations/UploadedInstallLog.)
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_map:
+    tab_action_bar("map")
     st.markdown("""
     <div class="info-box">
     🗺️ Installs data mirrors here automatically. The Map-only upload below never affects Installations.
@@ -3461,6 +3606,7 @@ with tab_map:
 #  INSTALLS
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inst:
+    tab_action_bar("inst")
     # ── Bulk Upload from MDM Excel export ────────────────────────────────────
     sec_hdr("upload", "Bulk Upload From Excel")
     st.markdown("""
@@ -3552,6 +3698,27 @@ with tab_inst:
                 st.success(f"✅ Found {len(results)} match(es).")
                 st.dataframe(results_display, use_container_width=True, hide_index=True,
                              height=dataframe_height(len(results_display), max_px=500))
+
+                # Label: value text, so a result can be pasted into WhatsApp or
+                # a ticket without the receiver needing the app.
+                blocks = []
+                for i, (_, row) in enumerate(results_display.iterrows(), 1):
+                    lines = [f"--- Result {i} of {len(results_display)} ---"] if len(results_display) > 1 else []
+                    lines += [f"{col}: {row[col]}" for col in results_display.columns if str(row[col]).strip()]
+                    blocks.append("\n".join(lines))
+                export_text = "\n\n".join(blocks)
+
+                st.text_area("Copy as text", export_text, height=170, key="search_export_text",
+                             help="Tap inside, select all, copy — or use Download below.")
+                dl1, dl2 = st.columns(2)
+                with dl1:
+                    st.download_button("Download as text", data=export_text,
+                                       file_name=f"search_{search_query.strip()[:20] or 'results'}.txt",
+                                       mime="text/plain", use_container_width=True, key="search_dl_txt")
+                with dl2:
+                    st.download_button("Download as CSV", data=results_display.to_csv(index=False),
+                                       file_name=f"search_{search_query.strip()[:20] or 'results'}.csv",
+                                       mime="text/csv", use_container_width=True, key="search_dl_csv")
 
     with st.expander("📤 Upload Legacy/Historical Data"):
         render_legacy_upload_widget(key_prefix="installs")
@@ -3804,6 +3971,7 @@ with tab_inst:
 #  INVENTORY (STORE)
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inv:
+    tab_action_bar("inv")
     sec_hdr("download", "Inward Store Material")
     with st.form("inv_form", clear_on_submit=True):
         iv1, iv2 = st.columns(2)
@@ -3927,6 +4095,7 @@ with tab_inv:
 #  ADMIN
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_admin:
+    tab_action_bar("admin")
     if st.button("🔓 Log Out This Browser", use_container_width=True, key="logout_btn"):
         st.session_state["authenticated"] = False
         if "k" in st.query_params:
@@ -3946,6 +4115,28 @@ with tab_admin:
     Active/Inactive, or 🗑️ to delete.
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Monthly install target ────────────────────────────────────────────────
+    sec_hdr("target", "Monthly Install Target")
+    _tgt_now = monthly_target_status(0, MONTHLY_TARGET, date.today())
+    st.caption(
+        f"Working month runs day {WORK_DAY_START}–{WORK_DAY_END} "
+        f"({_tgt_now['total_days']} working days this month). Used by the Dashboard progress ring."
+    )
+    tg1, tg2 = st.columns([2, 1])
+    with tg1:
+        new_target = st.number_input("Installs target for this month", min_value=0, step=100,
+                                     value=int(MONTHLY_TARGET), key="monthly_target_input")
+    with tg2:
+        st.write("")
+        if st.button("Save Target", type="primary", use_container_width=True, key="save_monthly_target"):
+            if save_setting("monthly_install_target", int(new_target)):
+                st.success(f"Monthly target set to {int(new_target):,}.")
+                st.rerun()
+    if _tgt_now["total_days"] > 0:
+        st.caption(f"That is {new_target / _tgt_now['total_days']:.0f} installs/day across the working month.")
+
+    st.divider()
 
     subtab_tech, subtab_sup, subtab_loc = st.tabs(["👷 Technicians", "🧑‍💼 Supervisors", "📍 Locations"])
 
