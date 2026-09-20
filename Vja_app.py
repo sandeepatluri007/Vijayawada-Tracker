@@ -986,41 +986,42 @@ button[data-testid="baseButton-primary"]:hover, .stButton>button[type="primary"]
 hr { margin: 0.9rem 0 !important; }
 [data-testid="stExpander"] { border-radius: var(--radius); border:1px solid var(--card-border); }
 
-/* ── Bottom tab bar (mobile) ──────────────────────────────────────────────
-   Streamlit renders tabs at the top; on a phone that is the hardest part of
-   the screen to reach one-handed at a meter. Pin the tab list to the bottom
-   there and style it as the design system's TabBar. Desktop keeps top tabs,
-   where reach is not a constraint. */
-@media (max-width: 640px) {
-    .stTabs [data-baseweb="tab-list"] {
-        position: fixed !important;
-        left: 0; right: 0; bottom: 0;
-        z-index: 999;
-        background: var(--surface-100) !important;
-        border-top: 1px solid var(--hairline) !important;
-        border-radius: 0 !important;
-        padding: 6px 4px calc(14px + env(safe-area-inset-bottom, 0px)) !important;
-        gap: 0 !important;
-        box-shadow: 0 -1px 3px rgba(16,21,31,0.06);
-        justify-content: space-around;
-    }
-    .stTabs [data-baseweb="tab"] {
-        flex: 1 1 0; min-width: 0;
-        padding: 8px 2px !important;
-        font-size: 11px !important;      /* the system's floor, never under */
-        font-weight: 600 !important;
-        color: var(--ink-600) !important;
-        text-align: center;
-        border-radius: var(--radius-sm) !important;
-    }
-    .stTabs [aria-selected="true"] {
-        color: var(--brand-700) !important;
-        font-weight: 700 !important;
-        background: var(--brand-050) !important;
-    }
-    /* Clear the fixed bar so the last control is never trapped under it. */
-    .block-container { padding-bottom: 88px !important; }
+/* ── Bottom navigation ────────────────────────────────────────────────────
+   Our own markup, not Streamlit's tab widget. The sentinel span lets us find
+   the block Streamlit wrapped our buttons in and pin the whole thing.
+   :has() is used because Streamlit gives us no stable class of our own. */
+[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .tlis-nav-anchor) {
+    position: fixed !important;
+    left: 0; right: 0; bottom: 0;
+    z-index: 9999;
+    background: var(--surface-100);
+    border-top: 1px solid var(--hairline);
+    box-shadow: 0 -1px 4px rgba(16,21,31,0.07);
+    padding: 6px 8px calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+    gap: 0 !important;
+    margin: 0 !important;
 }
+.tlis-nav-anchor { display:block; height:0; }
+.tlis-nav-icon { display:flex; justify-content:center; margin-bottom:-4px; }
+
+/* The label under each icon: a button stripped back to plain text. */
+[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .tlis-nav-anchor) .stButton>button {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: var(--ink-600) !important;
+    font-size: 11px !important;          /* the system's floor, never under */
+    font-weight: 600 !important;
+    padding: 2px 0 !important;
+    min-height: 0 !important;
+}
+[data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .tlis-nav-anchor) .stButton>button[kind="primary"] {
+    color: var(--brand-700) !important;
+    font-weight: 700 !important;
+}
+
+/* Keep the last control clear of the fixed bar. */
+.block-container { padding-bottom: 96px !important; }
 
 /* ── Mobile ──────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
@@ -2595,17 +2596,51 @@ if "pending_push" in st.session_state:
     st.divider()
 
 
-# ── Tabs Configuration ────────────────────────────────────────────────────────
-# Plain labels — the design system uses no emoji as interface icons, and they
-# render differently on every device.
-tab_dash, tab_analytics, tab_map, tab_inst, tab_inv, tab_admin = st.tabs([
-    "Dashboard", "Analytics", "Map", "Installs", "Store", "Admin"
-])
+# ── Navigation ────────────────────────────────────────────────────────────────
+# Session-state navigation rather than st.tabs, for two reasons:
+#   1. st.tabs renders at the top of the page and cannot be reliably moved —
+#      position:fixed on its internal DOM resolves against a transformed
+#      ancestor instead of the viewport. This bar is our own markup.
+#   2. st.tabs executes EVERY tab body on every interaction, whether or not
+#      it is visible. Branching on one value runs only the active section,
+#      which is the root cause of the slowness this app had.
+NAV_ITEMS = [
+    ("Dashboard", "chart"),
+    ("Analytics", "gauge"),
+    ("Map", "pin"),
+    ("Installs", "plug"),
+    ("Store", "box"),
+    ("Admin", "lock"),
+]
+
+if "nav" not in st.session_state:
+    st.session_state["nav"] = "Dashboard"
+NAV = st.session_state["nav"]
+
+
+def render_bottom_nav():
+    """The design system's TabBar: icon over label, one per destination.
+    A sentinel span lets the CSS find this exact block and pin it."""
+    st.markdown('<span class="tlis-nav-anchor"></span>', unsafe_allow_html=True)
+    cols = st.columns(len(NAV_ITEMS))
+    for col, (name, icon) in zip(cols, NAV_ITEMS):
+        with col:
+            active = (NAV == name)
+            st.markdown(
+                f'<div class="tlis-nav-icon {"on" if active else ""}">'
+                f'{_icon(icon, "--brand-700" if active else "--ink-600", 20)}</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button(name, key=f"nav_{name}", use_container_width=True,
+                         type=("primary" if active else "secondary")):
+                if not active:
+                    st.session_state["nav"] = name
+                    st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
-with tab_dash:
+if NAV == "Dashboard":
     df_inst = df_installations_master
     df_inv = df_inventory_master
 
@@ -2989,7 +3024,7 @@ def process_analytics_upload(analytics_file) -> dict:
     return {"ok": False, "wrote": False}
 
 
-with tab_analytics:
+if NAV == "Analytics":
     st.markdown("""
     <div class="info-box">
     📈 Live installer performance. Independent of Installs/Inventory. Re-uploads add new rows only.
@@ -3287,7 +3322,7 @@ with tab_analytics:
 #  push, plus this tab's own Legacy Data upload. Never written back to
 #  Installations/UploadedInstallLog.)
 # ═══════════════════════════════════════════════════════════════════════════════
-with tab_map:
+if NAV == "Map":
     st.markdown("""
     <div class="info-box">
     🗺️ Installs data mirrors here automatically. The Map-only upload below never affects Installations.
@@ -3496,7 +3531,7 @@ with tab_map:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  INSTALLS
 # ═══════════════════════════════════════════════════════════════════════════════
-with tab_inst:
+if NAV == "Installs":
     # ── Bulk Upload from MDM Excel export ────────────────────────────────────
     sec_hdr("upload", "Bulk Upload From Excel")
     st.markdown("""
@@ -3839,7 +3874,7 @@ with tab_inst:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  INVENTORY (STORE)
 # ═══════════════════════════════════════════════════════════════════════════════
-with tab_inv:
+if NAV == "Store":
     sec_hdr("download", "Inward Store Material")
     with st.form("inv_form", clear_on_submit=True):
         iv1, iv2 = st.columns(2)
@@ -3962,7 +3997,7 @@ with tab_inv:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ADMIN
 # ═══════════════════════════════════════════════════════════════════════════════
-with tab_admin:
+if NAV == "Admin":
     if st.button("🔓 Log Out This Browser", use_container_width=True, key="logout_btn"):
         st.session_state["authenticated"] = False
         if "k" in st.query_params:
@@ -4499,3 +4534,7 @@ with tab_admin:
             sub_hdr("clock", "Lower-Confidence: Same Installer, Times Within 2 Minutes")
             st.caption("Review carefully — back-to-back installs can be genuine.")
             st.dataframe(near_dups, use_container_width=True, hide_index=True, height=dataframe_height(len(near_dups)))
+
+
+# ── Bottom navigation (rendered last so it sits at the end of the DOM) ────────
+render_bottom_nav()
