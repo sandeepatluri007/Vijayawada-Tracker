@@ -124,10 +124,14 @@ FORECAST_DAY_END = "18:00:00"  # assumed end-of-workday for the forecasted-total
 # ── Conditional formatting thresholds ────────────────────────────────────────
 # Mirrors the colour rules used in the LoginID_Summary sheet of the MDM export.
 # Tune these if your team size / daily targets differ.
-CF_GREEN_BG, CF_GREEN_FONT = "#C6EFCE", "#006100"
-CF_YELLOW_BG, CF_YELLOW_FONT = "#FFEB9C", "#9C5700"
-CF_ORANGE_BG, CF_ORANGE_FONT = "#FFD9B3", "#9C5000"
-CF_RED_BG, CF_RED_FONT = "#FFC7CE", "#9C0006"
+# Table/PNG conditional-formatting pairs. Inks are the design system's signal
+# tokens (success-700 / warning-700 / danger-700) so tables match the rest of
+# the UI; literal hex because matplotlib and pandas Styler can't read CSS vars.
+# The previous orange pair measured 4.44:1 (below AA) — these all clear it.
+CF_GREEN_BG, CF_GREEN_FONT = "#C6EFCE", "#0C6633"
+CF_YELLOW_BG, CF_YELLOW_FONT = "#FFEB9C", "#875200"
+CF_ORANGE_BG, CF_ORANGE_FONT = "#FFD9B3", "#875200"
+CF_RED_BG, CF_RED_FONT = "#FFC7CE", "#A93226"
 
 # Per installer × hour cell (e.g. B3:L13 in the source sheet): <2 red, =2 yellow, >2 green
 HOURLY_CELL_THRESHOLD = 2
@@ -320,7 +324,7 @@ def dataframe_to_png_bytes(df: pd.DataFrame, color_grid=None, title: str = None)
 
     for j in range(n_cols):
         header_cell = tbl[0, j]
-        header_cell.set_facecolor("#10151F")
+        header_cell.set_facecolor("#14181F")
         header_cell.set_text_props(color="white", fontweight="bold")
 
     for i in range(n_rows):
@@ -505,7 +509,7 @@ def build_basemap_snapshot_png(lats, lons, title: str = None, point_labels=None)
             x, y = x - origin_x - crop_box[0], y - origin_y - crop_box[1]
             draw.ellipse([x - r, y - r, x + r, y + r], fill="#00B4C0", outline="white", width=outline_w)
             if point_labels and i < len(point_labels) and point_labels[i]:
-                draw.text((x + r + 3, y - r), str(point_labels[i]), fill="#10151F")
+                draw.text((x + r + 3, y - r), str(point_labels[i]), fill="#14181F")
 
         # OSM's tile usage policy requires visible attribution.
         try:
@@ -525,7 +529,7 @@ def build_basemap_snapshot_png(lats, lons, title: str = None, point_labels=None)
                 font = ImageFont.load_default(size=16)
             except Exception:
                 font = ImageFont.load_default()
-            d2.text((8, 8), title, fill="#10151F", font=font)
+            d2.text((8, 8), title, fill="#14181F", font=font)
             cropped = banner
 
         buf = io.BytesIO()
@@ -609,7 +613,7 @@ def render_hourly_heatmap(df: pd.DataFrame, hour_cols, color_grid):
     ax.set_yticklabels(df["Installer"].tolist(), fontsize=9)
     for i in range(n_rows):
         for j, col in enumerate(cols_to_plot):
-            ax.text(j, i, str(df.iloc[i][col]), ha="center", va="center", fontsize=9, fontweight="bold", color="#10151F")
+            ax.text(j, i, str(df.iloc[i][col]), ha="center", va="center", fontsize=9, fontweight="bold", color="#14181F")
     ax.set_xticks(np.arange(-0.5, len(cols_to_plot), 1), minor=True)
     ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
     ax.grid(which="minor", color="white", linewidth=1.5)
@@ -645,35 +649,66 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root {
-    /* Brand palette taken from the TLIS logo (teal), replacing the old green
-       accent so the app and the logo don't clash. */
-    --accent: #00B4C0;
-    --accent-dark: #018A96;
-    --accent-soft: #E4F8FA;
-    --ink: #10151F;
-    --ink-soft: #64748B;
-    --bg: #F6F7F9;
-    --card-border: #E7E9EE;
-    --surface: #FFFFFF;
-    --stripe: #F6F7F9;
-    --radius: 12px;
-    --gap: 14px;
+    /* ── TLIS Design System tokens ──────────────────────────────────────
+       Names and values come from the design system, not from this file.
+       Do not lighten --ink-600: at 8.2:1 it is the lightest grey the system
+       permits for text, chosen with headroom because sun glare erodes
+       perceived contrast well below what a meter reads indoors. */
+    --brand-500: #0EA5A8;
+    --brand-700: #0E6E7A;
+    --brand-050: #E4F8FA;
+    --surface-000: #FAFAFA;
+    --surface-100: #FFFFFF;
+    --surface-200: #ECEDEF;
+    --ink-900: #14181F;
+    --ink-600: #4B4F56;
+    --hairline: #ECECEE;
+    --success-700: #0C6633;
+    --warning-700: #875200;
+    --danger-700: #A93226;
+    --on-brand: #FFFFFF;
+
+    --radius-sm: 8px;
+    --radius-md: 13px;
+    --radius-lg: 18px;
+    --radius-pill: 999px;
+
+    --space-1: 4px;
+    --space-2: 7px;
+    --space-3: 8px;
+    --space-4: 11px;
+    --space-5: 14px;
+    --space-6: 16px;
+
+    /* Legacy aliases — older rules in this file still reference these.
+       Kept pointing at tokens so nothing carries an off-system value. */
+    --accent: var(--brand-500);
+    --accent-dark: var(--brand-700);
+    --accent-soft: var(--brand-050);
+    --ink: var(--ink-900);
+    --ink-soft: var(--ink-600);
+    --bg: var(--surface-000);
+    --card-border: var(--hairline);
+    --surface: var(--surface-100);
+    --stripe: var(--surface-000);
+    --radius: var(--radius-md);
+    --gap: var(--space-5);
 }
 
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
 .stApp { background: var(--bg); color: var(--ink); }
 #MainMenu, footer, header { visibility:hidden; }
 
 .top-banner {
-    background: #ffffff;
+    background: var(--surface-100);
     border: 1px solid var(--card-border);
-    border-radius: 16px;
-    padding: 14px 18px;
+    border-radius: var(--radius-lg);
+    padding: var(--space-5) 18px;
     display:flex; align-items:center; gap:12px;
     box-shadow: 0 1px 2px rgba(16,21,31,0.04);
 }
 .top-banner .icon-badge {
-    width:40px; height:40px; border-radius:12px; background:var(--accent-soft);
+    width:40px; height:40px; border-radius:var(--radius-md); background:var(--accent-soft);
     display:flex; align-items:center; justify-content:center; font-size:1.3rem; flex-shrink:0;
 }
 .top-banner .t { font-size:1.15rem; font-weight:800; color:var(--ink); letter-spacing:-.2px; margin:0; }
@@ -681,7 +716,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
 /* Segmented-control style tabs, closer to Groww/Kite bottom-nav feel */
 .stTabs [data-baseweb="tab-list"] {
-    background:#EEF0F3; border-radius:12px; padding:4px; gap:2px;
+    background:var(--surface-200); border-radius:var(--radius-md); padding:4px; gap:2px;
     overflow-x:auto; white-space:nowrap;
 }
 .stTabs [data-baseweb="tab"] {
@@ -692,14 +727,14 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 }
 .stTabs [aria-selected="true"] {
     background:var(--ink) !important;
-    color:#ffffff !important;
+    color:var(--on-brand) !important;
     box-shadow: 0 1px 3px rgba(16,21,31,0.15);
 }
 
 [data-testid="stMetric"] {
-    background: #ffffff;
-    border: 1px solid var(--card-border); border-radius:14px;
-    padding: 16px 14px !important;
+    background: var(--surface-100);
+    border: 1px solid var(--card-border); border-radius:var(--radius-md);
+    padding: var(--space-6) var(--space-5) !important;
     box-shadow: 0 1px 2px rgba(16,21,31,0.03);
 }
 [data-testid="stMetricLabel"] {
@@ -717,13 +752,13 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 }
 .sec-hdr::before { content:""; width:5px; height:16px; background:var(--accent); border-radius:3px; display:inline-block; }
 .sub-hdr {
-    font-size:.85rem; font-weight:700; color:var(--ink-soft);
+    font-size:.85rem; font-weight:700; color:var(--ink-600);
     text-transform:uppercase; letter-spacing:.4px;
     margin: 1.1rem 0 .5rem;
 }
 
 .stButton>button {
-    background:#ffffff !important; color:var(--ink) !important;
+    background:var(--surface-100) !important; color:var(--ink) !important;
     border:1px solid var(--card-border) !important; border-radius:10px !important;
     font-weight:600 !important; font-size:.92rem !important;
     padding:10px 18px !important; width:100% !important;
@@ -733,7 +768,9 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .stButton>button:hover { border-color:var(--accent) !important; color:var(--accent-dark) !important; }
 
 button[data-testid="baseButton-primary"], .stButton>button[type="primary"] {
-    background:var(--accent) !important; color:#ffffff !important; border-color:var(--accent) !important;
+    /* brand-700, not brand-500: white button LABELS are ~15px, and white on
+       brand-500 is only 3.01:1. brand-700 gives 5.95:1. */
+    background:var(--brand-700) !important; color:var(--on-brand) !important; border-color:var(--brand-700) !important;
 }
 button[data-testid="baseButton-primary"]:hover, .stButton>button[type="primary"]:hover {
     background:var(--accent-dark) !important; border-color:var(--accent-dark) !important; color:#fff !important;
@@ -741,30 +778,30 @@ button[data-testid="baseButton-primary"]:hover, .stButton>button[type="primary"]
 
 .stSelectbox>div>div, .stNumberInput>div>div>input,
 .stTextInput>div>div>input, .stDateInput>div>div>input, .stMultiSelect>div>div {
-    background:#ffffff !important; border:1px solid var(--card-border) !important;
+    background:var(--surface-100) !important; border:1px solid var(--card-border) !important;
     border-radius:10px !important; color:var(--ink) !important; font-size:.9rem !important;
 }
 
-.stForm { background:#ffffff !important; border:1px solid var(--card-border) !important;
+.stForm { background:var(--surface-100) !important; border:1px solid var(--card-border) !important;
     border-radius:14px !important; padding:18px !important; }
 
 
 .warn-box {
-    background:#FFF8E8; border:1px solid #F5D98B; border-radius:11px;
-    padding:11px 15px; color:#8A6208; font-size:.85rem; margin-bottom:.8rem; font-weight:500;
+    background:#FFF8E8; border:1px solid #F5D98B; border-radius:var(--radius-md);
+    padding:var(--space-4) 15px; color:var(--warning-700); font-size:.85rem; margin-bottom:.8rem; font-weight:600;
 }
 .info-box {
-    background:#F1F5F9; border:1px solid var(--card-border); border-radius:11px;
+    background:var(--surface-200); border:1px solid var(--card-border); border-radius:var(--radius-md);
     padding:11px 15px; color:var(--ink-soft); font-size:.85rem; margin-bottom:.8rem; font-weight:500;
 }
 .danger-box {
-    background:#FEF2F2; border:1px solid #FCA5A5; border-radius:11px;
-    padding:11px 15px; color:#991B1B; font-size:.85rem; margin-bottom:.8rem; font-weight:500;
+    background:#FEF2F2; border:1px solid #FCA5A5; border-radius:var(--radius-md);
+    padding:var(--space-4) 15px; color:var(--danger-700); font-size:.85rem; margin-bottom:.8rem; font-weight:600;
 }
 
 .wa-btn {
     display:block; text-align:center; background:#25D366; color:#fff !important;
-    padding:13px; border-radius:11px; text-decoration:none; font-weight:700;
+    padding:13px; border-radius:var(--radius-md); text-decoration:none; font-weight:700;
     font-size:1rem; letter-spacing:.2px;
     margin-top:1rem; transition: background 0.2s;
     box-shadow: 0 2px 6px rgba(37,211,102,0.25);
@@ -774,10 +811,10 @@ button[data-testid="baseButton-primary"]:hover, .stButton>button[type="primary"]
 /* Shared card used for batch previews, technician/location rows, etc.
    (previously repeated as inline styles in five places). */
 .item-card {
-    background: var(--surface);
+    background: var(--surface-100);
     border: 1px solid var(--card-border);
-    border-radius: var(--radius);
-    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    padding: var(--space-4) var(--space-5);
     margin-bottom: 6px;
 }
 
@@ -3160,7 +3197,7 @@ with tab_map:
                 tooltip={
                     "html": "<b>SNO:</b> {sno}<br/><b>Section:</b> {location}<br/><b>Date:</b> {date}<br/>"
                             "<b>Installer:</b> {tech_name}<br/><b>Old Meter:</b> {old_meter_no}<br/><b>New Meter:</b> {new_meter_no}",
-                    "style": {"backgroundColor": "#10151F", "color": "white", "fontSize": "12px"},
+                    "style": {"backgroundColor": "#14181F", "color": "white", "fontSize": "12px"},
                 },
             )
             st.pydeck_chart(deck, use_container_width=True)
@@ -3448,7 +3485,7 @@ with tab_inst:
                     st.markdown(f"""
                     <div class="item-card">
                         <b>{entry['tech_name']}</b> — {entry['location']}<br/>
-                        <span style="color:#64748b;font-size:.85rem;">
+                        <span style="color:var(--ink-600);font-size:.85rem;">
                             {entry['date']} · 1PH: {entry['qty_1ph']} · 3PH: {entry['qty_3ph']}
                         </span>
                     </div>
@@ -3728,7 +3765,7 @@ with tab_admin:
     st.caption("Forgets this browser only.")
 
     st.markdown("""
-    <div class="warn-box" style="background:#f8f9fa;border-color:#cbd5e1;color:#475569;">
+    <div class="warn-box" style="background:var(--surface-000);border-color:var(--hairline);color:var(--ink-600);">
     💡 <b>Tip:</b> Add one or several at once below, review them as cards, then Save Batch.
     Existing entries are listed further down as cards — tap ✏️ Edit to change details or toggle
     Active/Inactive, or 🗑️ to delete.
@@ -3787,7 +3824,7 @@ with tab_admin:
                     detail = " · ".join([x for x in [b["phone"], b["aadhar"], b.get("login_id", ""), (f"Sup: {b.get('supervisor','')}" if b.get("supervisor") else "")] if x]) or "no details given"
                     st.markdown(f"""
                     <div class="item-card">
-                        <b>{b['name']}</b><br/><span style="color:#64748b;font-size:.85rem;">{detail}</span>
+                        <b>{b['name']}</b><br/><span style="color:var(--ink-600);font-size:.85rem;">{detail}</span>
                     </div>
                     """, unsafe_allow_html=True)
                 with bdel:
@@ -3828,8 +3865,8 @@ with tab_admin:
         else:
             for idx, row in df_t.iterrows():
                 is_active = str(row.get("is_active", "1")).strip() in ["1", "1.0", "true", "yes"]
-                pill_color = "#018A96" if is_active else "#94a3b8"
-                pill_bg = "#E4F8FA" if is_active else "#f1f5f9"
+                pill_color = "var(--brand-700)" if is_active else "var(--ink-600)"
+                pill_bg = "var(--brand-050)" if is_active else "var(--surface-200)"
                 pill_text = "Active" if is_active else "Inactive"
 
                 rc1, rc2 = st.columns([5, 2])
@@ -3844,7 +3881,7 @@ with tab_admin:
                         <b>{row.get('name','')}</b>
                         <span style="background:{pill_bg};color:{pill_color};border-radius:20px;padding:2px 10px;
                             font-size:.72rem;font-weight:700;margin-left:8px;">{pill_text}</span><br/>
-                        <span style="color:#64748b;font-size:.85rem;">{detail}</span>
+                        <span style="color:var(--ink-600);font-size:.85rem;">{detail}</span>
                     </div>
                     """, unsafe_allow_html=True)
                 with rc2:
