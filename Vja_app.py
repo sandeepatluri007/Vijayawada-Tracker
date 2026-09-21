@@ -1619,6 +1619,38 @@ def clean_id_value(v) -> str:
     return s
 
 
+# ── Meter type -> phase ──────────────────────────────────────────────────────
+# Previously each record was tested with two INDEPENDENT checks — "contains
+# 1?" and "contains 3?". MDM meter-type text often carries a current rating
+# ("1PH 5-30A", "3PH 10-60A"), which contains both digits, so one install was
+# counted as 1PH AND 3PH: the Dashboard (which adds qty_1ph + qty_3ph) came out
+# higher than Analytics (which counts rows), and 1PH billing was inflated.
+# This reads the PHASE token only and returns exactly one answer per install.
+import re as _re
+_PH_3 = _re.compile(r"(?<![0-9])3\s*[-_ ]?\s*(?:PH|PHASE|P\b|Ø)|\bTHREE[\s_-]*PHASE\b|\bTHREE\b|\bLTCT\b|\bPOLY[\s_-]*PHASE\b")
+_PH_1 = _re.compile(r"(?<![0-9])1\s*[-_ ]?\s*(?:PH|PHASE|P\b|Ø)|\bSINGLE[\s_-]*PHASE\b|\bSINGLE\b")
+
+
+def classify_meter_type(meter_type) -> str:
+    """Return '1PH', '3PH', or '' (unclassified). Never both."""
+    s = str(meter_type or "").strip().upper()
+    if not s or s in ("NAN", "NONE"):
+        return ""
+    if s in ("1", "1.0"):
+        return "1PH"
+    if s in ("3", "3.0"):
+        return "3PH"
+    has3, has1 = bool(_PH_3.search(s)), bool(_PH_1.search(s))
+    if has3 and not has1:
+        return "3PH"
+    if has1 and not has3:
+        return "1PH"
+    if has3 and has1:
+        # Both phase words present — take whichever phase token comes first.
+        return "3PH" if _PH_3.search(s).start() < _PH_1.search(s).start() else "1PH"
+    return ""
+
+
 def extract_section_code(sno) -> str:
     """The 6th & 7th digit (1-indexed, from the left) of a 13-digit Consumer
     No / SNO is its section code, e.g. 6436126250971 -> '26'.
@@ -1676,7 +1708,10 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     df["_date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
     df = df[(df["_date"] >= date_start) & (df["_date"] <= date_end)]
     if meter_type_filter != "All":
-        df = df[df["meter_type"].astype(str).str.strip() == meter_type_filter]
+        # Classify rather than exact-match: real values carry ratings
+        # ("1PH 5-30A") and would never equal the plain "1 PH" label.
+        want = "1PH" if "1" in meter_type_filter else "3PH"
+        df = df[df["meter_type"].apply(classify_meter_type) == want]
     if location_filter and "location" in df.columns:
         df = df[df["location"].astype(str).str.strip().isin(location_filter)]
     df["section_code"] = df["sno"].apply(extract_section_code)
@@ -2396,8 +2431,9 @@ def _execute_push(parsed_records, source_label="install(s)"):
 
     # 2) aggregate the NEW rows only, by date + tech_name + location
     new_log_df = pd.DataFrame(new_log_rows)
-    new_log_df["is_1ph"] = new_log_df["meter_type"].str.contains("1", na=False)
-    new_log_df["is_3ph"] = new_log_df["meter_type"].str.contains("3", na=False)
+    _phase = new_log_df["meter_type"].apply(classify_meter_type)
+    new_log_df["is_1ph"] = _phase == "1PH"
+    new_log_df["is_3ph"] = _phase == "3PH"
     unclassified = int((~new_log_df["is_1ph"] & ~new_log_df["is_3ph"]).sum())
     agg = new_log_df.groupby(["date", "tech_name", "location"]).agg(
         d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum"), installer_id=("installer_id", "first")
@@ -2745,8 +2781,9 @@ def remove_install_log_rows(keys_to_remove) -> int:
             df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
         if "meter_type" not in removed_rows.columns:
             removed_rows["meter_type"] = ""
-        removed_rows["is_1ph"] = removed_rows["meter_type"].astype(str).str.contains("1", na=False)
-        removed_rows["is_3ph"] = removed_rows["meter_type"].astype(str).str.contains("3", na=False)
+        _phase = removed_rows["meter_type"].apply(classify_meter_type)
+        removed_rows["is_1ph"] = _phase == "1PH"
+        removed_rows["is_3ph"] = _phase == "3PH"
         agg = removed_rows.groupby(["date", "tech_name", "location"]).agg(
             d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
         ).reset_index()
@@ -2875,6 +2912,70 @@ def render_map_legacy_upload_widget():
                             st.rerun()
 
 
+def _old_phase_flags(mt):
+    """The retired rule, kept ONLY to work out what it added to Installations."""
+    s = str(mt)
+    return ("1" in s), ("3" in s)
+
+
+def plan_phase_count_repair():
+    """Work out the correction needed to Installations for installs counted
+    under the old digit-matching rule. Returns (per_group_df, per_value_df).
+
+    Every row in UploadedInstallLog was added to Installations by the old rule,
+    so for each date/technician/location the exact overcount is
+        (old 1PH, old 3PH) - (correct 1PH, correct 3PH).
+    Applying that difference removes only the misclassification; any manually
+    entered quantity on the same row is left exactly as it was."""
+    log = get_data("UploadedInstallLog")
+    if log.empty or not has_col(log, "date", "tech_name", "location", "meter_type"):
+        return pd.DataFrame(), pd.DataFrame()
+    log = log.copy()
+    old = log["meter_type"].apply(_old_phase_flags)
+    log["old_1"] = old.apply(lambda t: int(t[0]))
+    log["old_3"] = old.apply(lambda t: int(t[1]))
+    new = log["meter_type"].apply(classify_meter_type)
+    log["new_1"] = (new == "1PH").astype(int)
+    log["new_3"] = (new == "3PH").astype(int)
+
+    g = log.groupby(["date", "tech_name", "location"])[["old_1", "old_3", "new_1", "new_3"]].sum().reset_index()
+    g["d_1ph"] = g["new_1"] - g["old_1"]
+    g["d_3ph"] = g["new_3"] - g["old_3"]
+    g = g[(g["d_1ph"] != 0) | (g["d_3ph"] != 0)]
+
+    vals = log.groupby("meter_type").agg(Installs=("date", "size"), old_1=("old_1", "max"), old_3=("old_3", "max")).reset_index()
+    def _was(r):
+        if r.old_1 and r.old_3: return "1PH + 3PH (counted twice)"
+        return "1PH" if r.old_1 else ("3PH" if r.old_3 else "not counted")
+    vals["Counted before"] = vals.apply(_was, axis=1)
+    vals["Counted now"] = vals["meter_type"].apply(lambda v: classify_meter_type(v) or "not counted")
+    vals = vals.rename(columns={"meter_type": "Meter type"})[["Meter type", "Installs", "Counted before", "Counted now"]]
+    return g, vals.sort_values("Installs", ascending=False)
+
+
+def apply_phase_count_repair(plan: pd.DataFrame) -> int:
+    df = get_data("Installations")
+    if df.empty or plan.empty:
+        return 0
+    df = df.copy()
+    for col in ("qty_1ph", "qty_3ph"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    touched = 0
+    for _, p in plan.iterrows():
+        m = ((df["date"].astype(str) == str(p["date"])) &
+             (df["tech_name"].astype(str) == str(p["tech_name"])) &
+             (df["location"].astype(str) == str(p["location"])))
+        if not m.any():
+            continue
+        idx = df[m].index[0]
+        df.at[idx, "qty_1ph"] = max(0, int(df.at[idx, "qty_1ph"]) + int(p["d_1ph"]))
+        df.at[idx, "qty_3ph"] = max(0, int(df.at[idx, "qty_3ph"]) + int(p["d_3ph"]))
+        touched += 1
+    if touched and safe_update("Installations", df):
+        return touched
+    return 0
+
+
 def cleanup_non_tl_records():
     """One-click removal of any records saved before the TL_ filter was
     standardized. Removes matching rows from UploadedInstallLog (and, for
@@ -2896,8 +2997,9 @@ def cleanup_non_tl_records():
                     df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
                 if "meter_type" not in bad_rows.columns:
                     bad_rows["meter_type"] = ""
-                bad_rows["is_1ph"] = bad_rows["meter_type"].astype(str).str.contains("1", na=False)
-                bad_rows["is_3ph"] = bad_rows["meter_type"].astype(str).str.contains("3", na=False)
+                _phase = bad_rows["meter_type"].apply(classify_meter_type)
+                bad_rows["is_1ph"] = _phase == "1PH"
+                bad_rows["is_3ph"] = _phase == "3PH"
                 agg = bad_rows.groupby(["date", "tech_name", "location"]).agg(
                     d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
                 ).reset_index()
@@ -3155,17 +3257,6 @@ with tab_dash:
         with f2:
             meter_filter = st.multiselect("Meter Type", ["1 PH", "3 PH"], default=["1 PH", "3 PH"])
 
-        loc_list = sorted([l for l in df_inst["location"].unique() if l.strip()])
-        tech_list = sorted([t for t in df_inst["tech_name"].unique() if t.strip()])
-
-        f3, f4 = st.columns(2)
-        with f3:
-            loc_filter = st.multiselect("Locations", loc_list, default=loc_list)
-        with f4:
-            tech_filter = st.multiselect("Technicians", tech_list, default=tech_list)
-
-        filtered = df_inst.copy()
-
         if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
             d_start, d_end = date_range[0], date_range[1]
         elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
@@ -3173,17 +3264,42 @@ with tab_dash:
         else:
             d_start = d_end = date_range
 
-        filtered["_date"] = pd.to_datetime(filtered["date"], errors="coerce").dt.date
-        filtered = filtered[(filtered["_date"] >= d_start) & (filtered["_date"] <= d_end)]
+        show_1ph, show_3ph = "1 PH" in meter_filter, "3 PH" in meter_filter
+
+        # Work out what was actually installed in the chosen dates FIRST, so
+        # the Location and Technician lists only offer people and places with
+        # installs in that range. Previously both lists came from all data
+        # ever recorded, so long-idle installers still appeared.
+        in_range = df_inst.copy()
+        in_range["_date"] = pd.to_datetime(in_range["date"], errors="coerce").dt.date
+        in_range = in_range[(in_range["_date"] >= d_start) & (in_range["_date"] <= d_end)]
+        in_range["qty_1ph"] = safe_numeric_col(in_range, "qty_1ph")
+        in_range["qty_3ph"] = safe_numeric_col(in_range, "qty_3ph")
+        # "Did installs" respects the meter-type filter too: with only 3PH
+        # selected, someone who fitted only 1PH meters did no relevant work.
+        in_range["_qty"] = (in_range["qty_1ph"] if show_1ph else 0) + (in_range["qty_3ph"] if show_3ph else 0)
+        active = in_range[in_range["_qty"] > 0]
+
+        loc_list = sorted([l for l in active["location"].astype(str).unique() if l.strip()])
+
+        f3, f4 = st.columns(2)
+        with f3:
+            loc_filter = st.multiselect("Locations", loc_list, default=loc_list)
+        # Technicians narrow to the chosen locations as well, so nobody is
+        # listed who didn't install in the places being looked at.
+        active_scoped = active[active["location"].isin(loc_filter)] if loc_filter else active
+        tech_list = sorted([t for t in active_scoped["tech_name"].astype(str).unique() if t.strip()])
+        with f4:
+            tech_filter = st.multiselect("Technicians", tech_list, default=tech_list)
+
+        if active.empty:
+            st.info("No installs recorded for the selected dates.")
+
+        filtered = in_range
         if loc_filter:
             filtered = filtered[filtered["location"].isin(loc_filter)]
         if tech_filter:
             filtered = filtered[filtered["tech_name"].isin(tech_filter)]
-
-        filtered["qty_1ph"] = safe_numeric_col(filtered, "qty_1ph")
-        filtered["qty_3ph"] = safe_numeric_col(filtered, "qty_3ph")
-
-        show_1ph, show_3ph = "1 PH" in meter_filter, "3 PH" in meter_filter
         sum_1ph = int(filtered["qty_1ph"].sum()) if show_1ph else 0
         sum_3ph = int(filtered["qty_3ph"].sum()) if show_3ph else 0
 
@@ -3196,6 +3312,9 @@ with tab_dash:
             sec_hdr("users", "Technician Breakdown")
             group_df = filtered.groupby(["tech_name", "location"])[["qty_1ph", "qty_3ph"]].sum().reset_index()
             group_df["Total"] = group_df["qty_1ph"] + group_df["qty_3ph"]
+            # Same rule as the filters: no card for a technician/location with
+            # nothing installed in these dates.
+            group_df = group_df[group_df["Total"] > 0]
             group_df.columns = ["Technician", "Location", "1PH", "3PH", "Total"]
             # Counts are whole meters — the upstream to_numeric leaves them as
             # floats, which renders as "12.0".
@@ -4877,6 +4996,54 @@ with tab_admin:
     # ── Data Maintenance ──────────────────────────────────────────────────────
     st.divider()
     sec_hdr("broom", "Data Maintenance")
+
+    with st.expander("🔢 Fix 1PH / 3PH Install Counts", expanded=not bool(get_setting("phase_fix_applied", ""))):
+        already = str(get_setting("phase_fix_applied", "")).strip()
+        if already:
+            st.success(f"Already applied on {already}. Counts from new uploads are correct.")
+        else:
+            st.markdown("""
+            <div class="warn-box">
+            Installs whose meter type contains both a 1 and a 3 (e.g. <b>3PH 10-60A</b>)
+            were counted as 1PH <b>and</b> 3PH, so Dashboard totals ran higher than Analytics.
+            New uploads are now correct. This corrects what is already saved.
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Preview Correction", use_container_width=True, key="preview_phase_fix"):
+                st.session_state["phase_fix_plan"] = plan_phase_count_repair()
+
+            if "phase_fix_plan" in st.session_state:
+                plan, values = st.session_state["phase_fix_plan"]
+                if not values.empty:
+                    st.markdown("**How each meter type in your data was counted:**")
+                    st.dataframe(values, use_container_width=True, hide_index=True,
+                                 height=dataframe_height(len(values)))
+                if plan.empty:
+                    st.info("No correction needed — nothing was double counted.")
+                else:
+                    d1, d3 = int(plan["d_1ph"].sum()), int(plan["d_3ph"].sum())
+                    render_stat_tiles([
+                        ("bolt", f"{d1:+,}", "1PH", "change", "danger" if d1 < 0 else "normal"),
+                        ("bolt", f"{d3:+,}", "3PH", "change", "danger" if d3 < 0 else "normal"),
+                        ("target", f"{d1 + d3:+,}", "Total", "change", "danger" if d1 + d3 < 0 else "normal"),
+                    ])
+                    by_date = plan.groupby("date")[["d_1ph", "d_3ph"]].sum().reset_index()
+                    by_date["Total change"] = by_date["d_1ph"] + by_date["d_3ph"]
+                    by_date.columns = ["Date", "1PH change", "3PH change", "Total change"]
+                    st.dataframe(by_date.sort_values("Date", ascending=False), use_container_width=True,
+                                 hide_index=True, height=dataframe_height(len(by_date)))
+                    if st.button(f"Apply Correction to {len(plan)} row(s)", type="primary",
+                                 use_container_width=True, key="apply_phase_fix"):
+                        n = apply_phase_count_repair(plan)
+                        if n:
+                            # Guard: the correction is a one-time delta. Running
+                            # it twice would subtract the overcount twice.
+                            save_setting("phase_fix_applied", today_ist().isoformat())
+                            del st.session_state["phase_fix_plan"]
+                            st.success(f"✅ Corrected {n} row(s). Dashboard now matches Analytics.")
+                            st.rerun()
+                        else:
+                            st.error("Nothing was updated — no matching Installations rows found.")
 
     with st.expander("🗺️ Sync Map From Installs Log"):
         st.markdown("""
