@@ -2645,7 +2645,29 @@ def diagnose_installations_discrepancy():
     merged["Implied Manual Qty"] = merged["Installations Qty"] - merged["Upload-Derived Qty"]
 
     flagged = merged[(merged["Upload-Derived Qty"] > 0) & (merged["Implied Manual Qty"] > 0)].copy()
-    return flagged[["date", "tech_name", "location", "Installations Qty", "Upload-Derived Qty", "Implied Manual Qty"]].rename(
+
+    # Cause, from the data rather than a guess: how much of each row's extra
+    # the old 1PH/3PH rule would have added (installs whose meter type holds
+    # both a 1 and a 3). If the fix has already been applied, none of it is.
+    if not flagged.empty and has_col(df_log, "meter_type"):
+        both = df_log["meter_type"].apply(lambda s: int(("1" in str(s)) and ("3" in str(s))))
+        both_counts = df_log.assign(_b=both).groupby(["date", "tech_name", "location"])["_b"].sum()
+        phase_fixed = bool(str(get_setting("phase_fix_applied", "")).strip())
+
+        def _cause(r):
+            explained = 0 if phase_fixed else int(both_counts.get((r["date"], r["tech_name"], r["location"]), 0))
+            extra = int(r["Implied Manual Qty"])
+            if explained >= extra:
+                return "1PH/3PH double count"
+            if explained > 0:
+                return f"{explained} double count + {extra - explained} other"
+            return "Not in uploads (manual entry or repeat push)"
+        flagged["Likely cause"] = flagged.apply(_cause, axis=1)
+    else:
+        flagged["Likely cause"] = "Not in uploads (manual entry or repeat push)"
+
+    return flagged[["date", "tech_name", "location", "Installations Qty", "Upload-Derived Qty",
+                    "Implied Manual Qty", "Likely cause"]].rename(
         columns={"date": "Date", "tech_name": "Technician", "location": "Location"}
     ).sort_values("Implied Manual Qty", ascending=False)
 
@@ -3003,8 +3025,12 @@ def apply_phase_count_repair(plan: pd.DataFrame) -> int:
         if not m.any():
             continue
         idx = df[m].index[0]
-        df.at[idx, "qty_1ph"] = max(0, int(df.at[idx, "qty_1ph"]) + int(p["d_1ph"]))
-        df.at[idx, "qty_3ph"] = max(0, int(df.at[idx, "qty_3ph"]) + int(p["d_3ph"]))
+        # Never below the correct upload count. If this row was already reset
+        # by "Remove extra" in the discrepancy check, the overcount is already
+        # gone — applying the delta again would subtract real installs. The
+        # floor makes the two tools safe to use in either order.
+        df.at[idx, "qty_1ph"] = max(int(p["new_1"]), int(df.at[idx, "qty_1ph"]) + int(p["d_1ph"]))
+        df.at[idx, "qty_3ph"] = max(int(p["new_3"]), int(df.at[idx, "qty_3ph"]) + int(p["d_3ph"]))
         touched += 1
     if touched and safe_update("Installations", df):
         return touched
@@ -5146,34 +5172,25 @@ with tab_admin:
 
         if "discrepancy_report" in st.session_state:
             flagged = st.session_state["discrepancy_report"]
-            phase_fixed = bool(str(get_setting("phase_fix_applied", "")).strip())
             if flagged.empty:
                 st.success("✅ No discrepancies — every row matches its uploaded installs.")
-            elif not phase_fixed:
-                # The 1PH/3PH double count shows up here as "extra" too. Fixing
-                # rows here first and then running that fix would subtract the
-                # same overcount twice — so it has to go first.
-                st.warning(
-                    f"⚠️ {len(flagged)} row(s) flagged. These are most likely the 1PH/3PH double "
-                    "counting. Apply **Fix 1PH / 3PH Install Counts** (above) first, then run this "
-                    "check again — most or all of these should clear."
-                )
-                st.dataframe(flagged, use_container_width=True, hide_index=True,
-                             height=dataframe_height(len(flagged)))
             else:
-                st.warning(f"⚠️ {len(flagged)} row(s) still have more installs than their uploads support.")
+                extra_total = int(flagged["Implied Manual Qty"].sum())
+                st.warning(f"⚠️ {len(flagged)} row(s) have {extra_total} install(s) more than their uploads support.")
                 st.markdown("""
                 <div class="warn-box">
-                The 1PH/3PH fix is already applied, so the extra here is most likely a <b>manual entry
-                added on top of installs that were also uploaded</b>. Tick a row to remove its extra —
-                its uploaded installs stay. Leave a row unticked if the extra is real work that was
-                never uploaded.
+                Tick a row to remove its extra — its uploaded installs stay, split correctly into
+                1PH / 3PH. Leave a row unticked only if the extra is real work that was never uploaded.
                 </div>
                 """, unsafe_allow_html=True)
+                select_all = st.checkbox("Select all rows", key="discrepancy_select_all")
                 editable = flagged.copy()
-                editable.insert(0, "Remove extra", False)
+                editable.insert(0, "Remove extra", bool(select_all))
                 edited = st.data_editor(
-                    editable, use_container_width=True, hide_index=True, key="discrepancy_editor",
+                    editable, use_container_width=True, hide_index=True,
+                    # The key includes the select-all state so toggling it
+                    # rebuilds the ticks instead of keeping stale ones.
+                    key=f"discrepancy_editor_{int(select_all)}",
                     disabled=[col for col in editable.columns if col != "Remove extra"],
                     height=dataframe_height(len(editable)),
                 )
@@ -5185,9 +5202,9 @@ with tab_admin:
                     n = reduce_rows_to_upload_counts(keys)
                     del st.session_state["discrepancy_report"]
                     if n:
-                        st.success(f"✅ Removed {extra} extra install(s) from {n} row(s).")
+                        st.success(f"✅ Removed {extra} extra install(s) from {n} row(s). Dashboard now matches Analytics.")
                     else:
-                        st.error("Nothing changed — those rows may have been edited since the check ran.")
+                        st.error("Nothing changed — those rows may have been edited since the check ran. Run the check again.")
                     st.rerun()
 
             if not flagged.empty:
