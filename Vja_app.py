@@ -76,6 +76,18 @@ PIN_CODE = "1323"
 # Dashboard tile is explicitly labeled "1PH Billing" rather than guessing at
 # a 3PH rate. Update these constants (and INCENTIVE_TIER_SLABS_1PH) if the
 # approved rates change.
+# ── Local date ──────────────────────────────────────────────────────────────
+# Streamlit Community Cloud runs in UTC, so date.today() on the server lags
+# India by 5h30m: from midnight to 05:30 IST it still returns YESTERDAY. That
+# made the Map default to a day with no pins, and skewed working-days-left.
+from datetime import timezone as _tz
+IST = _tz(timedelta(hours=5, minutes=30))
+
+
+def today_ist() -> date:
+    return datetime.now(IST).date()
+
+
 # ── Monthly install target ─────────────────────────────────────────────────
 # The working month runs 3rd to 27th inclusive; the 1st/2nd and 28th-31st are
 # not install days, so "days remaining" must never count them or the per-day
@@ -1183,27 +1195,66 @@ except Exception as e:
     st.stop()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+_MISSING = "__worksheet_missing__"
+
+
+def _is_missing_worksheet(err: Exception) -> bool:
+    """A tab that doesn't exist in the Google Sheet. Retrying can never fix
+    this, so it must not be retried."""
+    text = f"{type(err).__name__} {err}".lower()
+    return "worksheetnotfound" in text or "worksheet not found" in text or "unable to parse range" in text
+
+
+def _is_rate_limited(err: Exception) -> bool:
+    text = f"{type(err).__name__} {err}".lower()
+    return "429" in text or "quota" in text or "rate_limit" in text or "rate limit" in text
+
+
 @st.cache_data(ttl=READ_TTL, show_spinner=False)
-def _read_worksheet_cached(worksheet: str, _version: int) -> pd.DataFrame:
+def _read_worksheet_cached(worksheet: str, _version: int):
     """Cached Sheets read. `_version` is bumped by safe_update() so writes
-    invalidate the cache immediately; otherwise the same worksheet is fetched
-    and string-converted once per TTL window instead of once per call site
-    (there are 30+ call sites, and Streamlit re-runs every tab body on each
-    interaction, so this was repeated work on every click)."""
-    df = conn.read(worksheet=worksheet, ttl=READ_TTL)
+    invalidate the cache immediately.
+
+    A MISSING worksheet is returned as a sentinel rather than raised. That
+    matters: st.cache_data never caches exceptions, so a raised "not found"
+    was re-requested on every single rerun, five times over with backoff —
+    which drained the Sheets read quota (~60/min/user) and then made
+    unrelated reads like Locations fail with rate-limit errors. Returning a
+    sentinel lets the miss be cached like any other result."""
+    try:
+        df = conn.read(worksheet=worksheet, ttl=READ_TTL)
+    except Exception as e:
+        if _is_missing_worksheet(e):
+            return _MISSING
+        raise
     return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
 
 
-def get_data(worksheet: str, retries: int = 5) -> pd.DataFrame:
+def get_data(worksheet: str, retries: int = 3) -> pd.DataFrame:
     version = st.session_state.get("_sheet_version", 0)
     for attempt in range(retries):
         try:
-            return _read_worksheet_cached(worksheet, version).copy()
-        except Exception:
+            result = _read_worksheet_cached(worksheet, version)
+            if isinstance(result, str) and result == _MISSING:
+                # Report once per session, not on every rerun.
+                missing = st.session_state.setdefault("_missing_sheets", set())
+                if worksheet not in missing:
+                    missing.add(worksheet)
+                    st.toast(f"Sheet tab '{worksheet}' not found — create it in Google Sheets.", icon="⚠️")
+                return pd.DataFrame()
+            return result.copy()
+        except Exception as e:
             if attempt < retries - 1:
-                time.sleep(min(2 ** attempt, 8))  # 1s, 2s, 4s, 8s — rides out brief rate-limit/network blips
+                # Rate limits need a longer pause to let the quota window roll;
+                # ordinary blips recover quickly. Capped well under the old
+                # 15s so a bad moment doesn't freeze the app.
+                time.sleep(3 * (attempt + 1) if _is_rate_limited(e) else 1)
             else:
-                st.toast(f"📡 Connection drop loading {worksheet}...", icon="⚠️")
+                reason = "rate limit reached" if _is_rate_limited(e) else "connection drop"
+                shown = st.session_state.setdefault("_read_errors", set())
+                if worksheet not in shown:
+                    shown.add(worksheet)
+                    st.toast(f"📡 {reason.capitalize()} loading {worksheet} — tap Refresh in a moment.", icon="⚠️")
                 return pd.DataFrame()
 
 
@@ -1502,7 +1553,7 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     code_desc = "All Codes" if not section_filter else ", ".join(section_filter)
     pdf.cell(0, 6, f"Period: {date_start.isoformat()} to {date_end.isoformat()}   |   Meter Type: {meter_type_filter}", ln=1)
     pdf.cell(0, 5, f"Section: {loc_desc}   |   Section Codes: {code_desc}", ln=1)
-    pdf.cell(0, 5, f"Generated: {date.today().isoformat()}", ln=1)
+    pdf.cell(0, 5, f"Generated: {today_ist().isoformat()}", ln=1)
     pdf.ln(2)
     # Brand rule under the letterhead.
     pdf.set_draw_color(0, 180, 192)
@@ -2063,10 +2114,31 @@ def _execute_push(parsed_records, source_label="install(s)"):
         })
         dates_with_new.add(rec["date"])
 
+    # Every record in this batch belongs on the map — not only the brand-new
+    # ones. Records already in the install log (pushed before MapRecords
+    # existed, or when a mirror write failed) were otherwise never mirrored,
+    # because the paths below that find "nothing new" returned before the
+    # mirror ran. The mirror is an upsert, so re-sending known rows is safe.
+    map_batch = []
+    for rec in parsed_records:
+        tn = tech_login_lookup.get(str(rec["installer_id"]).lower(), rec["installer_id"])
+        map_batch.append({
+            "key": f"{rec['date']}||{rec['time']}||{rec['installer_id']}",
+            "date": rec["date"], "time": rec["time"], "installer_id": rec["installer_id"],
+            "tech_name": tn, "location": rec.get("location") or "",
+            "sno": rec.get("sno") or "", "old_meter_no": rec.get("old_meter_no") or "",
+            "new_meter_no": rec.get("new_meter_no") or "",
+            "lat": rec.get("lat") or "", "long": rec.get("long") or "",
+        })
+
     fully_dup_dates = dates_seen - dates_with_new
 
     if not new_log_rows and not backfilled_count:
-        st.error(f"❌ Installs already exist for: {', '.join(sorted(dates_seen))}, with no missing details to fill in. Nothing to update.")
+        map_changed, map_ok = mirror_records_to_map(map_batch)
+        if map_changed:
+            st.success(f"✅ Installs were already recorded — added/updated {map_changed} record(s) on the Map.")
+            st.rerun()
+        st.info(f"Installs for {', '.join(sorted(dates_seen))} are already recorded and already on the Map.")
         return
 
     # 1) append/update raw log rows (dedup + detail ledger)
@@ -2074,6 +2146,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
 
     if not new_log_rows:
         if safe_update("UploadedInstallLog", updated_log):
+            mirror_records_to_map(map_batch)
             st.success(f"✅ No new installs, but filled in missing details for {backfilled_count} existing record(s).")
             st.rerun()
         return
@@ -2117,7 +2190,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
             }])], ignore_index=True)
 
     if safe_update("Installations", df_inst_existing) and safe_update("UploadedInstallLog", updated_log):
-        map_added, map_ok = mirror_records_to_map(new_log_rows)
+        map_added, map_ok = mirror_records_to_map(map_batch)
         if not map_ok:
             st.session_state["map_sync_warning"] = (
                 f"⚠️ {len(new_log_rows)} install(s) were saved to Installs data, but syncing them to the "
@@ -2159,23 +2232,41 @@ def mirror_records_to_map(records) -> tuple:
     for col in map_cols:
         if col not in df_map_existing.columns:
             df_map_existing[col] = ""
-    existing_keys = set(df_map_existing["key"].values) if "key" in df_map_existing.columns else set()
+    key_to_idx = {k: i for i, k in zip(df_map_existing.index, df_map_existing["key"].values)}
+
+    def _blank(v):
+        return v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() in ("", "nan", "Unspecified")
 
     new_map_rows = []
+    filled = 0
     for rec in records:
         key = rec.get("key") or f"{rec.get('date')}||{rec.get('time')}||{rec.get('installer_id')}"
-        if key in existing_keys:
+        if key in key_to_idx:
+            # Upsert, not skip. A map row can exist with no coordinates (it was
+            # mirrored before the Analytics file carrying lat/long arrived);
+            # skipping it outright left that pin off the map permanently.
+            idx = key_to_idx[key]
+            changed = False
+            for col in map_cols:
+                if col == "key":
+                    continue
+                new_val = rec.get(col)
+                if not _blank(new_val) and _blank(df_map_existing.at[idx, col]):
+                    df_map_existing.at[idx, col] = str(new_val)
+                    changed = True
+            filled += int(changed)
             continue
-        existing_keys.add(key)
         row = {col: rec.get(col, "") for col in map_cols}
         row["key"] = key
+        key_to_idx[key] = None
         new_map_rows.append(row)
 
-    if not new_map_rows:
+    if not new_map_rows and not filled:
         return 0, True
-    updated_map = pd.concat([df_map_existing, pd.DataFrame(new_map_rows)], ignore_index=True)
+    updated_map = (pd.concat([df_map_existing, pd.DataFrame(new_map_rows)], ignore_index=True)
+                   if new_map_rows else df_map_existing)
     ok = safe_update("MapRecords", updated_map)
-    return len(new_map_rows), ok
+    return len(new_map_rows) + filled, ok
 
 
 def push_parsed_records_to_installations(parsed_records, source_label="install(s)"):
@@ -2744,7 +2835,7 @@ with tab_dash:
         df_month["qty_1ph"] = safe_numeric_col(df_month, "qty_1ph")
         df_month["qty_3ph"] = safe_numeric_col(df_month, "qty_3ph")
 
-        today = date.today()
+        today = today_ist()
         this_month = df_month[(df_month["_date"].dt.month == today.month) & (df_month["_date"].dt.year == today.year)]
 
         m_1ph = int(this_month["qty_1ph"].sum())
@@ -2815,7 +2906,7 @@ with tab_dash:
     else:
         f1, f2 = st.columns(2)
         with f1:
-            date_range = st.date_input("Date Range", [date.today(), date.today()])
+            date_range = st.date_input("Date Range", [today_ist(), today_ist()])
         with f2:
             meter_filter = st.multiselect("Meter Type", ["1 PH", "3 PH"], default=["1 PH", "3 PH"])
 
@@ -2912,7 +3003,7 @@ with tab_dash:
 
     rf1, rf2 = st.columns(2)
     with rf1:
-        report_date_range = st.date_input("Date Range", [date.today() - timedelta(days=6), date.today()], key="report_date_range")
+        report_date_range = st.date_input("Date Range", [today_ist() - timedelta(days=6), today_ist()], key="report_date_range")
     with rf2:
         report_meter_type = st.selectbox("Meter Type", ["All", "1 PH", "3 PH"], key="report_meter_type")
 
@@ -3168,6 +3259,9 @@ with tab_analytics:
         sups_today = sorted(day_df["supervisor"].unique())
         with vc2:
             sel_supervisor = st.selectbox("Supervisor", ["All supervisors"] + sups_today, key="analytics_supervisor")
+        # Unscoped copy for the Installs push: the supervisor filter is a VIEW
+        # choice, and must never decide which installs get recorded.
+        day_df_all = day_df.copy()
         if sel_supervisor != "All supervisors":
             day_df = day_df[day_df["supervisor"] == sel_supervisor]
 
@@ -3382,10 +3476,10 @@ with tab_analytics:
             _push_now = True
         if _push_now:
             push_records = []
-            for _, r in day_df.iterrows():
+            for _, r in day_df_all.iterrows():
                 rec = {"date": r["date"], "time": r["time"], "installer_id": r["installer_id"]}
                 for col in ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]:
-                    rec[col] = r[col] if col in day_df.columns else ""
+                    rec[col] = r[col] if col in day_df_all.columns else ""
                 push_records.append(rec)
             push_parsed_records_to_installations(push_records, source_label="install(s) from Analytics")
 
@@ -3427,11 +3521,11 @@ with tab_map:
 
         loc_options = sorted([l for l in df_map["location"].unique() if str(l).strip()]) if "location" in df_map.columns else []
         valid_dates = df_map["_date"].dropna()
-        data_min_d, data_max_d = (valid_dates.min(), valid_dates.max()) if not valid_dates.empty else (date.today(), date.today())
+        data_min_d, data_max_d = (valid_dates.min(), valid_dates.max()) if not valid_dates.empty else (today_ist(), today_ist())
 
         # Default to today when today has data; otherwise start blank so the
         # map isn't silently showing an unrelated historical range.
-        today = date.today()
+        today = today_ist()
         has_today_data = (not valid_dates.empty) and (today in set(valid_dates))
         default_range = [today, today] if has_today_data else []
 
@@ -3971,7 +4065,7 @@ with tab_inv:
     with st.form("inv_form", clear_on_submit=True):
         iv1, iv2 = st.columns(2)
         with iv1:
-            idate = st.date_input("Received Date", date.today())
+            idate = st.date_input("Received Date", today_ist())
             itype = st.selectbox("Type", ["1 PH", "3 PH"])
         with iv2:
             iqty = st.number_input("Quantity", min_value=1, step=1, value=1)
@@ -4524,6 +4618,36 @@ with tab_admin:
     # ── Data Maintenance ──────────────────────────────────────────────────────
     st.divider()
     sec_hdr("broom", "Data Maintenance")
+
+    with st.expander("🗺️ Sync Map From Installs Log"):
+        st.markdown("""
+        <div class="info-box">
+        Copies every install in the Installs log onto the Map, and fills in
+        coordinates on Map pins that are missing them. Use once to recover
+        installs recorded before the Map sync covered them. Safe to re-run —
+        nothing is duplicated and no install counts change.
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Sync Map Now", type="primary", use_container_width=True, key="sync_map_from_log"):
+            df_log_all = get_data("UploadedInstallLog")
+            if df_log_all.empty or "key" not in df_log_all.columns:
+                st.warning("The Installs log is empty — nothing to sync.")
+            else:
+                recs = []
+                for _, r in df_log_all.iterrows():
+                    if not is_valid_installer_id(r.get("installer_id")):
+                        continue
+                    recs.append({col: r.get(col, "") for col in
+                                 ["key", "date", "time", "installer_id", "tech_name", "location",
+                                  "sno", "old_meter_no", "new_meter_no", "lat", "long"]})
+                with st.spinner(f"Syncing {len(recs):,} install(s) to the Map..."):
+                    changed, ok = mirror_records_to_map(recs)
+                if not ok:
+                    st.error("❌ Couldn't write to the Map. Check the 'MapRecords' tab exists in the Google Sheet.")
+                elif changed:
+                    st.success(f"✅ Added or updated {changed:,} record(s) on the Map.")
+                else:
+                    st.info("The Map already matches the Installs log.")
     with st.expander(f"🔒 Remove Non-{INSTALLER_ID_PREFIX} Installer Records"):
         st.markdown(f"""
         <div class="danger-box">
