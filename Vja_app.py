@@ -399,63 +399,176 @@ def build_single_col_color_grid(df: pd.DataFrame, col_name: str, color_func):
     return grid
 
 
+# ── Table image export ───────────────────────────────────────────────────────
+# Landscape, measured layout. Replaces a matplotlib table whose output size,
+# margins and proportions changed with every table (it centred the table in a
+# fixed figure, then cropped whatever whitespace was left) and was capped in
+# portrait. Here every column is sized from its actual text and the whole
+# table is scaled to fit one landscape canvas, so every export looks the same.
+# Phone held sideways is ~19.5:9 (~2.17:1). A 16:9 canvas is taller than that,
+# so it left an empty band under shorter tables and showed letterboxed.
+IMG_W, IMG_H_MIN = 1920, 885           # ~2.17:1 — a phone in landscape
+IMG_MARGIN = 56
+IMG_FONT_MAX, IMG_FONT_MIN = 30, 15     # px; shrinks between these to fit
+IMG_INK, IMG_INK_SOFT = (20, 24, 31), (75, 79, 86)          # ink-900, ink-600
+IMG_HEAD_BG, IMG_HAIRLINE = (20, 24, 31), (226, 228, 232)
+IMG_STRIPE = (246, 247, 249)
+IMG_BRAND = (14, 110, 122)                                   # brand-700
+
+
+def _img_font(size: int, bold: bool = False):
+    """DejaVu ships inside matplotlib, which is already a dependency — so the
+    same font is available everywhere the app runs, including Streamlit Cloud."""
+    from PIL import ImageFont
+    import matplotlib, os
+    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    try:
+        return ImageFont.truetype(os.path.join(matplotlib.get_data_path(), "fonts", "ttf", name), size)
+    except Exception:
+        return ImageFont.load_default(size=size)
+
+
+def _hex_to_rgb(h):
+    h = str(h).lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4)) if len(h) == 6 else None
+
+
 def dataframe_to_png_bytes(df: pd.DataFrame, color_grid=None, title: str = None) -> bytes:
-    """Renders a DataFrame (optionally with a matching (bg,font) colour grid)
-    as a PNG, so tables can be shared as an image (e.g. over WhatsApp).
-    "Fit to screen": the canvas is capped at MAX_FIG_W x MAX_FIG_H instead of
-    growing without bound for large tables — beyond that cap, font size and
-    row height shrink to still fit everything on one canvas, so the image
-    doesn't need pinch-zooming or scrolling to view on a phone."""
-    import matplotlib.pyplot as plt
+    """Table -> landscape PNG.
 
-    MAX_FIG_W, MAX_FIG_H = 9.0, 13.0
+    `title` may span lines: the first is the heading, the rest are header
+    lines (scope, last install, totals, forecast). Callers keep passing one
+    string, so the format is identical across every export in the app."""
+    from PIL import Image, ImageDraw
 
-    n_rows, n_cols = df.shape
-    title_lines = title.count("\n") + 1 if title else 0
-    raw_w = max(6.0, n_cols * 1.35)
-    raw_h = max(2.0, (n_rows + 2) * 0.42) + title_lines * 0.35
+    lines = [l for l in (title or "").split("\n") if l.strip()]
+    heading, meta = (lines[0], lines[1:]) if lines else ("", [])
+    headers = [str(h) for h in df.columns]
+    body = [["" if pd.isna(v) else str(v) for v in row] for row in df.itertuples(index=False)]
+    n_rows, n_cols = len(body), len(headers)
+    probe = ImageDraw.Draw(Image.new("RGB", (8, 8)))
 
-    fig_w = min(raw_w, MAX_FIG_W)
-    fig_h = min(raw_h, MAX_FIG_H)
-    shrink = min(fig_w / raw_w, fig_h / raw_h, 1.0)
+    def text_w(s, font):
+        return probe.textlength(s, font=font)
 
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    ax.axis("off")
-    if title:
-        ax.set_title(title, fontsize=max(9, round(13 * shrink)), fontweight="bold", loc="left", pad=14)
+    def natural_widths(fs):
+        """Each column as wide as its widest cell (header included) + padding."""
+        fb, fr = _img_font(fs, True), _img_font(fs)
+        pad = fs * 1.4
+        return [max([text_w(headers[j], fb)] + [text_w(r[j], fr) for r in body]) + pad
+                for j in range(n_cols)]
 
-    cell_text = df.astype(str).values
-    tbl = ax.table(cellText=cell_text, colLabels=list(df.columns), cellLoc="center", loc="center")
-    tbl.auto_set_font_size(False)
-    tbl.set_fontsize(max(6, round(10 * shrink)))
-    tbl.scale(1, max(1.1, 1.7 * shrink))
-    tbl.auto_set_column_width(col=list(range(n_cols)))
+    # Header block height depends on font size too; size it for the chosen fs.
+    def header_h(fs):
+        return int(fs * 1.9) + len(meta) * int(fs * 1.35) + int(fs * 1.0)
 
-    for j in range(n_cols):
-        header_cell = tbl[0, j]
-        header_cell.set_facecolor("#14181F")
-        header_cell.set_text_props(color="white", fontweight="bold")
+    avail_w = IMG_W - 2 * IMG_MARGIN
 
-    for i in range(n_rows):
-        for j in range(n_cols):
-            cell = tbl[i + 1, j]
+    # 1) Largest font whose natural table width fits the landscape width.
+    fs = IMG_FONT_MAX
+    while fs > IMG_FONT_MIN and sum(natural_widths(fs)) > avail_w:
+        fs -= 1
+    # 2) Then shrink further, if needed, so all rows fit the landscape height.
+    row_h = lambda f: int(f * 2.0)
+    while fs > IMG_FONT_MIN and (header_h(fs) + (n_rows + 1) * row_h(fs) + 2 * IMG_MARGIN) > IMG_H_MIN:
+        fs -= 1
+
+    widths = natural_widths(fs)
+    # Spread leftover width across columns so the table spans the canvas
+    # instead of floating in the middle.
+    spare = avail_w - sum(widths)
+    if spare > 0:
+        widths = [w + spare * (w / sum(widths)) for w in widths]
+    # At the floor font a very wide table can still overflow: scale to fit.
+    elif spare < 0:
+        widths = [w * avail_w / sum(widths) for w in widths]
+
+    hh = header_h(fs)
+    # Rows stretch to fill the landscape height, so a short table uses the
+    # whole canvas instead of leaving an empty band below it. Capped so a
+    # 3-row table doesn't get comically tall rows.
+    avail_h = IMG_H_MIN - 2 * IMG_MARGIN - hh
+    rh = int(min(fs * 2.9, max(row_h(fs), avail_h / (n_rows + 1))))
+    table_h = (n_rows + 1) * rh
+    # Stays 16:9; only grows taller when rows can't fit even at the floor
+    # font, so text never drops below a readable size.
+    canvas_h = max(IMG_H_MIN, hh + table_h + 2 * IMG_MARGIN)
+
+    img = Image.new("RGB", (IMG_W, canvas_h), (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    f_title, f_meta = _img_font(int(fs * 1.25), True), _img_font(int(fs * 0.9))
+    f_head, f_cell, f_cell_b = _img_font(fs, True), _img_font(fs), _img_font(fs, True)
+
+    # -- Header block --
+    y = IMG_MARGIN
+    d.text((IMG_MARGIN, y), heading, font=f_title, fill=IMG_INK)
+    # Brand logo, top-right, sized to the heading
+    try:
+        logo = Image.open(io.BytesIO(base64.b64decode(LOGO_PRINT_B64))).convert("RGB")
+        lh = int(fs * 2.4)
+        logo = logo.resize((int(logo.width * lh / logo.height), lh))
+        img.paste(logo, (IMG_W - IMG_MARGIN - logo.width, IMG_MARGIN - int(fs * 0.3)))
+    except Exception:
+        pass
+    y += int(fs * 1.9)
+    for m in meta:
+        d.text((IMG_MARGIN, y), m, font=f_meta, fill=IMG_INK_SOFT)
+        y += int(fs * 1.35)
+    y += int(fs * 0.4)
+    d.line([(IMG_MARGIN, y), (IMG_W - IMG_MARGIN, y)], fill=IMG_BRAND, width=max(2, fs // 8))
+    y += int(fs * 0.6)
+
+    # -- Table --
+    x0 = IMG_MARGIN
+    xs = [x0]
+    for w in widths:
+        xs.append(xs[-1] + w)
+
+    def cell_text(x_left, w, top, s, font, fill):
+        tw = text_w(s, font)
+        # Truncate only if a cell still can't fit after scaling.
+        while s and tw > w - fs * 0.6:
+            s = s[:-2] + "…"
+            tw = text_w(s, font)
+        bbox = d.textbbox((0, 0), "Ag", font=font)
+        th = bbox[3] - bbox[1]
+        d.text((x_left + (w - tw) / 2, top + (rh - th) / 2 - bbox[1]), s, font=font, fill=fill)
+
+    d.rectangle([xs[0], y, xs[-1], y + rh], fill=IMG_HEAD_BG)
+    for j, h in enumerate(headers):
+        cell_text(xs[j], widths[j], y, h, f_head, (255, 255, 255))
+    y += rh
+
+    for i, row in enumerate(body):
+        is_agg = row and (row[0].strip().upper() == "TOTAL" or row[0].strip().startswith("—"))
+        d.rectangle([xs[0], y, xs[-1], y + rh], fill=IMG_STRIPE if i % 2 else (255, 255, 255))
+        for j, val in enumerate(row):
             bg, fg = (None, None)
             if color_grid is not None:
-                bg, fg = color_grid[i][j]
-            cell.set_facecolor(bg if bg else ("#FFFFFF" if i % 2 == 0 else "#F6F7F9"))
-            if fg:
-                cell.set_text_props(color=fg, fontweight="bold")
+                try:
+                    bg, fg = color_grid[i][j]
+                except (IndexError, TypeError):
+                    pass
+            bg_rgb = _hex_to_rgb(bg) if bg else None
+            if bg_rgb:
+                d.rectangle([xs[j], y, xs[j + 1], y + rh], fill=bg_rgb)
+            ink = _hex_to_rgb(fg) if fg else IMG_INK
+            bold = bool(fg) or is_agg
+            cell_text(xs[j], widths[j], y, val, f_cell_b if bold else f_cell, ink or IMG_INK)
+        d.line([(xs[0], y + rh), (xs[-1], y + rh)], fill=IMG_HAIRLINE, width=1)
+        y += rh
 
-    fig.tight_layout()
+    for x in xs:   # column rules
+        d.line([(x, y - n_rows * rh - rh), (x, y)], fill=IMG_HAIRLINE, width=1)
+    d.rectangle([xs[0], y - (n_rows + 1) * rh, xs[-1], y], outline=IMG_HAIRLINE, width=1)
+
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
+    img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
 
 
 import threading
-_RENDER_LOCK = threading.Lock()   # matplotlib's pyplot state isn't thread-safe
+_RENDER_LOCK = threading.Lock()   # the Map PNG still uses matplotlib, whose pyplot state isn't thread-safe
 
 
 def lazy_download_button(label: str, make_bytes, file_name: str, mime: str, key: str):
@@ -1185,7 +1298,18 @@ st.markdown(f"""
   </div>
 </div>
 """, unsafe_allow_html=True)
-replay_carried_messages()
+
+# ── Notice area: ONE container, created on every run, above the tabs ─────────
+# Streamlit identifies st.tabs by its position on the page. Anything drawn
+# above the tabs on only SOME runs (a replayed "✅ saved" message, the map-sync
+# warning, the double-count prompt) shifts the tabs down a slot, so Streamlit
+# treats them as new tabs and resets to the first one — which is what bounced
+# every Excel upload back to the Dashboard. A container that always exists
+# occupies exactly one slot whether or not it has content, so everything
+# conditional goes INSIDE it and the tabs never move.
+_notice_area = st.container()
+with _notice_area:
+    replay_carried_messages()
 
 # ── Authentication / PIN Protection (persists until the app/tab is closed, ──
 # and now also survives a Streamlit Community Cloud app-sleep / session reset
@@ -2865,37 +2989,39 @@ def render_legacy_upload_widget(key_prefix: str):
 # ── Persistent Map-sync failure warning (survives the st.rerun() that would ──
 # otherwise wipe it — see mirror_records_to_map) ─────────────────────────────
 if "map_sync_warning" in st.session_state:
-    st.markdown(f'<div class="danger-box">{st.session_state["map_sync_warning"]}</div>', unsafe_allow_html=True)
-    if st.button("✅ Got it, dismiss", key="dismiss_map_sync_warning"):
-        del st.session_state["map_sync_warning"]
-        st.rerun()
-    st.divider()
+    with _notice_area:
+        st.markdown(f'<div class="danger-box">{st.session_state["map_sync_warning"]}</div>', unsafe_allow_html=True)
+        if st.button("✅ Got it, dismiss", key="dismiss_map_sync_warning"):
+            del st.session_state["map_sync_warning"]
+            st.rerun()
+        st.divider()
 
 
 # ── Pending double-count confirmation banner (rendered before the tabs so ──
 # it's visible no matter which tab triggered it) ────────────────────────────
 if "pending_push" in st.session_state:
-    pend = st.session_state["pending_push"]
-    st.markdown("""
-    <div class="danger-box">
-    ⚠️ <b>Possible double-count risk.</b> The record(s) below already have a manually-entered
-    quantity for that date/technician/location with no matching upload history — adding this
-    upload on top could count the same real installs twice. Review, then choose:
-    </div>
-    """, unsafe_allow_html=True)
-    st.dataframe(pd.DataFrame(pend["risky"]), use_container_width=True, hide_index=True)
-    pc1, pc2 = st.columns(2)
-    with pc1:
-        if st.button("✅ Proceed Anyway (verified — not duplicates)", type="primary", use_container_width=True, key="pending_push_proceed"):
-            records, label = pend["records"], pend["source_label"]
-            del st.session_state["pending_push"]
-            _execute_push(records, label)
-    with pc2:
-        if st.button("❌ Cancel This Upload", use_container_width=True, key="pending_push_cancel"):
-            del st.session_state["pending_push"]
-            st.info("Upload cancelled — nothing was saved.")
-            st.rerun()
-    st.divider()
+    with _notice_area:
+        pend = st.session_state["pending_push"]
+        st.markdown("""
+        <div class="danger-box">
+        ⚠️ <b>Possible double-count risk.</b> The record(s) below already have a manually-entered
+        quantity for that date/technician/location with no matching upload history — adding this
+        upload on top could count the same real installs twice. Review, then choose:
+        </div>
+        """, unsafe_allow_html=True)
+        st.dataframe(pd.DataFrame(pend["risky"]), use_container_width=True, hide_index=True)
+        pc1, pc2 = st.columns(2)
+        with pc1:
+            if st.button("✅ Proceed Anyway (verified — not duplicates)", type="primary", use_container_width=True, key="pending_push_proceed"):
+                records, label = pend["records"], pend["source_label"]
+                del st.session_state["pending_push"]
+                _execute_push(records, label)
+        with pc2:
+            if st.button("❌ Cancel This Upload", use_container_width=True, key="pending_push_cancel"):
+                del st.session_state["pending_push"]
+                st.info("Upload cancelled — nothing was saved.")
+                st.rerun()
+        st.divider()
 
 
 # ── Tabs Configuration ────────────────────────────────────────────────────────
@@ -3419,6 +3545,17 @@ with tab_analytics:
             st.caption("Not enough data yet to project.")
 
         # -- Hourly table --------------------------------------------------
+        # One header for every Analytics image export — the same figures as the
+        # glance cards above, including the forecast — so all shared images
+        # carry an identical, self-explanatory header.
+        _scope_txt = "All supervisors" if sel_supervisor == "All supervisors" else f"Supervisor: {sel_supervisor}"
+        analytics_img_meta = (
+            f"{_scope_txt}   |   Last install: {str(max(day_df['time']))[:5]}\n"
+            f"Total: {len(day_df)}   |   Active Installers: {len(installers)}   |   "
+            f"Avg/Installer: {round(len(day_df) / len(installers), 1) if installers else 0}   |   "
+            f"Forecast by {effective_end[:5]}: {forecast_total if forecast_total is not None else 'N/A'}"
+        )
+
         sec_hdr("clock", "Installer-Wise Hourly Count")
         if day_df["hour_int"].notna().any():
             hr_min = int(day_df["hour_int"].min())
@@ -3469,11 +3606,17 @@ with tab_analytics:
                 render_hourly_heatmap(hdf, hour_col_labels, grid)
 
             n_inst = scope_df["installer_id"].nunique()
+            # Same glance figures as the on-screen header, including the
+            # forecast, computed for THIS scope (a supervisor's own team when
+            # split) so each shared image is self-contained.
+            scope_fc, _, scope_end = forecast_total_installs(
+                scope_df, sorted(scope_df["installer_id"].unique()), f"{day_end_choice}:00")
             glance = (
-                f"Total: {len(scope_df)}  |  Active Installers: {n_inst}  |  "
-                f"Avg/Installer: {round(len(scope_df) / n_inst, 1) if n_inst else 0}"
+                f"Total: {len(scope_df)}   |   Active Installers: {n_inst}   |   "
+                f"Avg/Installer: {round(len(scope_df) / n_inst, 1) if n_inst else 0}   |   "
+                f"Forecast by {scope_end[:5]}: {scope_fc if scope_fc is not None else 'N/A'}"
             )
-            scope_line = f"{scope_label}  |  " if scope_label else ""
+            scope_line = f"{scope_label}   |   " if scope_label else ""
             title = (f"Installer-Wise Hourly Count — {sel_date}\n"
                      f"{scope_line}Last install: {str(max(scope_df['time']))[:5]}\n{glance}")
             safe_label = (scope_label or "All").replace(" ", "_").replace(":", "")
@@ -3529,7 +3672,8 @@ with tab_analytics:
         }
         half_display_df = pd.concat([half_df, pd.DataFrame([half_total_row])], ignore_index=True)
         st.dataframe(half_display_df, use_container_width=True, hide_index=True, height=dataframe_height(len(half_display_df)))
-        download_image_button(half_display_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half", title=f"Half-Day Split — {sel_date}")
+        download_image_button(half_display_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half",
+                              title=f"Half-Day Split — {sel_date}\n{analytics_img_meta}")
 
         # -- Average install time -------------------------------------------
         sec_hdr("gauge", "Active Pace / Installer")
@@ -3554,7 +3698,7 @@ with tab_analytics:
         download_image_button(
             avg_df, f"Avg_Install_Time_{sel_date}.png", key="dl_img_avg",
             color_grid=build_single_col_color_grid(avg_df, "Avg Time/Install (min)", avg_time_colors),
-            title=f"Average Install Time / Installer — {sel_date}",
+            title=f"Active Pace / Installer — {sel_date}\n{analytics_img_meta}",
         )
 
         # -- Quick visual ------------------------------------------------------
