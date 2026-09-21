@@ -57,6 +57,48 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ── Messages that survive st.rerun() ──────────────────────────────────────────
+# st.rerun() discards everything drawn in the current run, so a confirmation
+# like "✅ Added 150 records" followed by a rerun was wiped before anyone could
+# read it. With counts also looking unchanged, every action seemed to do
+# nothing — prompting repeat clicks. Rather than edit ~28 call sites, success/
+# info/warning calls made during a run are remembered, and if that run ends in
+# st.rerun() they are replayed once at the top of the next run.
+#
+# The originals are captured ONCE on the streamlit module: this script
+# re-executes on every run, and re-capturing each time would wrap the
+# already-wrapped functions, nesting deeper on every rerun.
+if not hasattr(st, "_tlis_originals"):
+    st._tlis_originals = {n: getattr(st, n) for n in ("success", "info", "warning", "rerun")}
+_ST = st._tlis_originals
+_RUN_MESSAGES = []   # re-created on every run, since the script re-executes
+
+
+def _remembering(kind):
+    def _show(body, *args, **kwargs):
+        _RUN_MESSAGES.append((kind, body))
+        return _ST[kind](body, *args, **kwargs)
+    return _show
+
+
+def _rerun_keeping_messages(*args, **kwargs):
+    if _RUN_MESSAGES:
+        st.session_state["_carry_messages"] = list(_RUN_MESSAGES)
+    return _ST["rerun"](*args, **kwargs)
+
+
+st.success = _remembering("success")
+st.info = _remembering("info")
+st.warning = _remembering("warning")
+st.rerun = _rerun_keeping_messages
+
+
+def replay_carried_messages():
+    """Show, once, whatever the previous run said just before it reran."""
+    for kind, body in st.session_state.pop("_carry_messages", []):
+        _ST[kind](body)   # the original: replaying must not re-queue itself
+
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 # ── Brand ──────────────────────────────────────────────────────────────────
 # Logo embedded as base64 so there's no extra file to deploy alongside the app
@@ -412,24 +454,36 @@ def dataframe_to_png_bytes(df: pd.DataFrame, color_grid=None, title: str = None)
     return buf.getvalue()
 
 
-def download_image_button(df: pd.DataFrame, file_name: str, key: str, color_grid=None, title: str = None, label: str = "📷 Download as Image"):
-    """Download-as-Image button for the given table.
+import threading
+_RENDER_LOCK = threading.Lock()   # matplotlib's pyplot state isn't thread-safe
 
-    Rendering a table to PNG via matplotlib costs ~0.3s. Streamlit re-runs the
-    WHOLE script (every tab body, not just the visible one) on every widget
-    interaction, so eagerly building these made each click pay for every
-    export image in the app whether or not anyone wanted one. The PNG is now
-    built only after the user asks for it."""
+
+def lazy_download_button(label: str, make_bytes, file_name: str, mime: str, key: str):
+    """One-click download whose file is only built when clicked.
+
+    Streamlit >= 1.64 accepts a callable for `data`, run on click on a separate
+    thread. That replaces the old two-step "prepare, then download" pattern,
+    which needed two clicks and — once prepared — rebuilt the file on every
+    later interaction. on_click="ignore" stops the download from rerunning
+    (and redrawing) the entire app."""
+    def _build():
+        with _RENDER_LOCK:
+            return make_bytes()
+    st.download_button(label, data=_build, file_name=file_name, mime=mime,
+                       use_container_width=True, key=key, on_click="ignore")
+
+
+def download_image_button(df: pd.DataFrame, file_name: str, key: str, color_grid=None, title: str = None, label: str = "📷 Download as Image"):
+    """Download-as-Image for a table: one click, rendered only on demand."""
     if df.empty:
         return
-    want_key = f"{key}__prepare"
-    if st.session_state.get(want_key):
-        png_bytes = dataframe_to_png_bytes(df, color_grid=color_grid, title=title)
-        st.download_button(label, data=png_bytes, file_name=file_name, mime="image/png", use_container_width=True, key=key)
-    else:
-        if st.button(label, use_container_width=True, key=f"{key}__btn"):
-            st.session_state[want_key] = True
-            st.rerun()
+    # Snapshot the inputs now: this function is called in loops (one block
+    # per supervisor), and the render happens later on another thread.
+    df_snap, grid_snap, title_snap = df.copy(), color_grid, title
+    lazy_download_button(
+        label, lambda: dataframe_to_png_bytes(df_snap, color_grid=grid_snap, title=title_snap),
+        file_name, "image/png", key,
+    )
 
 
 def build_map_snapshot_png(df: pd.DataFrame, title: str) -> bytes:
@@ -1131,6 +1185,7 @@ st.markdown(f"""
   </div>
 </div>
 """, unsafe_allow_html=True)
+replay_carried_messages()
 
 # ── Authentication / PIN Protection (persists until the app/tab is closed, ──
 # and now also survives a Streamlit Community Cloud app-sleep / session reset
@@ -1233,9 +1288,15 @@ def _bump_sheet_version(worksheet: str):
 
 
 @st.cache_data(ttl=READ_TTL, show_spinner=False)
-def _read_worksheet_cached(worksheet: str, _version: int):
-    """Cached Sheets read. `_version` is bumped by safe_update() so writes
+def _read_worksheet_cached(worksheet: str, version: int):
+    """Cached Sheets read. `version` is bumped by safe_update() so writes
     invalidate the cache immediately.
+
+    NOTE: this parameter must NOT start with an underscore. st.cache_data
+    deliberately leaves underscore-prefixed parameters out of the cache key,
+    so a `_version` argument is silently ignored — bumping it did nothing and
+    every save stayed invisible until the 90s TTL expired, which is why
+    uploads and pushes needed repeated clicks to show up.
 
     A MISSING worksheet is returned as a sentinel rather than raised. That
     matters: st.cache_data never caches exceptions, so a raised "not found"
@@ -3039,7 +3100,7 @@ with tab_dash:
             export_df.loc[len(export_df)] = ["PENDING STOCK", "", pending_1ph, pending_3ph, ""]
 
             csv_data = export_df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download CSV Report", data=csv_data, file_name="Installation_Summary.csv", mime="text/csv", use_container_width=True)
+            st.download_button("📥 Download CSV Report", data=csv_data, file_name="Installation_Summary.csv", mime="text/csv", use_container_width=True, on_click="ignore")
 
             date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
             wa_loc_df = filtered.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
@@ -3117,7 +3178,7 @@ with tab_dash:
     if "weekly_report_pdf" in st.session_state:
         st.download_button("Download Report (PDF)", data=st.session_state["weekly_report_pdf"],
                             file_name=st.session_state["weekly_report_name"], mime="application/pdf",
-                            use_container_width=True, key="download_weekly_report")
+                            use_container_width=True, key="download_weekly_report", on_click="ignore")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ANALYTICS  (fully independent of Installations/Inventory/Technicians —
@@ -3698,27 +3759,23 @@ with tab_map:
                                f"**Old Meter:** {clean_id_value(pin_row.get('old_meter_no')) or '—'}", f"**New Meter:** {clean_id_value(pin_row.get('new_meter_no')) or '—'}"]
                 st.caption(" · ".join(detail_bits))
 
-            # -- Save view + share ---------------------------------------------
-            # Both exports are built on demand: Streamlit re-runs every tab body
-            # on each interaction, so generating these eagerly made every click
-            # in the app pay for a matplotlib render plus a full KML build.
+            # -- Save view + share (one click, built only when clicked) --------
             sub_hdr("download", "Export This View")
             filter_desc = f"{', '.join(map_loc_filter) if map_loc_filter and len(map_loc_filter) < len(loc_options) else 'All Sections'} · {md_start} to {md_end}"
             ec1, ec2 = st.columns(2)
+            _pins_snap = pinned.copy()
             with ec1:
-                if st.session_state.get("map_png_ready"):
-                    png_snapshot = build_map_snapshot_png(pinned, title=f"Install Locations\n{filter_desc}")
-                    st.download_button("📷 Save Map View As PNG", data=png_snapshot, file_name="map_view.png", mime="image/png", use_container_width=True, key="map_png_export")
-                elif st.button("📷 Save Map View As PNG", use_container_width=True, key="map_png_prep"):
-                    st.session_state["map_png_ready"] = True
-                    st.rerun()
+                lazy_download_button(
+                    "📷 Save Map View As PNG",
+                    lambda: build_map_snapshot_png(_pins_snap, title=f"Install Locations\n{filter_desc}"),
+                    "map_view.png", "image/png", "map_png_export",
+                )
             with ec2:
-                if st.session_state.get("map_kml_ready"):
-                    kml_bytes = build_kml(pinned, doc_name=f"Installed Meters — {filter_desc}")
-                    st.download_button("🗺️ Share As KML File", data=kml_bytes, file_name="installed_meters.kml", mime="application/vnd.google-earth.kml+xml", use_container_width=True, key="map_kml_export")
-                elif st.button("🗺️ Share As KML File", use_container_width=True, key="map_kml_prep"):
-                    st.session_state["map_kml_ready"] = True
-                    st.rerun()
+                lazy_download_button(
+                    "🗺️ Share As KML File",
+                    lambda: build_kml(_pins_snap, doc_name=f"Installed Meters — {filter_desc}"),
+                    "installed_meters.kml", "application/vnd.google-earth.kml+xml", "map_kml_export",
+                )
 
             with st.expander(f"📋 View {len(pinned)} record(s) as a table"):
                 map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
@@ -3863,11 +3920,11 @@ with tab_inst:
                 with dl1:
                     st.download_button("Download as text", data=export_text,
                                        file_name=f"search_{search_query.strip()[:20] or 'results'}.txt",
-                                       mime="text/plain", use_container_width=True, key="search_dl_txt")
+                                       mime="text/plain", use_container_width=True, key="search_dl_txt", on_click="ignore")
                 with dl2:
                     st.download_button("Download as CSV", data=results_display.to_csv(index=False),
                                        file_name=f"search_{search_query.strip()[:20] or 'results'}.csv",
-                                       mime="text/csv", use_container_width=True, key="search_dl_csv")
+                                       mime="text/csv", use_container_width=True, key="search_dl_csv", on_click="ignore")
 
     with st.expander("📤 Upload Legacy/Historical Data"):
         render_legacy_upload_widget(key_prefix="installs")
@@ -4166,7 +4223,7 @@ with tab_inv:
     else:
         inv_sorted = df_inv_t.iloc[::-1].reset_index(drop=True)
         inv_exp = inv_sorted.rename(columns={"date": "Date", "type": "Type", "qty": "Qty", "mrn": "MRN No", "make": "Make"})
-        st.download_button("⬇ Export Inventory CSV", inv_exp.to_csv(index=False).encode(), "inventory.csv", "text/csv", use_container_width=True)
+        st.download_button("⬇ Export Inventory CSV", inv_exp.to_csv(index=False).encode(), "inventory.csv", "text/csv", use_container_width=True, on_click="ignore")
 
         ITEMS_INV = 10
         total_inv_p = max(1, math.ceil(len(inv_sorted) / ITEMS_INV))
@@ -4745,7 +4802,7 @@ with tab_admin:
                 st.warning(f"⚠️ Found {len(flagged)} row(s) where the Installations total exceeds what uploads alone account for.")
                 st.dataframe(flagged, use_container_width=True, hide_index=True, height=dataframe_height(len(flagged)))
                 csv_data = flagged.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Download This Report", data=csv_data, file_name="installations_discrepancy_report.csv", mime="text/csv", use_container_width=True)
+                st.download_button("📥 Download This Report", data=csv_data, file_name="installations_discrepancy_report.csv", mime="text/csv", use_container_width=True, on_click="ignore")
 
     with st.expander("↩️ Undo A Previous Upload"):
         st.markdown("""
