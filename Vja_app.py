@@ -2650,6 +2650,41 @@ def diagnose_installations_discrepancy():
     ).sort_values("Implied Manual Qty", ascending=False)
 
 
+def reduce_rows_to_upload_counts(keys) -> int:
+    """For each flagged (date, technician, location), set that Installations
+    row to exactly what its uploaded records support — correctly split into
+    1PH / 3PH. Removes only the EXTRA on top of the uploads; the uploaded
+    installs themselves stay. Returns the number of rows changed."""
+    df_inst = get_data("Installations")
+    df_log = get_data("UploadedInstallLog")
+    if df_inst.empty or df_log.empty or not keys:
+        return 0
+    df_inst = df_inst.copy()
+    for col in ("qty_1ph", "qty_3ph"):
+        df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
+    phase = df_log["meter_type"].apply(classify_meter_type) if "meter_type" in df_log.columns else pd.Series("", index=df_log.index)
+    log = df_log.assign(_1=(phase == "1PH").astype(int), _3=(phase == "3PH").astype(int))
+    truth = log.groupby(["date", "tech_name", "location"])[["_1", "_3"]].sum()
+
+    changed = 0
+    for d, t, l in keys:
+        if (d, t, l) not in truth.index:
+            continue
+        want_1, want_3 = (int(x) for x in truth.loc[(d, t, l)])
+        m = ((df_inst["date"].astype(str) == str(d)) & (df_inst["tech_name"].astype(str) == str(t))
+             & (df_inst["location"].astype(str) == str(l)))
+        # Only rows that exceed the uploads — a separate, smaller manual row
+        # for the same day is a different entry and is left alone.
+        m &= (df_inst["qty_1ph"] + df_inst["qty_3ph"]) > (want_1 + want_3)
+        for idx in df_inst[m].index:
+            df_inst.at[idx, "qty_1ph"] = want_1
+            df_inst.at[idx, "qty_3ph"] = want_3
+            changed += 1
+    if changed and safe_update("Installations", df_inst):
+        return changed
+    return 0
+
+
 def find_sno_duplicates():
     """The highest-confidence duplicate signal: the same Consumer No (SNO)
     appearing more than once in UploadedInstallLog on the SAME date. A given
@@ -5098,22 +5133,67 @@ with tab_admin:
     with st.expander("🔎 Check For Possible Double-Counted Installs"):
         st.markdown("""
         <div class="info-box">
-        Flags any date/technician/location where the Installations total is higher than what's
-        derivable purely from uploaded records — a sign that a manual entry may have been added
-        on top of installs that were later also uploaded, double-counting them. This is a
-        read-only report; nothing is changed automatically. Review each row, then correct it
-        manually via the Installation Log in the Installs tab (edit or delete the affected entry).
+        Finds Installations rows whose total is <b>higher</b> than the uploaded installs behind
+        them. Each flagged row holds real uploaded installs <b>plus</b> an extra amount — so the
+        fix is to remove the extra, never to delete the row.
         </div>
         """, unsafe_allow_html=True)
         if st.button("🔎 Run Discrepancy Check", use_container_width=True, key="run_discrepancy_check"):
-            flagged = diagnose_installations_discrepancy()
+            # Kept in session state: a button drawn inside another button's
+            # result never fires, because clicking it reruns the app and the
+            # outer button is no longer "pressed".
+            st.session_state["discrepancy_report"] = diagnose_installations_discrepancy()
+
+        if "discrepancy_report" in st.session_state:
+            flagged = st.session_state["discrepancy_report"]
+            phase_fixed = bool(str(get_setting("phase_fix_applied", "")).strip())
             if flagged.empty:
-                st.success("✅ No discrepancies found — every Installations row with upload history matches its upload-derived count.")
+                st.success("✅ No discrepancies — every row matches its uploaded installs.")
+            elif not phase_fixed:
+                # The 1PH/3PH double count shows up here as "extra" too. Fixing
+                # rows here first and then running that fix would subtract the
+                # same overcount twice — so it has to go first.
+                st.warning(
+                    f"⚠️ {len(flagged)} row(s) flagged. These are most likely the 1PH/3PH double "
+                    "counting. Apply **Fix 1PH / 3PH Install Counts** (above) first, then run this "
+                    "check again — most or all of these should clear."
+                )
+                st.dataframe(flagged, use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(flagged)))
             else:
-                st.warning(f"⚠️ Found {len(flagged)} row(s) where the Installations total exceeds what uploads alone account for.")
-                st.dataframe(flagged, use_container_width=True, hide_index=True, height=dataframe_height(len(flagged)))
-                csv_data = flagged.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Download This Report", data=csv_data, file_name="installations_discrepancy_report.csv", mime="text/csv", use_container_width=True, on_click="ignore")
+                st.warning(f"⚠️ {len(flagged)} row(s) still have more installs than their uploads support.")
+                st.markdown("""
+                <div class="warn-box">
+                The 1PH/3PH fix is already applied, so the extra here is most likely a <b>manual entry
+                added on top of installs that were also uploaded</b>. Tick a row to remove its extra —
+                its uploaded installs stay. Leave a row unticked if the extra is real work that was
+                never uploaded.
+                </div>
+                """, unsafe_allow_html=True)
+                editable = flagged.copy()
+                editable.insert(0, "Remove extra", False)
+                edited = st.data_editor(
+                    editable, use_container_width=True, hide_index=True, key="discrepancy_editor",
+                    disabled=[col for col in editable.columns if col != "Remove extra"],
+                    height=dataframe_height(len(editable)),
+                )
+                picked = edited[edited["Remove extra"]]
+                extra = int(picked["Implied Manual Qty"].sum()) if not picked.empty else 0
+                if st.button(f"Remove {extra} extra install(s) from {len(picked)} row(s)", type="primary",
+                             use_container_width=True, disabled=picked.empty, key="apply_discrepancy_fix"):
+                    keys = list(zip(picked["Date"], picked["Technician"], picked["Location"]))
+                    n = reduce_rows_to_upload_counts(keys)
+                    del st.session_state["discrepancy_report"]
+                    if n:
+                        st.success(f"✅ Removed {extra} extra install(s) from {n} row(s).")
+                    else:
+                        st.error("Nothing changed — those rows may have been edited since the check ran.")
+                    st.rerun()
+
+            if not flagged.empty:
+                st.download_button("📥 Download This Report", data=flagged.to_csv(index=False).encode("utf-8"),
+                                   file_name="installations_discrepancy_report.csv", mime="text/csv",
+                                   use_container_width=True, on_click="ignore")
 
     with st.expander("↩️ Undo A Previous Upload"):
         st.markdown("""
