@@ -628,6 +628,42 @@ def build_map_snapshot_png(df: pd.DataFrame, title: str) -> bytes:
 # free XYZ tiles directly (CARTO's "light_all" basemap, no key required) and
 # composite the filtered points on top — giving a snapshot that matches what
 # you see live on the Map tab, cropped tightly to just those points.
+# ── Stray pins ─────────────────────────────────────────────────────────────
+# A single pin kilometres from the rest (a bad GPS fix, or a meter logged under
+# the wrong section) forces any "fit all pins" view to zoom out until every
+# real install collapses into one corner. Such pins are kept out of the VIEW —
+# never out of the data — and named on the image so they can be checked.
+STRAY_PIN_MIN_M = 800   # a pin this close to the group is never called stray
+
+
+def _dist_m(lat1, lon1, lat2, lon2) -> float:
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def split_stray_pins(lats, lons):
+    """Return a list of booleans, True = stray. Distance from the median point,
+    with an IQR fence — robust to the very outliers it's looking for, unlike a
+    mean. Needs a handful of pins before it will call anything stray."""
+    n = len(lats)
+    if n < 5:
+        return [False] * n
+    mlat, mlon = float(pd.Series(lats).median()), float(pd.Series(lons).median())
+    d = pd.Series([_dist_m(la, lo, mlat, mlon) for la, lo in zip(lats, lons)])
+    q1, q3 = d.quantile(0.25), d.quantile(0.75)
+    fence = max(q3 + 3 * (q3 - q1), STRAY_PIN_MIN_M)
+    far = [bool(x > fence) for x in d]
+    # Only a FEW isolated pins count as stray. A bigger far-off group is a
+    # real second work area (e.g. 12 installs 3 km away) — hiding it would
+    # misrepresent the section, so then the view simply shows every pin.
+    if sum(far) > max(2, int(n * 0.03)):
+        return [False] * n
+    return far
+
+
 TILE_SIZE = 256
 # OpenStreetMap's standard tiles need no API key. (CARTO's basemaps.cartocdn.com
 # now stamps an "API key missing" watermark across its tiles, which was showing
@@ -775,6 +811,147 @@ def build_basemap_snapshot_png(lats, lons, title: str = None, point_labels=None)
         # scatter-only style rather than erroring out the whole report.
         fallback_df = pd.DataFrame({"_lat": lats, "_long": lons})
         return build_map_snapshot_png(fallback_df, title or "Install Locations")
+
+
+def _fetch_tile(z: int, x: int, y: int):
+    import requests
+    from PIL import Image
+    try:
+        r = requests.get(TILE_URL_TEMPLATE.format(z=z, x=x, y=y), timeout=6,
+                         headers={"User-Agent": "SmartMeterFieldTracker/1.0"})
+        if r.status_code == 200:
+            return Image.open(io.BytesIO(r.content)).convert("RGB")
+    except Exception:
+        pass
+    return None
+
+
+def build_map_export_png(pins: pd.DataFrame, heading: str, meta_lines) -> bytes:
+    """Map tab export: street map, landscape, same header/logo as the table
+    images, framed on the group of installs rather than on every pin.
+
+    Replaces a plain latitude/longitude scatter with no streets, whose frame
+    was stretched by any stray pin until the real installs sat in a corner."""
+    from PIL import Image, ImageDraw
+
+    lats = pd.to_numeric(pins["_lat"], errors="coerce")
+    lons = pd.to_numeric(pins["_long"], errors="coerce")
+    ok = lats.notna() & lons.notna()
+    pins, lats, lons = pins[ok], lats[ok].tolist(), lons[ok].tolist()
+    stray = split_stray_pins(lats, lons)
+    keep_lat = [la for la, s in zip(lats, stray) if not s]
+    keep_lon = [lo for lo, s in zip(lons, stray) if not s]
+
+    meta = list(meta_lines)
+    meta.append(f"{len(keep_lat):,} pin(s) shown")
+    if any(stray):
+        strays = pins[[bool(s) for s in stray]]
+        bits = []
+        for _, r in strays.head(3).iterrows():
+            sno = clean_id_value(r.get("sno", "")) or "no SNO"
+            bits.append(f"SNO {sno} at {float(r['_lat']):.4f}, {float(r['_long']):.4f}")
+        more = f" (+{len(strays) - 3} more)" if len(strays) > 3 else ""
+        meta.append(f"{len(strays)} pin(s) far from the rest, not shown — check location: " + "; ".join(bits) + more)
+
+    fs = 26
+    f_title, f_meta = _img_font(int(fs * 1.25), True), _img_font(int(fs * 0.9))
+    map_w = IMG_W - 2 * IMG_MARGIN
+
+    canvas = Image.new("RGB", (IMG_W, IMG_H_MIN), (255, 255, 255))
+    d = ImageDraw.Draw(canvas)
+
+    # Wrap header lines to the image width — the stray-pin note can list
+    # several SNOs with coordinates and would otherwise run off the edge.
+    wrapped = []
+    for m in meta:
+        words, line = m.split(" "), ""
+        for w in words:
+            trial = f"{line} {w}".strip()
+            if d.textlength(trial, font=f_meta) > map_w and line:
+                wrapped.append(line)
+                line = w
+            else:
+                line = trial
+        wrapped.append(line)
+    meta = wrapped
+
+    # -- Header (identical treatment to the table images) --
+    y = IMG_MARGIN
+    d.text((IMG_MARGIN, y), heading, font=f_title, fill=IMG_INK)
+    try:
+        logo = Image.open(io.BytesIO(base64.b64decode(LOGO_PRINT_B64))).convert("RGB")
+        lh = int(fs * 2.4)
+        logo = logo.resize((int(logo.width * lh / logo.height), lh))
+        canvas.paste(logo, (IMG_W - IMG_MARGIN - logo.width, IMG_MARGIN - int(fs * 0.3)))
+    except Exception:
+        pass
+    y += int(fs * 1.9)
+    for m in meta:
+        d.text((IMG_MARGIN, y), m, font=f_meta, fill=IMG_INK_SOFT)
+        y += int(fs * 1.35)
+    y += int(fs * 0.4)
+    d.line([(IMG_MARGIN, y), (IMG_W - IMG_MARGIN, y)], fill=IMG_BRAND, width=3)
+    map_top = y + int(fs * 0.6)
+    map_h = IMG_H_MIN - IMG_MARGIN - map_top
+
+    if not keep_lat:
+        d.text((IMG_MARGIN, map_top + 20), "No pins with coordinates for this view.", font=f_meta, fill=IMG_INK_SOFT)
+        buf = io.BytesIO(); canvas.save(buf, format="PNG", optimize=True); return buf.getvalue()
+
+    # -- Frame: the kept pins, padded, stretched to the map area's shape --
+    min_lat, max_lat = min(keep_lat), max(keep_lat)
+    min_lon, max_lon = min(keep_lon), max(keep_lon)
+    # Highest zoom at which the padded pin box still fits the map area.
+    zoom = TILE_MAX_ZOOM
+    for z in range(TILE_MAX_ZOOM, 1, -1):
+        x1, y1 = _lonlat_to_pixel(min_lon, max_lat, z)
+        x2, y2 = _lonlat_to_pixel(max_lon, min_lat, z)
+        if (x2 - x1) * 1.25 <= map_w and (y2 - y1) * 1.25 <= map_h:
+            zoom = z
+            break
+    zoom = min(zoom, 18)
+    x1, y1 = _lonlat_to_pixel(min_lon, max_lat, zoom)
+    x2, y2 = _lonlat_to_pixel(max_lon, min_lat, zoom)
+    bw, bh = max(x2 - x1, 1) * 1.25, max(y2 - y1, 1) * 1.25
+    # Crop box at this zoom with EXACTLY the map area's aspect, centred on the
+    # pins, then scaled up by k (< 2, since the next zoom level didn't fit).
+    k = min(map_w / bw, map_h / bh)
+    cw, ch = map_w / k, map_h / k
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    left, top = cx - cw / 2, cy - ch / 2
+
+    tx0, ty0 = int(left // TILE_SIZE), int(top // TILE_SIZE)
+    tx1, ty1 = int((left + cw) // TILE_SIZE), int((top + ch) // TILE_SIZE)
+    mosaic = Image.new("RGB", ((tx1 - tx0 + 1) * TILE_SIZE, (ty1 - ty0 + 1) * TILE_SIZE), (236, 238, 241))
+    got_any = False
+    for tx in range(tx0, tx1 + 1):
+        for ty in range(ty0, ty1 + 1):
+            tile = _fetch_tile(zoom, tx, ty)
+            if tile is not None:
+                mosaic.paste(tile, ((tx - tx0) * TILE_SIZE, (ty - ty0) * TILE_SIZE))
+                got_any = True
+    ox, oy = left - tx0 * TILE_SIZE, top - ty0 * TILE_SIZE
+    view = mosaic.crop((int(ox), int(oy), int(ox + cw), int(oy + ch))).resize((map_w, map_h))
+
+    vd = ImageDraw.Draw(view)
+    r = max(7, int(min(map_w, map_h) * 0.012))
+    for la, lo in zip(keep_lat, keep_lon):
+        px, py = _lonlat_to_pixel(lo, la, zoom)
+        vx, vy = (px - left) * k, (py - top) * k
+        vd.ellipse([vx - r, vy - r, vx + r, vy + r], fill=(0, 180, 192), outline=(255, 255, 255), width=max(2, r // 3))
+
+    note = TILE_ATTRIBUTION if got_any else "Street map unavailable — pin positions only"
+    nf = _img_font(15)
+    nw = vd.textlength(note, font=nf)
+    vd.rectangle([map_w - nw - 16, map_h - 26, map_w, map_h], fill=(255, 255, 255))
+    vd.text((map_w - nw - 8, map_h - 22), note, font=nf, fill=IMG_INK_SOFT)
+
+    canvas.paste(view, (IMG_MARGIN, map_top))
+    d.rectangle([IMG_MARGIN, map_top, IMG_MARGIN + map_w - 1, map_top + map_h - 1], outline=IMG_HAIRLINE, width=1)
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 def build_kml(df: pd.DataFrame, doc_name: str = "Installed Meters") -> bytes:
@@ -1754,7 +1931,13 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
         if not sub.empty:
             try:
                 loc_name = code_to_location.get(sec, "")
-                png = build_basemap_snapshot_png(sub["_lat"].tolist(), sub["_long"].tolist(), title=f"{sec} - {loc_name}" if loc_name else f"Section {sec}")
+                # Frame each snippet on its group of installs; a stray pin
+                # would otherwise shrink the whole section into one corner.
+                _la, _lo = sub["_lat"].tolist(), sub["_long"].tolist()
+                _stray = split_stray_pins(_la, _lo)
+                _la = [v for v, s in zip(_la, _stray) if not s] or _la
+                _lo = [v for v, s in zip(_lo, _stray) if not s] or _lo
+                png = build_basemap_snapshot_png(_la, _lo, title=f"{sec} - {loc_name}" if loc_name else f"Section {sec}")
             except Exception:
                 png = None
         snippets.append((sec, qty, png))
@@ -4091,8 +4274,9 @@ with tab_map:
             with ec1:
                 lazy_download_button(
                     "📷 Save Map View As PNG",
-                    lambda: build_map_snapshot_png(_pins_snap, title=f"Install Locations\n{filter_desc}"),
-                    "map_view.png", "image/png", "map_png_export",
+                    lambda: build_map_export_png(_pins_snap, "Install Locations", [filter_desc]),
+                    f"Map_{filter_desc.split(' · ')[0].replace(', ', '_').replace(' ', '_')}.png",
+                    "image/png", "map_png_export",
                 )
             with ec2:
                 lazy_download_button(
