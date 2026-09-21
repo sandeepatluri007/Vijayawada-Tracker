@@ -1210,6 +1210,28 @@ def _is_rate_limited(err: Exception) -> bool:
     return "429" in text or "quota" in text or "rate_limit" in text or "rate limit" in text
 
 
+@st.cache_resource
+def _sheet_versions() -> dict:
+    """Per-worksheet version counters, shared across every user session.
+
+    Bumping ONE sheet's counter makes only that sheet's next read miss the
+    cache. The previous approach cleared the entire cache on every write,
+    which forced all 9 worksheets to be re-downloaded after saving any one of
+    them — ~21 API calls per Analytics upload, so the third section file in a
+    minute ran into Google's ~60 reads/min quota. cache_resource (not
+    session_state) so a write by one supervisor refreshes it for all of them."""
+    return {}
+
+
+def _sheet_version(worksheet: str) -> int:
+    return _sheet_versions().get(worksheet, 0)
+
+
+def _bump_sheet_version(worksheet: str):
+    v = _sheet_versions()
+    v[worksheet] = v.get(worksheet, 0) + 1
+
+
 @st.cache_data(ttl=READ_TTL, show_spinner=False)
 def _read_worksheet_cached(worksheet: str, _version: int):
     """Cached Sheets read. `_version` is bumped by safe_update() so writes
@@ -1222,7 +1244,10 @@ def _read_worksheet_cached(worksheet: str, _version: int):
     unrelated reads like Locations fail with rate-limit errors. Returning a
     sentinel lets the miss be cached like any other result."""
     try:
-        df = conn.read(worksheet=worksheet, ttl=READ_TTL)
+        # ttl=0: the connection's internal cache is turned off so this wrapper
+        # is the ONLY cache layer. Two layers meant a write could only be made
+        # visible by wiping everything; one layer can be invalidated per sheet.
+        df = conn.read(worksheet=worksheet, ttl=0)
     except Exception as e:
         if _is_missing_worksheet(e):
             return _MISSING
@@ -1231,7 +1256,7 @@ def _read_worksheet_cached(worksheet: str, _version: int):
 
 
 def get_data(worksheet: str, retries: int = 3) -> pd.DataFrame:
-    version = st.session_state.get("_sheet_version", 0)
+    version = _sheet_version(worksheet)
     for attempt in range(retries):
         try:
             result = _read_worksheet_cached(worksheet, version)
@@ -1258,29 +1283,29 @@ def get_data(worksheet: str, retries: int = 3) -> pd.DataFrame:
                 return pd.DataFrame()
 
 
-def safe_update(worksheet: str, data: pd.DataFrame, retries: int = 5) -> bool:
+def safe_update(worksheet: str, data: pd.DataFrame, retries: int = 3) -> bool:
     """Write to Sheets with retries so a dropped connection doesn't lose the entry.
     On repeated failure, the data the user entered is NOT cleared — they can just retry."""
     for attempt in range(retries):
         try:
             with st.spinner(f"💾 Saving to {worksheet}..."):
                 conn.update(worksheet=worksheet, data=data.astype(str))
-            # Two cache layers have to be invalidated here, and missing either
-            # one makes a fresh write look like it never happened:
-            #   1. our _read_worksheet_cached wrapper (keyed on _sheet_version)
-            #   2. conn.read()'s OWN internal st.cache_data cache inside
-            #      streamlit-gsheets-connection, which otherwise keeps serving
-            #      its stale copy for the rest of the TTL window.
-            # Writes are rare compared to reads, so a full clear here costs
-            # little and is the only reliable way to flush layer 2.
-            st.cache_data.clear()
-            st.session_state["_sheet_version"] = st.session_state.get("_sheet_version", 0) + 1
+            # Invalidate ONLY this worksheet. With the connection's own cache
+            # disabled (see _read_worksheet_cached) there is a single cache
+            # layer, so this is sufficient — and the other 8 sheets stay
+            # cached instead of all being re-downloaded after every save.
+            _bump_sheet_version(worksheet)
             return True
         except Exception as e:
             if attempt < retries - 1:
-                time.sleep(min(2 ** attempt, 8))
+                # A rate limit won't clear in a second; hammering it just
+                # spends more of the quota that caused it.
+                time.sleep(4 * (attempt + 1) if _is_rate_limited(e) else 1)
             else:
-                st.error(f"⚠️ Save failed after several attempts ({e}). Your entries are still in the form — please tap Save again once you have signal.")
+                if _is_rate_limited(e):
+                    st.error("⚠️ Google Sheets limit reached. Your entries are safe — wait about a minute, then tap Save again.")
+                else:
+                    st.error(f"⚠️ Save failed after several attempts ({e}). Your entries are still in the form — please tap Save again once you have signal.")
                 return False
     return False
 
@@ -1817,14 +1842,47 @@ def normalize_time_val(val):
         return None
 
 
+class _Cell:
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+
+class _SheetGrid:
+    """In-memory stand-in for an openpyxl worksheet exposing just the
+    .cell(row=, column=).value and .max_row / .max_column the parsers use.
+
+    openpyxl's read-only mode loads far faster, but random cell access in that
+    mode rescans the file on every call — worse than a normal load. Streaming
+    the rows once into memory gets the fast load AND fast random access, with
+    no change needed at any of the call sites."""
+
+    def __init__(self, rows):
+        self._rows = rows
+        self.max_row = len(rows)
+        self.max_column = max((len(r) for r in rows), default=0)
+
+    def cell(self, row: int, column: int):
+        try:
+            return _Cell(self._rows[row - 1][column - 1])
+        except IndexError:
+            return _Cell(None)
+
+
 def load_first_data_sheet(uploaded_file):
     """Return the primary data worksheet from an uploaded workbook, skipping
     any pre-computed pivot/summary sheets (e.g. 'LoginID_Summary')."""
-    wb = openpyxl.load_workbook(uploaded_file, data_only=True)
-    for name in wb.sheetnames:
-        if "summary" not in name.strip().lower():
-            return wb[name]
-    return wb[wb.sheetnames[0]]
+    try:
+        uploaded_file.seek(0)
+    except Exception:
+        pass
+    wb = openpyxl.load_workbook(uploaded_file, data_only=True, read_only=True)
+    try:
+        name = next((n for n in wb.sheetnames if "summary" not in n.strip().lower()), wb.sheetnames[0])
+        return _SheetGrid([tuple(r) for r in wb[name].iter_rows(values_only=True)])
+    finally:
+        wb.close()  # read-only workbooks hold the file open until closed
 
 
 def time_to_minutes(hhmmss: str) -> float:
