@@ -1483,12 +1483,16 @@ hr { margin: 0.9rem 0 !important; }
 
 
 # ── Top banner & Refresh Button ───────────────────────────────────────────────
-st.markdown(f"""
+# Banner on the left, quick search on the right — the search sits ABOVE the
+# tabs so it is reachable from every tab. This row renders on every run, so it
+# never shifts the tabs (which would reset the selected tab).
+head_l, head_search = st.columns([8, 1], vertical_alignment="center")
+with head_l:
+    st.markdown(f"""
 <div class="top-banner">
   <img class="logo" src="data:image/png;base64,{LOGO_B64}" alt="TLIS" />
   <div>
-    <p class="t">Meter Tracker</p>
-    <p class="s">{COMPANY_NAME} &middot; Vijayawada Field Ops &middot; v{APP_VERSION}</p>
+    <p class="t">Smart Meter Tracker- Vijayawada</p>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -2554,6 +2558,10 @@ def expense_summary(df_exp: pd.DataFrame, mkey: str, n_1ph: int, n_3ph: int) -> 
 
     fixed_total = float(fixed["amount"].sum())
     variable_total = float((var["rate_1ph"] * n_1ph + var["rate_3ph"] * n_3ph).sum())
+    # Variable cost of one more install, used for the target projection and the
+    # slider. 1PH rate only, as agreed — change to a mix here if 3PH is ever
+    # to be projected too.
+    variable_rate = float(var["rate_1ph"].sum())
     total_cost = fixed_total + variable_total
     n = n_1ph + n_3ph
     # None (shown as "—") when there are no installs to divide by, or no costs
@@ -2562,9 +2570,32 @@ def expense_summary(df_exp: pd.DataFrame, mkey: str, n_1ph: int, n_3ph: int) -> 
     return {
         "installs_1ph": n_1ph, "installs_3ph": n_3ph, "installs": n,
         "fixed_total": fixed_total, "variable_total": variable_total, "total_cost": total_cost,
+        "variable_rate": variable_rate,
         "fixed_per_install": per(fixed_total), "variable_per_install": per(variable_total),
         "total_per_install": per(total_cost), "by_category": by_cat,
         "has_entries": not rows.empty,
+    }
+
+
+def cost_at_installs(fixed_total: float, variable_rate: float, n_installs: int) -> dict:
+    """Cost per install at any install count, for the target projection and the
+    slider.
+
+    Fixed costs are taken as the FULL month's — rent, salaries and EMIs are
+    monthly by nature, and diesel/misc are entered for the whole month — so
+    they don't grow with more installs; only the variable rate does. That is
+    the whole point of the curve: fixed cost per install falls as installs rise.
+    """
+    if n_installs <= 0:
+        return {"installs": 0, "fixed_per_install": None, "variable_per_install": None,
+                "total_per_install": None, "total_cost": fixed_total}
+    fixed_pi = fixed_total / n_installs
+    return {
+        "installs": n_installs,
+        "fixed_per_install": fixed_pi,
+        "variable_per_install": variable_rate,
+        "total_per_install": fixed_pi + variable_rate,
+        "total_cost": fixed_total + variable_rate * n_installs,
     }
 
 
@@ -3511,6 +3542,69 @@ def render_legacy_upload_widget(key_prefix: str):
                         push_parsed_records_to_installations(parsed, source_label="legacy install(s)")
 
 
+def render_meter_search(key_prefix: str = "inst", show_heading: bool = True):
+    """Search By Meter / Service No. Used both in the Installs tab and in the
+    header's quick-search, so there is only one copy to keep correct."""
+    if show_heading:
+        sec_hdr("search", "Search By Meter / Service No")
+    search_query = st.text_input("Search SNO / Old Meter No / New Meter No", key=f"{key_prefix}_meter_search_box",
+                                 placeholder="e.g. 1234567890 or meter serial number",
+                                 label_visibility="visible" if show_heading else "collapsed")
+
+    if search_query.strip():
+        df_search = get_data("UploadedInstallLog")
+        if df_search.empty or not has_col(df_search, "sno", "old_meter_no", "new_meter_no"):
+            st.info("No install records with meter/SNO details on file yet.")
+        else:
+            q = search_query.strip().lower()
+            for col in ["sno", "old_meter_no", "new_meter_no"]:
+                if col not in df_search.columns:
+                    df_search[col] = ""
+            match_mask = (
+                df_search["sno"].str.lower().str.contains(q, na=False) |
+                df_search["old_meter_no"].str.lower().str.contains(q, na=False) |
+                df_search["new_meter_no"].str.lower().str.contains(q, na=False)
+            )
+            results = df_search[match_mask]
+            if results.empty:
+                st.warning(f"⚠️ No matches found for '{search_query.strip()}'.")
+            else:
+                display_cols_map = {
+                    "date": "Date", "installer_id": "Installer LoginID", "location": "Section",
+                    "sno": "SNO", "old_meter_no": "Old Meter No", "new_meter_no": "New Meter No",
+                    "lat": "Latitude", "long": "Longitude",
+                }
+                cols_present = [c for c in display_cols_map if c in results.columns]
+                results_display = results[cols_present].rename(columns=display_cols_map).copy()
+                for _idc in ["SNO", "Old Meter No", "New Meter No"]:
+                    if _idc in results_display.columns:
+                        results_display[_idc] = results_display[_idc].apply(clean_id_value)
+                st.success(f"✅ Found {len(results)} match(es).")
+                st.dataframe(results_display, use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(results_display), max_px=500))
+
+                # Label: value text, so a result can be pasted into WhatsApp or
+                # a ticket without the receiver needing the app.
+                blocks = []
+                for i, (_, row) in enumerate(results_display.iterrows(), 1):
+                    lines = [f"--- Result {i} of {len(results_display)} ---"] if len(results_display) > 1 else []
+                    lines += [f"{col}: {row[col]}" for col in results_display.columns if str(row[col]).strip()]
+                    blocks.append("\n".join(lines))
+                export_text = "\n\n".join(blocks)
+
+                st.text_area("Copy as text", export_text, height=170, key=f"{key_prefix}_search_export_text",
+                             help="Tap inside, select all, copy — or use Download below.")
+                dl1, dl2 = st.columns(2)
+                with dl1:
+                    st.download_button("Download as text", data=export_text,
+                                       file_name=f"search_{search_query.strip()[:20] or 'results'}.txt",
+                                       mime="text/plain", use_container_width=True, key=f"{key_prefix}_search_dl_txt", on_click="ignore")
+                with dl2:
+                    st.download_button("Download as CSV", data=results_display.to_csv(index=False),
+                                       file_name=f"search_{search_query.strip()[:20] or 'results'}.csv",
+                                       mime="text/csv", use_container_width=True, key=f"{key_prefix}_search_dl_csv", on_click="ignore")
+
+
 # ── Persistent Map-sync failure warning (survives the st.rerun() that would ──
 # otherwise wipe it — see mirror_records_to_map) ─────────────────────────────
 if "map_sync_warning" in st.session_state:
@@ -3548,6 +3642,12 @@ if "pending_push" in st.session_state:
                 st.rerun()
         st.divider()
 
+
+# Quick search in the header — rendered into the column reserved beside the
+# banner, now that the data connection is ready.
+with head_search:
+    with st.popover("🔍", use_container_width=True, help="Search by meter / service no"):
+        render_meter_search("hdr", show_heading=False)
 
 # ── Tabs Configuration ────────────────────────────────────────────────────────
 # Plain labels — the design system uses no emoji as interface icons, and they
@@ -4262,11 +4362,6 @@ with tab_analytics:
             title=f"Active Pace / Installer — {sel_date}\n{analytics_img_meta}",
         )
 
-        # -- Quick visual ------------------------------------------------------
-        sec_hdr("chart", "Total Installs By Installer")
-        chart_df = half_df.set_index("Installer")[["Total"]]
-        st.bar_chart(chart_df)
-
         # -- Locked reset --------------------------------------------------
         st.divider()
         with st.expander("🔒 Reset Analytics Data (start a new day)"):
@@ -4556,6 +4651,56 @@ with tab_exp:
     if summ["installs"] == 0 and summ["has_entries"]:
         st.info("No installs recorded for this month yet, so there is no per-install cost to show.")
 
+    if summ["has_entries"]:
+        # -- If the monthly target is met --------------------------------
+        at_target = cost_at_installs(summ["fixed_total"], summ["variable_rate"], MONTHLY_TARGET)
+        sub_hdr("target", f"If The Monthly Target Of {MONTHLY_TARGET:,} Is Met")
+        now_pi = summ["total_per_install"]
+        drop = (now_pi - at_target["total_per_install"]) if (now_pi and at_target["total_per_install"]) else None
+        render_stat_tiles([
+            ("wallet", fmt_rs(at_target["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
+            ("gauge", fmt_rs(at_target["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
+            ("target", fmt_rs(at_target["total_per_install"], 1), "Total", "Rs./install", "normal"),
+            ("chart", ("—" if drop is None else f"{'-' if drop >= 0 else '+'}{abs(drop):,.1f}"),
+             "vs now", "Rs./install", "normal"),
+        ])
+        st.markdown(
+            f'<div class="info-box">Assumes this month\'s fixed costs of Rs. {summ["fixed_total"]:,.0f} '
+            f'are the full month, and each extra install adds Rs. {summ["variable_rate"]:,.0f} of variable cost. '
+            f'Month cost at target: Rs. {at_target["total_cost"]:,.0f}.</div>',
+            unsafe_allow_html=True)
+
+        # -- Slider: cost per install at any install count ----------------
+        sub_hdr("gauge", "Cost At Any Install Count")
+        slider_max = int(max(MONTHLY_TARGET, summ["installs"]) * 1.5 / 100) * 100 or 1000
+        default_n = int(summ["installs"] or MONTHLY_TARGET)
+        picked = st.slider("Installs in the month", min_value=0, max_value=slider_max,
+                           value=min(default_n, slider_max), step=25, key=f"exp_slider_{sel_month}",
+                           help="Drag to see how the cost per install changes with volume.")
+        at_pick = cost_at_installs(summ["fixed_total"], summ["variable_rate"], picked)
+        render_stat_tiles([
+            ("bolt", f"{picked:,}", "Installs", "chosen", "normal"),
+            ("wallet", fmt_rs(at_pick["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
+            ("gauge", fmt_rs(at_pick["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
+            ("target", fmt_rs(at_pick["total_per_install"], 1), "Total", "Rs./install", "normal"),
+        ])
+        st.markdown(
+            f'<div class="info-box">At {picked:,} installs the month costs Rs. {at_pick["total_cost"]:,.0f}'
+            + (f' — Rs. {at_pick["total_per_install"]:,.2f} per install.</div>'
+               if at_pick["total_per_install"] is not None else ' — no installs to divide by.</div>'),
+            unsafe_allow_html=True)
+
+        # The curve behind the slider: fixed cost per install falls as volume
+        # rises, while variable stays flat.
+        pts = [x for x in range(100, slider_max + 1, max(25, slider_max // 40))]
+        if pts:
+            curve = pd.DataFrame(
+                {"Total": [summ["fixed_total"] / x + summ["variable_rate"] for x in pts],
+                 "Fixed": [summ["fixed_total"] / x for x in pts],
+                 "Variable": [summ["variable_rate"] for x in pts]},
+                index=pd.Index(pts, name="Installs in the month"))
+            st.line_chart(curve, height=220)
+
     if summ["by_category"]:
         sub_hdr("chart", "By Category")
         cat_df = pd.DataFrame(summ["by_category"], columns=["Type", "Category", "Month (Rs.)"])
@@ -4817,61 +4962,7 @@ with tab_inst:
                         push_parsed_records_to_installations(parsed, source_label="install(s)")
 
     st.divider()
-    sec_hdr("search", "Search By Meter / Service No")
-    search_query = st.text_input("Search SNO / Old Meter No / New Meter No", key="meter_search_box", placeholder="e.g. 1234567890 or meter serial number")
-
-    if search_query.strip():
-        df_search = get_data("UploadedInstallLog")
-        if df_search.empty or not has_col(df_search, "sno", "old_meter_no", "new_meter_no"):
-            st.info("No install records with meter/SNO details on file yet.")
-        else:
-            q = search_query.strip().lower()
-            for col in ["sno", "old_meter_no", "new_meter_no"]:
-                if col not in df_search.columns:
-                    df_search[col] = ""
-            match_mask = (
-                df_search["sno"].str.lower().str.contains(q, na=False) |
-                df_search["old_meter_no"].str.lower().str.contains(q, na=False) |
-                df_search["new_meter_no"].str.lower().str.contains(q, na=False)
-            )
-            results = df_search[match_mask]
-            if results.empty:
-                st.warning(f"⚠️ No matches found for '{search_query.strip()}'.")
-            else:
-                display_cols_map = {
-                    "date": "Date", "installer_id": "Installer LoginID", "location": "Section",
-                    "sno": "SNO", "old_meter_no": "Old Meter No", "new_meter_no": "New Meter No",
-                    "lat": "Latitude", "long": "Longitude",
-                }
-                cols_present = [c for c in display_cols_map if c in results.columns]
-                results_display = results[cols_present].rename(columns=display_cols_map).copy()
-                for _idc in ["SNO", "Old Meter No", "New Meter No"]:
-                    if _idc in results_display.columns:
-                        results_display[_idc] = results_display[_idc].apply(clean_id_value)
-                st.success(f"✅ Found {len(results)} match(es).")
-                st.dataframe(results_display, use_container_width=True, hide_index=True,
-                             height=dataframe_height(len(results_display), max_px=500))
-
-                # Label: value text, so a result can be pasted into WhatsApp or
-                # a ticket without the receiver needing the app.
-                blocks = []
-                for i, (_, row) in enumerate(results_display.iterrows(), 1):
-                    lines = [f"--- Result {i} of {len(results_display)} ---"] if len(results_display) > 1 else []
-                    lines += [f"{col}: {row[col]}" for col in results_display.columns if str(row[col]).strip()]
-                    blocks.append("\n".join(lines))
-                export_text = "\n\n".join(blocks)
-
-                st.text_area("Copy as text", export_text, height=170, key="search_export_text",
-                             help="Tap inside, select all, copy — or use Download below.")
-                dl1, dl2 = st.columns(2)
-                with dl1:
-                    st.download_button("Download as text", data=export_text,
-                                       file_name=f"search_{search_query.strip()[:20] or 'results'}.txt",
-                                       mime="text/plain", use_container_width=True, key="search_dl_txt", on_click="ignore")
-                with dl2:
-                    st.download_button("Download as CSV", data=results_display.to_csv(index=False),
-                                       file_name=f"search_{search_query.strip()[:20] or 'results'}.csv",
-                                       mime="text/csv", use_container_width=True, key="search_dl_csv", on_click="ignore")
+    render_meter_search("inst")
 
     with st.expander("📤 Upload Legacy/Historical Data"):
         render_legacy_upload_widget(key_prefix="installs")
@@ -5246,6 +5337,9 @@ with tab_inv:
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_admin:
     tab_action_bar("admin")
+    # App version lives here rather than in the header: it is only needed to
+    # confirm which build is live after a deploy.
+    st.markdown(f'<div class="info-box">App version <b>v{APP_VERSION}</b></div>', unsafe_allow_html=True)
     if st.button("🔓 Log Out This Browser", use_container_width=True, key="logout_btn"):
         st.session_state["authenticated"] = False
         if "k" in st.query_params:
