@@ -1446,6 +1446,16 @@ button[data-testid="baseButton-primary"]:hover, .stButton>button[type="primary"]
 hr { margin: 0.9rem 0 !important; }
 [data-testid="stExpander"] { border-radius: var(--radius); border:1px solid var(--card-border); }
 
+/* Compact Analytics uploader. Scoped by Streamlit's per-key class so the
+   other upload boxes (Installs bulk upload, legacy uploads) keep full size. */
+.st-key-analytics_uploader [data-testid="stFileUploaderDropzone"] {
+    padding: 6px 10px !important;
+    min-height: 0 !important;
+}
+.st-key-analytics_uploader [data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }
+.st-key-analytics_uploader section { padding: 0 !important; }
+.st-key-analytics_go button { font-weight: 800 !important; letter-spacing: .5px; }
+
 /* ── Mobile ──────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
     .block-container { padding-left: 0.7rem !important; padding-right: 0.7rem !important; }
@@ -3385,37 +3395,6 @@ with tab_dash:
     df_inst = df_installations_master
     df_inv = df_inventory_master
 
-    sec_hdr("box", "Live Inventory Stock")
-
-    if not df_inv.empty and has_col(df_inv, "type", "qty"):
-        total_in_1ph = safe_numeric_col(df_inv[df_inv["type"] == "1 PH"], "qty").sum()
-        total_in_3ph = safe_numeric_col(df_inv[df_inv["type"] == "3 PH"], "qty").sum()
-    else:
-        total_in_1ph = total_in_3ph = 0
-
-    if not df_inst.empty and has_col(df_inst, "qty_1ph", "qty_3ph"):
-        total_out_1ph = safe_numeric_col(df_inst, "qty_1ph").sum()
-        total_out_3ph = safe_numeric_col(df_inst, "qty_3ph").sum()
-    else:
-        total_out_1ph = total_out_3ph = 0
-
-    pending_1ph = int(total_in_1ph - total_out_1ph)
-    pending_3ph = int(total_in_3ph - total_out_3ph)
-
-    render_stat_tiles([
-        ("bolt",  f"{int(total_in_1ph):,}", "Recv", "1PH", "normal"),
-        ("bolt",  f"{int(total_in_3ph):,}", "Recv", "3PH", "normal"),
-        ("alert" if pending_1ph < 0 else "bolt", f"{pending_1ph:,}", "Pend", "1PH",
-         "danger" if pending_1ph < 0 else "normal"),
-        ("alert" if pending_3ph < 0 else "bolt", f"{pending_3ph:,}", "Pend", "3PH",
-         "danger" if pending_3ph < 0 else "normal"),
-    ])
-    if pending_1ph < 0 or pending_3ph < 0:
-        deficits = [t for t, v in (("1PH", pending_1ph), ("3PH", pending_3ph)) if v < 0]
-        st.markdown(f'<div class="danger-box">More {" and ".join(deficits)} meters installed than received — check Inventory entries.</div>', unsafe_allow_html=True)
-
-    # ── Monthly Installs Overview ────────────────────────────────────────────
-    st.divider()
     sec_hdr("calendar", "Monthly Installs Overview")
 
     if df_inst.empty or not has_col(df_inst, "date", "qty_1ph", "qty_3ph", "location"):
@@ -3489,6 +3468,37 @@ with tab_dash:
                 st.dataframe(loc_month, use_container_width=True, hide_index=True)
                 download_image_button(loc_month, "This_Month_By_Location.png", key="dl_img_loc_month", title="This Month, By Location")
 
+    st.divider()
+    sec_hdr("box", "Live Inventory Stock")
+
+    if not df_inv.empty and has_col(df_inv, "type", "qty"):
+        total_in_1ph = safe_numeric_col(df_inv[df_inv["type"] == "1 PH"], "qty").sum()
+        total_in_3ph = safe_numeric_col(df_inv[df_inv["type"] == "3 PH"], "qty").sum()
+    else:
+        total_in_1ph = total_in_3ph = 0
+
+    if not df_inst.empty and has_col(df_inst, "qty_1ph", "qty_3ph"):
+        total_out_1ph = safe_numeric_col(df_inst, "qty_1ph").sum()
+        total_out_3ph = safe_numeric_col(df_inst, "qty_3ph").sum()
+    else:
+        total_out_1ph = total_out_3ph = 0
+
+    pending_1ph = int(total_in_1ph - total_out_1ph)
+    pending_3ph = int(total_in_3ph - total_out_3ph)
+
+    render_stat_tiles([
+        ("bolt",  f"{int(total_in_1ph):,}", "Recv", "1PH", "normal"),
+        ("bolt",  f"{int(total_in_3ph):,}", "Recv", "3PH", "normal"),
+        ("alert" if pending_1ph < 0 else "bolt", f"{pending_1ph:,}", "Pend", "1PH",
+         "danger" if pending_1ph < 0 else "normal"),
+        ("alert" if pending_3ph < 0 else "bolt", f"{pending_3ph:,}", "Pend", "3PH",
+         "danger" if pending_3ph < 0 else "normal"),
+    ])
+    if pending_1ph < 0 or pending_3ph < 0:
+        deficits = [t for t, v in (("1PH", pending_1ph), ("3PH", pending_3ph)) if v < 0]
+        st.markdown(f'<div class="danger-box">More {" and ".join(deficits)} meters installed than received — check Inventory entries.</div>', unsafe_allow_html=True)
+
+    # ── Monthly Installs Overview ────────────────────────────────────────────
     st.divider()
     sec_hdr("plug", "Installation Summary")
 
@@ -3794,17 +3804,20 @@ def process_analytics_upload(analytics_file) -> dict:
 
 with tab_analytics:
     tab_action_bar("analytics", show_upload=True)
-    st.markdown("""
-    <div class="info-box">
-    📈 Live installer performance. Independent of Installs/Inventory. Re-uploads add new rows only.
-    </div>
-    """, unsafe_allow_html=True)
 
     sec_hdr("upload", "Upload Progress File")
-    analytics_file = st.file_uploader(
-        "Upload MDM export (.xlsx) — TL_ logins only. Processes automatically.",
-        type=["xlsx"], key="analytics_uploader"
-    )
+    up_col, go_col = st.columns([6, 1], vertical_alignment="center")
+    with up_col:
+        analytics_file = st.file_uploader(
+            "MDM export (.xlsx)", type=["xlsx"], key="analytics_uploader",
+            label_visibility="collapsed",
+        )
+    with go_col:
+        # GO re-runs "Add & Process" on demand. New files still process
+        # automatically on upload; GO is for a retry or a forced re-run.
+        go_clicked = st.button("GO", type="primary", use_container_width=True,
+                               key="analytics_go", disabled=analytics_file is None,
+                               help="Add & process this file")
 
     SLOW_PROCESS_SECONDS = 5
 
@@ -3832,11 +3845,10 @@ with tab_analytics:
         needs_attention = (not last_ok) or last_slow
 
         if needs_attention:
-            st.warning(("⚠️ Automatic processing failed — tap below to retry." if not last_ok
-                        else "⏳ Automatic processing took a while — tap below if the data below doesn't look up to date."))
+            st.warning(("⚠️ Automatic processing failed — tap GO to retry." if not last_ok
+                        else "⏳ Processing took a while — tap GO if the figures below don't look up to date."))
 
-        btn_label = "🔁 Retry: Process & Add To Analytics" if not last_ok else "📊 Process & Add To Analytics"
-        if st.button(btn_label, type=("primary" if needs_attention else "secondary"), use_container_width=True, key="manual_analytics_process_btn"):
+        if go_clicked:
             t0 = time.time()
             with st.spinner("📊 Processing and adding to Analytics..."):
                 result = process_analytics_upload(analytics_file)
@@ -3854,58 +3866,70 @@ with tab_analytics:
         st.info("No analytics data yet — upload a progress file above to get started.")
     else:
         avail_dates = sorted(df_araw["date"].unique(), reverse=True)
-        vc1, vc2 = st.columns(2)
-        with vc1:
-            sel_date = st.selectbox("Viewing date", avail_dates, index=0)
-        day_df = df_araw[df_araw["date"] == sel_date].copy()
-        day_df["hour_int"] = pd.to_numeric(day_df["hour"], errors="coerce")
-        day_df["supervisor"] = day_df["installer_id"].apply(supervisor_of)
 
-        # Supervisor scope: every figure below (glance, forecast, hourly,
-        # half-day, pace) reflects the selection, so a supervisor can read the
-        # tab as if it were only their own team.
-        sups_today = sorted(day_df["supervisor"].unique())
-        with vc2:
-            sel_supervisor = st.selectbox("Supervisor", ["All supervisors"] + sups_today, key="analytics_supervisor")
-        # Unscoped copy for the Installs push: the supervisor filter is a VIEW
-        # choice, and must never decide which installs get recorded.
-        day_df_all = day_df.copy()
-        if sel_supervisor != "All supervisors":
-            day_df = day_df[day_df["supervisor"] == sel_supervisor]
-
-        # (No empty-guard needed: sups_today is derived from day_df itself, so
-        # selecting any listed supervisor always leaves at least one record.)
-        installers = sorted(day_df["installer_id"].unique())
-        if UNASSIGNED_SUPERVISOR in sups_today and sel_supervisor == "All supervisors":
-            unassigned_ids = sorted(day_df.loc[day_df["supervisor"] == UNASSIGNED_SUPERVISOR, "installer_id"].unique())
-            st.caption(f"⚠️ Not mapped to a supervisor: {', '.join(unassigned_ids)} — set their Supervisor in Admin → Technicians.")
-
+        # Display order is glance -> "work until" -> date/supervisor, but the
+        # logic needs the reverse: the pickers decide which installs the glance
+        # counts. So reserve the three spots in display order now, and fill
+        # them below in the order the logic needs.
         sec_hdr("target", "Today At A Glance")
-        day_end_choice = st.selectbox(
-            "Assume work continues until", ["17:00", "18:00", "19:00", "20:00", "21:00"],
-            index=1, key="forecast_day_end",
-            help="Used only for the forecast. If installs are still coming in past this time, the forecast extends automatically.",
-        )
+        glance_slot = st.container()
+        until_slot = st.container()
+        picker_slot = st.container()
+
+        with picker_slot:
+            vc1, vc2 = st.columns(2)
+            with vc1:
+                sel_date = st.selectbox("Viewing date", avail_dates, index=0)
+            day_df = df_araw[df_araw["date"] == sel_date].copy()
+            day_df["hour_int"] = pd.to_numeric(day_df["hour"], errors="coerce")
+            day_df["supervisor"] = day_df["installer_id"].apply(supervisor_of)
+
+            # Supervisor scope: every figure below (glance, forecast, hourly,
+            # half-day, pace) reflects the selection, so a supervisor can read the
+            # tab as if it were only their own team.
+            sups_today = sorted(day_df["supervisor"].unique())
+            with vc2:
+                sel_supervisor = st.selectbox("Supervisor", ["All supervisors"] + sups_today, key="analytics_supervisor")
+            # Unscoped copy for the Installs push: the supervisor filter is a VIEW
+            # choice, and must never decide which installs get recorded.
+            day_df_all = day_df.copy()
+            if sel_supervisor != "All supervisors":
+                day_df = day_df[day_df["supervisor"] == sel_supervisor]
+
+            # (No empty-guard needed: sups_today is derived from day_df itself, so
+            # selecting any listed supervisor always leaves at least one record.)
+            installers = sorted(day_df["installer_id"].unique())
+            if UNASSIGNED_SUPERVISOR in sups_today and sel_supervisor == "All supervisors":
+                unassigned_ids = sorted(day_df.loc[day_df["supervisor"] == UNASSIGNED_SUPERVISOR, "installer_id"].unique())
+                st.caption(f"⚠️ Not mapped to a supervisor: {', '.join(unassigned_ids)} — set their Supervisor in Admin → Technicians.")
+
+        with until_slot:
+            day_end_choice = st.selectbox(
+                "Assume work continues until", ["17:00", "18:00", "19:00", "20:00", "21:00"],
+                index=1, key="forecast_day_end",
+                help="Used only for the forecast. If installs are still coming in past this time, the forecast extends automatically.",
+            )
         forecast_total, rate_per_hour, effective_end = (
             forecast_total_installs(day_df, installers, f"{day_end_choice}:00")
             if installers else (None, 0.0, f"{day_end_choice}:00")
         )
-        g1, g2, g3, g4 = st.columns(4)
-        with g1:
-            render_colored_metric("Total Installs", len(day_df), GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
-        g2.metric("Active Installers", len(installers))
-        g3.metric("Avg / Installer", round(len(day_df) / len(installers), 1) if installers else 0)
-        with g4:
+        with glance_slot:
+            g1, g2, g3, g4 = st.columns(4)
+            with g1:
+                render_colored_metric("Total Installs", len(day_df), GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
+            g2.metric("Active Installers", len(installers))
+            g3.metric("Avg / Installer", round(len(day_df) / len(installers), 1) if installers else 0)
+            with g4:
+                if forecast_total is not None:
+                    render_colored_metric("Forecasted Total", forecast_total, GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
+                else:
+                    st.metric("Forecasted Total", "—")
             if forecast_total is not None:
-                render_colored_metric("Forecasted Total", forecast_total, GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
+                extended = effective_end[:5] != day_end_choice
+                note = f" (extended past {day_end_choice} — installs still coming in)" if extended else ""
+                st.caption(f"Projected to {effective_end[:5]} at the current team rate of {rate_per_hour:.0f} installs/hour{note}.")
             else:
-                st.metric("Forecasted Total", "—")
-        if forecast_total is not None:
-            extended = effective_end[:5] != day_end_choice
-            note = f" (extended past {day_end_choice} — installs still coming in)" if extended else ""
-            st.caption(f"Projected to {effective_end[:5]} at the current team rate of {rate_per_hour:.0f} installs/hour{note}.")
-        else:
-            st.caption("Not enough data yet to project.")
+                st.caption("Not enough data yet to project.")
 
         # -- Hourly table --------------------------------------------------
         # One header for every Analytics image export — the same figures as the
@@ -3989,14 +4013,14 @@ with tab_analytics:
             )
 
         if sel_supervisor == "All supervisors" and len(sups_today) > 1:
-            # A separate table per supervisor: each team reads on its own and
-            # can be shared as its own image, rather than one combined table.
+            # Combined first for the overall picture, then a separate table per
+            # supervisor, each shareable as its own image.
+            sub_hdr("chart", "All Teams Combined")
+            _render_hourly_block(day_df, "All supervisors", "all")
             for i, sup in enumerate(day_df.groupby("supervisor").size().sort_values(ascending=False).index):
                 sup_df = day_df[day_df["supervisor"] == sup]
                 sub_hdr("users", f"{sup} — {len(sup_df)} installs")
                 _render_hourly_block(sup_df, f"Supervisor: {sup}", f"sup{i}")
-            sub_hdr("chart", "All Teams Combined")
-            _render_hourly_block(day_df, "All supervisors", "all")
         else:
             scope_label = "" if sel_supervisor == "All supervisors" else f"Supervisor: {sel_supervisor}"
             _render_hourly_block(day_df, scope_label, "single")
