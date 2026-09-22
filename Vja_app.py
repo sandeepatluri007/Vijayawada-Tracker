@@ -20,6 +20,11 @@ the app creates and appends data automatically):
   Locations             - location_name
   Supervisors           - supervisor_id, name, phone, is_active
   Settings              - key, value   (holds monthly_install_target)
+  Expenses              - expense_id, month, cost_type, category, item, vehicle_reg,
+                           amount, rate_1ph, rate_3ph, recurring
+                           (Expenses tab: fixed monthly costs use `amount`; variable
+                           per-install costs use `rate_1ph` / `rate_3ph`)
+  Vehicles              - reg_no, description, is_active
                            (Technicians.supervisor holds the supervisor_id)
   UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type,
                            sno, old_meter_no, new_meter_no, lat, long, source
@@ -1065,6 +1070,8 @@ ICON_PATHS = {
     "rupee": '<path d="M7 5h10M7 9h10M15 5c0 4-3.5 4-8 4l8 10"/>',
     "receipt": '<path d="M5 3v18l2.5-1.6L10 21l2-1.6L14 21l2.5-1.6L19 21V3Z"/><path d="M9 8h6M9 12h6"/>',
     "plug": '<path d="M9 3v6M15 3v6"/><path d="M6 9h12v3a6 6 0 0 1-12 0Z"/><path d="M12 18v3"/>',
+    "wallet": '<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18"/><circle cx="16.5" cy="15" r="1.2" fill="currentColor" stroke="none"/><path d="M7 6V4.5A1.5 1.5 0 0 1 8.5 3H17"/>',
+    "truck": '<path d="M3 6h11v10H3z"/><path d="M14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/>',
 }
 
 
@@ -2437,6 +2444,168 @@ def save_setting(key: str, value) -> bool:
 
 MONTHLY_TARGET = int(get_setting("monthly_install_target", DEFAULT_MONTHLY_TARGET))
 
+
+# ── Expenses: cost per install ─────────────────────────────────────────────
+# Every figure is computed live from the Expenses and Vehicles sheets, so any
+# change to a cost shows up in the per-install numbers straight away.
+#   Fixed    — amounts for the calendar month (rent, salaries, vehicles...).
+#   Variable — RATES per install, multiplied by that month's installs.
+#              1PH and 3PH have separate rates, since 3PH work is often paid
+#              differently; leave the 3PH rate at 0 if it isn't.
+EXPENSE_COLS = ["expense_id", "month", "cost_type", "category", "item", "vehicle_reg",
+                "amount", "rate_1ph", "rate_3ph", "recurring"]
+VEHICLE_COLS = ["reg_no", "description", "is_active"]
+
+EXPENSE_FIXED_CATEGORIES = [
+    "Accommodation (Rent)", "Salaries", "Vehicle EMI", "Vehicle Maintenance",
+    "Vehicle Permits", "Diesel", "Travel", "Misc",
+]
+EXPENSE_VARIABLE_CATEGORIES = ["Installer Payment", "Liaisoning"]
+# Costs that belong to a particular vehicle (chosen from the Vehicles list).
+EXPENSE_VEHICLE_CATEGORIES = {"Vehicle EMI", "Vehicle Maintenance", "Vehicle Permits", "Diesel"}
+# Costs that are usually the same every month — pre-ticked as "repeats monthly"
+# so "Copy repeating costs from last month" can carry them forward.
+EXPENSE_RECURRING_DEFAULT = {"Accommodation (Rent)", "Salaries", "Vehicle EMI"}
+EXPENSE_ITEM_HINT = {
+    "Accommodation (Rent)": "e.g. Team room, Benz Circle",
+    "Salaries": "e.g. Supervisor – Surendra",
+    "Vehicle EMI": "e.g. Bolero loan EMI",
+    "Vehicle Maintenance": "e.g. Service, tyres",
+    "Vehicle Permits": "e.g. Permit renewal",
+    "Diesel": "e.g. Fill on 12 Sep",
+    "Travel": "e.g. Bus to Guntur",
+    "Misc": "e.g. Stationery, impact driver, meeting snacks",
+}
+
+
+def month_key(d) -> str:
+    return f"{d.year:04d}-{d.month:02d}"
+
+
+def month_label(mkey: str) -> str:
+    try:
+        return datetime.strptime(mkey, "%Y-%m").strftime("%b %Y")
+    except Exception:
+        return mkey
+
+
+def normalize_reg_no(reg: str) -> str:
+    """AP 16 AB-1234 / ap16ab1234 -> AP16AB1234, so one vehicle can't appear
+    twice under slightly different spellings."""
+    return "".join(ch for ch in str(reg).upper() if ch.isalnum())
+
+
+def _truthy(v) -> bool:
+    return str(v).strip().lower() in ("1", "1.0", "true", "yes")
+
+
+def load_expenses() -> pd.DataFrame:
+    df = get_data("Expenses")
+    if df.empty:
+        df = pd.DataFrame(columns=EXPENSE_COLS)
+    df = df.copy()
+    for c in EXPENSE_COLS:
+        if c not in df.columns:
+            df[c] = ""
+    for c in ("amount", "rate_1ph", "rate_3ph"):
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    return df
+
+
+def load_vehicles() -> pd.DataFrame:
+    df = get_data("Vehicles")
+    if df.empty:
+        df = pd.DataFrame(columns=VEHICLE_COLS)
+    df = df.copy()
+    for c in VEHICLE_COLS:
+        if c not in df.columns:
+            df[c] = ""
+    return df
+
+
+def month_installs(df_inst: pd.DataFrame, mkey: str):
+    """(1PH, 3PH) installs recorded in Installations for a calendar month."""
+    if df_inst.empty or not has_col(df_inst, "date", "qty_1ph", "qty_3ph"):
+        return 0, 0
+    d = pd.to_datetime(df_inst["date"], errors="coerce")
+    m = d.dt.strftime("%Y-%m") == mkey
+    return int(safe_numeric_col(df_inst[m], "qty_1ph").sum()), int(safe_numeric_col(df_inst[m], "qty_3ph").sum())
+
+
+def expense_summary(df_exp: pd.DataFrame, mkey: str, n_1ph: int, n_3ph: int) -> dict:
+    """Fixed, variable and total cost for a month, and each per install.
+
+    Per-install figures divide by ALL installs that month (1PH + 3PH).
+    They are None when there are no installs, rather than a misleading 0."""
+    rows = df_exp[df_exp["month"].astype(str) == mkey] if not df_exp.empty else df_exp
+    fixed = rows[rows["cost_type"] == "Fixed"]
+    var = rows[rows["cost_type"] == "Variable"]
+
+    by_cat = []
+    for cat in EXPENSE_FIXED_CATEGORIES:
+        amt = float(fixed.loc[fixed["category"] == cat, "amount"].sum())
+        if amt:
+            by_cat.append(("Fixed", cat, amt))
+    for cat in EXPENSE_VARIABLE_CATEGORIES:
+        sub = var[var["category"] == cat]
+        amt = float((sub["rate_1ph"] * n_1ph + sub["rate_3ph"] * n_3ph).sum())
+        if amt or not sub.empty:
+            by_cat.append(("Variable", cat, amt))
+
+    fixed_total = float(fixed["amount"].sum())
+    variable_total = float((var["rate_1ph"] * n_1ph + var["rate_3ph"] * n_3ph).sum())
+    total_cost = fixed_total + variable_total
+    n = n_1ph + n_3ph
+    # None (shown as "—") when there are no installs to divide by, or no costs
+    # entered for the month: 0.00 would read as "these installs cost nothing".
+    per = (lambda x: x / n) if (n > 0 and not rows.empty) else (lambda x: None)
+    return {
+        "installs_1ph": n_1ph, "installs_3ph": n_3ph, "installs": n,
+        "fixed_total": fixed_total, "variable_total": variable_total, "total_cost": total_cost,
+        "fixed_per_install": per(fixed_total), "variable_per_install": per(variable_total),
+        "total_per_install": per(total_cost), "by_category": by_cat,
+        "has_entries": not rows.empty,
+    }
+
+
+def apply_expense_edits(df_exp: pd.DataFrame, edited: pd.DataFrame) -> pd.DataFrame:
+    """Merge the Expenses tab's edit table back into the full Expenses sheet,
+    matched by expense_id — other months' rows are never touched."""
+    out = df_exp[EXPENSE_COLS].copy().set_index("expense_id")
+    for _, r in edited.iterrows():
+        eid = r["expense_id"]
+        if eid not in out.index:
+            continue
+        if r["Delete"]:
+            out = out.drop(index=eid)
+            continue
+        out.at[eid, "item"] = str(r["Description"] if pd.notna(r["Description"]) else "").strip()
+        out.at[eid, "amount"] = float(r["Amount (Rs.)"] or 0)
+        out.at[eid, "rate_1ph"] = float(r["Rate 1PH"] or 0)
+        out.at[eid, "rate_3ph"] = float(r["Rate 3PH"] or 0)
+        out.at[eid, "recurring"] = "1" if r["Repeats"] else "0"
+    return out.reset_index()[EXPENSE_COLS]
+
+
+def apply_vehicle_edits(edited: pd.DataFrame, used_regs: set):
+    """Returns (vehicles_df, blocked_regs). A vehicle with costs on record is
+    deactivated rather than deleted, so those costs keep their vehicle."""
+    keep, blocked = [], []
+    for _, r in edited.iterrows():
+        reg = r["Registration No."]
+        desc = str(r["Description"] if pd.notna(r["Description"]) else "").strip()
+        if r["Delete"]:
+            if reg in used_regs:
+                blocked.append(reg)
+                keep.append({"reg_no": reg, "description": desc, "is_active": "0"})
+            continue
+        keep.append({"reg_no": reg, "description": desc, "is_active": "1" if r["Active"] else "0"})
+    return pd.DataFrame(keep, columns=VEHICLE_COLS), blocked
+
+
+def fmt_rs(v, decimals: int = 0) -> str:
+    return "—" if v is None else f"{v:,.{decimals}f}"
+
 active_techs = []
 if not df_technicians_master.empty and has_col(df_technicians_master, "is_active", "name"):
     for _, r in df_technicians_master.iterrows():
@@ -3383,8 +3552,8 @@ if "pending_push" in st.session_state:
 # ── Tabs Configuration ────────────────────────────────────────────────────────
 # Plain labels — the design system uses no emoji as interface icons, and they
 # render differently on every device.
-tab_dash, tab_analytics, tab_map, tab_inst, tab_inv, tab_admin = st.tabs([
-    "Dashboard", "Analytics", "Map", "Installs", "Store", "Admin"
+tab_dash, tab_analytics, tab_map, tab_exp, tab_inst, tab_inv, tab_admin = st.tabs([
+    "Dashboard", "Analytics", "Map", "Expenses", "Installs", "Store", "Admin"
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3438,9 +3607,14 @@ with tab_dash:
         sub_hdr("rupee", "This Month — 1PH Billing")
         month_1ph_count = m_1ph
         billing = calculate_1ph_incentive_billing(month_1ph_count)
-        tb1, tb2 = st.columns(2)
+        # Running cost per install for the same month, from the Expenses tab —
+        # beside the billed rate so the two can be compared at a glance.
+        month_cost = expense_summary(load_expenses(), month_key(today), m_1ph, m_3ph)
+        tb1, tb2, tb3 = st.columns(3)
         tb1.metric("Total Billing (Rs.)", f"{billing['total_cost']:,.0f}")
         tb2.metric("Blended Cost / Install (Rs.)", f"{billing['blended_per_install']:,.2f}" if month_1ph_count > 0 else "—")
+        tb3.metric("Total Cost / Install (Rs.)", fmt_rs(month_cost["total_per_install"], 2),
+                   help="This month's fixed + variable costs from the Expenses tab, divided by all installs this month (1PH + 3PH).")
         with st.expander("View slab breakdown"):
             slab_df = pd.DataFrame(billing["slabs"])
             if not slab_df.empty:
@@ -4340,6 +4514,247 @@ with tab_map:
                     removed = remove_map_records(to_remove)
                     st.success(f"✅ Removed {removed} duplicate record(s) from the Map.")
                     st.rerun()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  EXPENSES  — fixed and variable costs per calendar month, and cost per install
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_exp:
+    tab_action_bar("exp")
+    df_exp_all = load_expenses()
+    df_veh = load_vehicles()
+    active_regs = sorted(r for r, a in zip(df_veh["reg_no"].astype(str), df_veh["is_active"]) if r.strip() and _truthy(a))
+
+    # -- Month --------------------------------------------------------------
+    _today = today_ist()
+    _months = {month_key(_today)}
+    _y, _m = _today.year, _today.month
+    for _ in range(11):                          # the last 12 months, always offered
+        _m -= 1
+        if _m == 0:
+            _y, _m = _y - 1, 12
+        _months.add(f"{_y:04d}-{_m:02d}")
+    _months |= {str(x) for x in df_exp_all["month"].unique() if str(x).strip()}
+    month_opts = sorted(_months, reverse=True)
+    sel_month = st.selectbox("Month", month_opts, index=month_opts.index(month_key(_today)),
+                             format_func=month_label, key="exp_month")
+
+    n1, n3 = month_installs(df_installations_master, sel_month)
+    summ = expense_summary(df_exp_all, sel_month, n1, n3)
+
+    sec_hdr("wallet", f"Cost Per Install — {month_label(sel_month)}")
+    render_stat_tiles([
+        ("bolt", f"{summ['installs']:,}", "Installs", f"{n1:,} 1PH · {n3:,} 3PH", "normal"),
+        ("wallet", fmt_rs(summ["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
+        ("gauge", fmt_rs(summ["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
+        ("target", fmt_rs(summ["total_per_install"], 1), "Total", "Rs./install", "normal"),
+    ])
+    render_stat_tiles([
+        ("wallet", fmt_rs(summ["fixed_total"]), "Fixed", "Rs. month", "normal"),
+        ("gauge", fmt_rs(summ["variable_total"]), "Variable", "Rs. month", "normal"),
+        ("target", fmt_rs(summ["total_cost"]), "Total cost", "Rs. month", "normal"),
+    ])
+    if summ["installs"] == 0 and summ["has_entries"]:
+        st.info("No installs recorded for this month yet, so there is no per-install cost to show.")
+
+    if summ["by_category"]:
+        sub_hdr("chart", "By Category")
+        cat_df = pd.DataFrame(summ["by_category"], columns=["Type", "Category", "Month (Rs.)"])
+        cat_df["Per install (Rs.)"] = cat_df["Month (Rs.)"].apply(
+            lambda v: round(v / summ["installs"], 2) if summ["installs"] else None)
+        cat_df["Month (Rs.)"] = cat_df["Month (Rs.)"].round(0).astype(int)
+        cat_df["Share"] = cat_df["Month (Rs.)"].apply(
+            lambda v: f"{v / summ['total_cost'] * 100:.0f}%" if summ["total_cost"] else "—")
+        st.dataframe(cat_df, use_container_width=True, hide_index=True, height=dataframe_height(len(cat_df)))
+
+        veh_rows = df_exp_all[(df_exp_all["month"].astype(str) == sel_month)
+                              & (df_exp_all["category"].isin(EXPENSE_VEHICLE_CATEGORIES))
+                              & (df_exp_all["vehicle_reg"].astype(str).str.strip() != "")]
+        if not veh_rows.empty:
+            sub_hdr("truck", "By Vehicle")
+            vt = veh_rows.pivot_table(index="vehicle_reg", columns="category", values="amount",
+                                      aggfunc="sum", fill_value=0)
+            vt = vt.reindex(columns=[c for c in EXPENSE_FIXED_CATEGORIES if c in EXPENSE_VEHICLE_CATEGORIES],
+                            fill_value=0)
+            vt["Total"] = vt.sum(axis=1)
+            vt = vt.round(0).astype(int).sort_values("Total", ascending=False).reset_index()
+            vt = vt.rename(columns={"vehicle_reg": "Vehicle"})
+            st.dataframe(vt, use_container_width=True, hide_index=True, height=dataframe_height(len(vt)))
+
+    # -- Add an expense ----------------------------------------------------
+    st.divider()
+    sec_hdr("plus", f"Add To {month_label(sel_month)}")
+    if "exp_form_version" not in st.session_state:
+        st.session_state["exp_form_version"] = 0
+    ev = st.session_state["exp_form_version"]
+
+    exp_type = st.radio("Cost type", ["Fixed", "Variable"], horizontal=True, key=f"exp_type_{ev}",
+                        help="Fixed: an amount for the month. Variable: a rate per install.")
+    if exp_type == "Fixed":
+        ec1, ec2 = st.columns(2)
+        with ec1:
+            exp_cat = st.selectbox("Category", EXPENSE_FIXED_CATEGORIES, key=f"exp_cat_f_{ev}")
+        exp_reg = ""
+        with ec2:
+            if exp_cat in EXPENSE_VEHICLE_CATEGORIES:
+                exp_reg = st.selectbox("Vehicle", ["-- Select --"] + active_regs, key=f"exp_reg_{ev}")
+            else:
+                st.write("")
+        exp_item = st.text_input("Description", key=f"exp_item_{ev}", placeholder=EXPENSE_ITEM_HINT.get(exp_cat, ""))
+        ec3, ec4 = st.columns([2, 1], vertical_alignment="bottom")
+        with ec3:
+            exp_amt = st.number_input("Amount (Rs.)", min_value=0.0, step=100.0, value=0.0, key=f"exp_amt_{ev}")
+        with ec4:
+            # Keyed on the category so the default re-applies when it changes.
+            exp_rec = st.checkbox("Repeats monthly", value=exp_cat in EXPENSE_RECURRING_DEFAULT,
+                                  key=f"exp_rec_{ev}_{exp_cat}")
+        if exp_cat in EXPENSE_VEHICLE_CATEGORIES and not active_regs:
+            st.warning("⚠️ Add a vehicle under Vehicles below first.")
+        if st.button("➕ Add Expense", type="primary", use_container_width=True, key="exp_add_fixed"):
+            if exp_amt <= 0:
+                st.error("❌ Enter an amount.")
+            elif exp_cat in EXPENSE_VEHICLE_CATEGORIES and exp_reg in ("", "-- Select --"):
+                st.error("❌ Pick the vehicle this cost belongs to.")
+            else:
+                new_row = {"expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Fixed",
+                           "category": exp_cat, "item": exp_item.strip(),
+                           "vehicle_reg": exp_reg if exp_cat in EXPENSE_VEHICLE_CATEGORIES else "",
+                           "amount": exp_amt, "rate_1ph": 0, "rate_3ph": 0, "recurring": "1" if exp_rec else "0"}
+                if safe_update("Expenses", pd.concat([df_exp_all[EXPENSE_COLS], pd.DataFrame([new_row])], ignore_index=True)):
+                    st.session_state["exp_form_version"] += 1
+                    st.success(f"✅ Added {exp_cat}: Rs. {exp_amt:,.0f} to {month_label(sel_month)}.")
+                    st.rerun()
+    else:
+        exp_vcat = st.selectbox("Category", EXPENSE_VARIABLE_CATEGORIES, key=f"exp_cat_v_{ev}")
+        cur = df_exp_all[(df_exp_all["month"].astype(str) == sel_month) & (df_exp_all["cost_type"] == "Variable")
+                         & (df_exp_all["category"] == exp_vcat)]
+        vc1, vc2 = st.columns(2)
+        with vc1:
+            r1 = st.number_input("Rate per 1PH install (Rs.)", min_value=0.0, step=5.0,
+                                 value=float(cur["rate_1ph"].iloc[0]) if not cur.empty else 0.0,
+                                 key=f"exp_r1_{ev}_{exp_vcat}_{sel_month}")
+        with vc2:
+            r3 = st.number_input("Rate per 3PH install (Rs.)", min_value=0.0, step=5.0,
+                                 value=float(cur["rate_3ph"].iloc[0]) if not cur.empty else 0.0,
+                                 key=f"exp_r3_{ev}_{exp_vcat}_{sel_month}")
+        if n1 or n3:
+            st.markdown(f'<div class="info-box">At these rates: Rs. {r1 * n1 + r3 * n3:,.0f} for '
+                        f'{month_label(sel_month)} ({n1:,} × {r1:,.0f} + {n3:,} × {r3:,.0f}).</div>',
+                        unsafe_allow_html=True)
+        if st.button("💾 Save Rate", type="primary", use_container_width=True, key="exp_add_var"):
+            if r1 <= 0 and r3 <= 0:
+                st.error("❌ Enter at least one rate.")
+            else:
+                # One rate per variable category per month: saving again
+                # UPDATES it. Two rows would silently add the rates together.
+                df_new = df_exp_all[EXPENSE_COLS].copy()
+                df_new = df_new[~((df_new["month"].astype(str) == sel_month) & (df_new["cost_type"] == "Variable")
+                                  & (df_new["category"] == exp_vcat))]
+                df_new = pd.concat([df_new, pd.DataFrame([{
+                    "expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Variable",
+                    "category": exp_vcat, "item": "", "vehicle_reg": "", "amount": 0,
+                    "rate_1ph": r1, "rate_3ph": r3, "recurring": "1"}])], ignore_index=True)
+                if safe_update("Expenses", df_new):
+                    st.session_state["exp_form_version"] += 1
+                    st.success(f"✅ {exp_vcat} rate saved for {month_label(sel_month)}.")
+                    st.rerun()
+
+    # -- Carry repeating costs forward --------------------------------------
+    _y, _m = int(sel_month[:4]), int(sel_month[5:])
+    prev_month = f"{_y - 1:04d}-12" if _m == 1 else f"{_y:04d}-{_m - 1:02d}"
+    prev_rec = df_exp_all[(df_exp_all["month"].astype(str) == prev_month) & df_exp_all["recurring"].apply(_truthy)]
+    if not prev_rec.empty:
+        this_rows = df_exp_all[df_exp_all["month"].astype(str) == sel_month]
+        have = set(zip(this_rows["cost_type"], this_rows["category"], this_rows["item"].astype(str),
+                       this_rows["vehicle_reg"].astype(str)))
+        have_var = set(this_rows.loc[this_rows["cost_type"] == "Variable", "category"])
+        to_copy = prev_rec[[
+            (r["category"] not in have_var) if r["cost_type"] == "Variable"
+            else ((r["cost_type"], r["category"], str(r["item"]), str(r["vehicle_reg"])) not in have)
+            for _, r in prev_rec.iterrows()]]
+        if not to_copy.empty:
+            if st.button(f"📋 Copy {len(to_copy)} repeating cost(s) from {month_label(prev_month)}",
+                         use_container_width=True, key="exp_copy_prev"):
+                copied = to_copy[EXPENSE_COLS].copy()
+                copied["month"] = sel_month
+                base = int(time.time() * 1000)
+                copied["expense_id"] = [f"E{base + i}" for i in range(len(copied))]
+                if safe_update("Expenses", pd.concat([df_exp_all[EXPENSE_COLS], copied], ignore_index=True)):
+                    st.success(f"✅ Copied {len(copied)} cost(s) into {month_label(sel_month)} — adjust any that changed below.")
+                    st.rerun()
+
+    # -- This month's entries: edit / delete ---------------------------------
+    sec_hdr("list", f"Expenses — {month_label(sel_month)}")
+    month_rows = df_exp_all[df_exp_all["month"].astype(str) == sel_month]
+    if month_rows.empty:
+        st.info("No expenses added for this month yet.")
+    else:
+        ed = month_rows.copy()
+        ed["Repeats"] = ed["recurring"].apply(_truthy)
+        ed.insert(0, "Delete", False)
+        ed = ed.sort_values(["cost_type", "category"])
+        view = ed[["Delete", "cost_type", "category", "item", "vehicle_reg", "amount", "rate_1ph", "rate_3ph",
+                   "Repeats", "expense_id"]].rename(columns={
+            "cost_type": "Type", "category": "Category", "item": "Description", "vehicle_reg": "Vehicle",
+            "amount": "Amount (Rs.)", "rate_1ph": "Rate 1PH", "rate_3ph": "Rate 3PH"})
+        edited = st.data_editor(
+            view, use_container_width=True, hide_index=True, # Keyed on the sheet's version: after a save the editor starts fresh,
+            # so a leftover "Delete" tick can't shift onto a different row.
+            key=f"exp_editor_{sel_month}_{_sheet_version('Expenses')}",
+            disabled=["Type", "Category", "Vehicle", "expense_id"],
+            column_config={"expense_id": None,
+                           "Amount (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=100.0, format="%.0f"),
+                           "Rate 1PH": st.column_config.NumberColumn(min_value=0.0, step=5.0, format="%.2f"),
+                           "Rate 3PH": st.column_config.NumberColumn(min_value=0.0, step=5.0, format="%.2f")},
+            height=dataframe_height(len(view)),
+        )
+        n_del = int(edited["Delete"].sum())
+        if st.button(f"💾 Save Changes{f' (deleting {n_del})' if n_del else ''}", type="primary",
+                     use_container_width=True, key="exp_save_edits"):
+            if safe_update("Expenses", apply_expense_edits(df_exp_all, edited)):
+                st.success("✅ Expenses updated.")
+                st.rerun()
+
+    # -- Vehicles -----------------------------------------------------------
+    st.divider()
+    sec_hdr("truck", "Vehicles")
+    vc1, vc2, vc3 = st.columns([1.2, 2, 1], vertical_alignment="bottom")
+    with vc1:
+        new_reg = st.text_input("Registration No.", key=f"veh_reg_{ev}", placeholder="AP16AB1234")
+    with vc2:
+        new_desc = st.text_input("Description", key=f"veh_desc_{ev}", placeholder="e.g. Bolero – Chittinagar team")
+    with vc3:
+        if st.button("➕ Add Vehicle", use_container_width=True, key="veh_add"):
+            reg = normalize_reg_no(new_reg)
+            if len(reg) < 6:
+                st.error("❌ Enter a valid registration number.")
+            elif reg in set(df_veh["reg_no"].astype(str).map(normalize_reg_no)):
+                st.error(f"❌ {reg} is already in the list.")
+            else:
+                if safe_update("Vehicles", pd.concat([df_veh[VEHICLE_COLS], pd.DataFrame([{
+                        "reg_no": reg, "description": new_desc.strip(), "is_active": "1"}])], ignore_index=True)):
+                    st.session_state["exp_form_version"] += 1
+                    st.success(f"✅ Added {reg}.")
+                    st.rerun()
+
+    if df_veh.empty or df_veh["reg_no"].astype(str).str.strip().eq("").all():
+        st.info("No vehicles added yet.")
+    else:
+        used_regs = set(df_exp_all["vehicle_reg"].astype(str))
+        vview = df_veh[VEHICLE_COLS].copy()
+        vview["Active"] = vview["is_active"].apply(_truthy)
+        vview.insert(0, "Delete", False)
+        vview = vview[["Delete", "reg_no", "description", "Active"]].rename(
+            columns={"reg_no": "Registration No.", "description": "Description"})
+        vedit = st.data_editor(vview, use_container_width=True, hide_index=True, key=f"veh_editor_{_sheet_version('Vehicles')}",
+                               disabled=["Registration No."], height=dataframe_height(len(vview)))
+        if st.button("💾 Save Vehicle Changes", use_container_width=True, key="veh_save"):
+            new_veh, blocked = apply_vehicle_edits(vedit, used_regs)
+            if safe_update("Vehicles", new_veh):
+                if blocked:
+                    st.warning(f"⚠️ {', '.join(blocked)} has costs on record, so it was marked inactive instead of deleted.")
+                st.success("✅ Vehicles updated.")
+                st.rerun()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  INSTALLS
