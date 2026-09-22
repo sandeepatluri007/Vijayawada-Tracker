@@ -2460,6 +2460,9 @@ EXPENSE_COLS = ["expense_id", "month", "cost_type", "category", "item", "vehicle
                 "amount", "rate_1ph", "rate_3ph", "recurring"]
 VEHICLE_COLS = ["reg_no", "description", "is_active"]
 
+# Upper end of the "Cost At Any Install Count" slider.
+EXPENSE_SLIDER_MAX = 14000
+
 EXPENSE_FIXED_CATEGORIES = [
     "Accommodation (Rent)", "Salaries", "Vehicle EMI", "Vehicle Maintenance",
     "Vehicle Permits", "Diesel", "Travel", "Misc",
@@ -4672,7 +4675,7 @@ with tab_exp:
 
         # -- Slider: cost per install at any install count ----------------
         sub_hdr("gauge", "Cost At Any Install Count")
-        slider_max = int(max(MONTHLY_TARGET, summ["installs"]) * 1.5 / 100) * 100 or 1000
+        slider_max = EXPENSE_SLIDER_MAX
         default_n = int(summ["installs"] or MONTHLY_TARGET)
         picked = st.slider("Installs in the month", min_value=0, max_value=slider_max,
                            value=min(default_n, slider_max), step=25, key=f"exp_slider_{sel_month}",
