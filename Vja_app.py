@@ -3967,8 +3967,9 @@ with tab_dash:
         with f4:
             tech_filter = st.multiselect("Technicians", tech_list, default=tech_list)
 
-        if active.empty:
-            st.info("No installs recorded for the selected dates.")
+        # No message when the chosen dates hold nothing: the filters and totals
+        # already read zero, and today is empty every morning until the day's
+        # file is uploaded.
 
         filtered = in_range
         if loc_filter:
@@ -4589,11 +4590,10 @@ with tab_map:
         valid_dates = df_map["_date"].dropna()
         data_min_d, data_max_d = (valid_dates.min(), valid_dates.max()) if not valid_dates.empty else (today_ist(), today_ist())
 
-        # Default to today when today has data; otherwise start blank so the
-        # map isn't silently showing an unrelated historical range.
+        # Always today. Before the day's file is uploaded this simply shows
+        # zero pins — the quick-pick buttons below jump to other ranges.
         today = today_ist()
-        has_today_data = (not valid_dates.empty) and (today in set(valid_dates))
-        default_range = [today, today] if has_today_data else []
+        default_range = [today, today]
 
         # Give the picker a wide min/max so previous/next month navigation works.
         picker_min = min(data_min_d, today) - timedelta(days=365)
@@ -4631,7 +4631,8 @@ with tab_map:
             md_start = md_end = map_date_range
 
         if md_start is None:
-            st.info("Pick a date range to show pins." + ("" if has_today_data else f" No data for today — data runs {data_min_d} to {data_max_d}."))
+            # Only reachable if the picker is cleared mid-session; show nothing
+            # rather than a message.
             filtered_map = df_map.iloc[0:0]
         else:
             filtered_map = df_map[(df_map["_date"] >= md_start) & (df_map["_date"] <= md_end)]
@@ -4646,8 +4647,11 @@ with tab_map:
         mm1.metric("Records In Filter", total_in_range)
         mm2.metric("With Location Data", len(pinned))
 
-        if pinned.empty:
-            st.warning("⚠️ None of the filtered records have latitude/longitude on file.")
+        if pinned.empty and total_in_range > 0:
+            # Only when records exist but carry no coordinates. Previously this
+            # also fired when nothing was selected at all, which is not a
+            # missing-coordinates problem.
+            st.warning(f"⚠️ None of the {total_in_range} record(s) in this filter have latitude/longitude on file.")
         else:
             center_lat, center_lon = pinned["_lat"].mean(), pinned["_long"].mean()
             tooltip_df = pinned.rename(columns={"_lat": "lat", "_long": "lon"}).copy()
