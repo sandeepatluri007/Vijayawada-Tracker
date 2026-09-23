@@ -229,9 +229,13 @@ def calculate_1ph_incentive_billing(total_installs: int) -> dict:
 # it — this trades a little security for not re-typing the PIN constantly.
 # Change PIN_CODE any time to invalidate every remembered browser at once.
 REMEMBER_TOKEN = hashlib.sha256((PIN_CODE + "vja-remember-v1").encode()).hexdigest()[:20]
-READ_TTL = 90  # seconds — cuts down on redundant Sheets reads (raised from 30s: the app now
-# reads 7 worksheets across multiple tabs/tools, and a low TTL meant far more real Google
-# Sheets API calls than needed, which is the main driver of "connection drop" messages)
+READ_TTL = 600  # seconds. Every open session re-reads all 11 worksheets once per
+# TTL window, so this sets the app's standing call rate: at 90s that was ~15
+# read calls/min per session and about 4 open sessions (phones, browser tabs)
+# exhausted Google's ~60/min quota — which showed up as "limit reached" and,
+# because a rate-limited read then retries with 3s and 6s pauses, as the app
+# crawling. At 600s it is ~2/min per session. Writes still invalidate their own
+# sheet immediately, so saves appear at once; Refresh reloads everything.
 HALF_DAY_CUTOFF = "13:30:00"  # H1 = first install .. 13:30, H2 = 13:30 .. last install
 FORECAST_DAY_END = "18:00:00"  # assumed end-of-workday for the forecasted-total projection
 
@@ -1638,8 +1642,107 @@ def _read_worksheet_cached(worksheet: str, version: int):
     return df.astype(str).fillna("") if not df.empty else pd.DataFrame()
 
 
+def _rate_limit_cooloff_active() -> bool:
+    """True while a rate limit is known to be in force. Without this, EVERY
+    sheet in the run retries with 3s + 6s pauses, so one exhausted quota made
+    a single page load sleep for over a minute. During the cool-off we fail
+    fast instead, and spend no more quota trying."""
+    return time.time() < st.session_state.get("_rate_limit_until", 0)
+
+
+# ── One batched read for every worksheet ────────────────────────────────────
+# Google counts a batch request — including all its sub-ranges — as ONE API
+# request. Reading the app's worksheets one at a time cost ~2 calls each
+# (~22 per refresh); fetching them together costs 1, which is what keeps the
+# app clear of the 60-reads-per-minute-per-user quota that produced the
+# "limit reached" messages. Falls back to per-sheet reads if anything about
+# the batch call fails, so this can never be worse than before.
+SHEET_TABS = ("Installations", "Inventory", "Technicians", "Locations", "Supervisors",
+              "Settings", "UploadedInstallLog", "AnalyticsRaw", "MapRecords",
+              "Expenses", "Vehicles")
+
+
+@st.cache_resource(show_spinner=False)
+def _spreadsheet_handle():
+    """Opening the spreadsheet is itself an API call, so hold on to it."""
+    return conn.client._open_spreadsheet()
+
+
+def _values_to_df(values) -> pd.DataFrame:
+    """Raw cell rows -> DataFrame, first row as the header. Short rows are
+    padded: Sheets omits trailing empty cells, so rows arrive ragged."""
+    if not values:
+        return pd.DataFrame()
+    header = [str(h).strip() for h in values[0]]
+    width = len(header)
+    rows = [(r + [""] * (width - len(r)))[:width] for r in values[1:]]
+    return pd.DataFrame(rows, columns=header)
+
+
+@st.cache_data(ttl=READ_TTL, show_spinner=False)
+def _batch_read_sheets(worksheets: tuple, version: int) -> dict:
+    """All worksheets in a single API call."""
+    sh = _spreadsheet_handle()
+    ranges = list(worksheets)
+    missing = []
+    for _ in range(len(ranges)):
+        try:
+            resp = sh.values_batch_get([f"'{w}'" for w in ranges])
+            break
+        except Exception as e:
+            # A tab that doesn't exist fails the WHOLE batch ("Unable to parse
+            # range: 'Expenses'"), so drop the named one and retry without it.
+            m = _re.search(r"[Uu]nable to parse range:\s*'?([^'\"]+?)'?(?:!|\"|$)", str(e))
+            name = m.group(1).strip().strip("'") if m else None
+            if name and name in ranges:
+                ranges.remove(name)
+                missing.append(name)
+                continue
+            raise
+    else:
+        return {}
+
+    out = {w: _MISSING for w in missing}
+    for w, vr in zip(ranges, resp.get("valueRanges", [])):
+        df = _values_to_df(vr.get("values", []))
+        out[w] = df.astype(str).fillna("") if not df.empty else pd.DataFrame()
+    return out
+
+
+def _batch_version() -> int:
+    """Any write to any sheet invalidates the batch, so saves stay instant."""
+    return sum(_sheet_versions().values())
+
+
+def _batched(worksheet: str):
+    """The worksheet from the batched read, or None to fall back."""
+    if worksheet not in SHEET_TABS or st.session_state.get("_batch_read_off"):
+        return None
+    try:
+        data = _batch_read_sheets(SHEET_TABS, _batch_version())
+    except Exception:
+        # Don't retry the batch for the rest of this session; per-sheet reads
+        # still work, and retrying a broken batch every call would be costly.
+        st.session_state["_batch_read_off"] = True
+        return None
+    return data.get(worksheet)
+
+
 def get_data(worksheet: str, retries: int = 3) -> pd.DataFrame:
     version = _sheet_version(worksheet)
+
+    batched = _batched(worksheet)
+    if batched is not None:
+        if isinstance(batched, str) and batched == _MISSING:
+            missing = st.session_state.setdefault("_missing_sheets", set())
+            if worksheet not in missing:
+                missing.add(worksheet)
+                st.toast(f"Sheet tab '{worksheet}' not found — create it in Google Sheets.", icon="⚠️")
+            return pd.DataFrame()
+        return batched.copy()
+
+    if _rate_limit_cooloff_active():
+        retries = 1
     for attempt in range(retries):
         try:
             result = _read_worksheet_cached(worksheet, version)
@@ -1652,6 +1755,8 @@ def get_data(worksheet: str, retries: int = 3) -> pd.DataFrame:
                 return pd.DataFrame()
             return result.copy()
         except Exception as e:
+            if _is_rate_limited(e):
+                st.session_state["_rate_limit_until"] = time.time() + 30
             if attempt < retries - 1:
                 # Rate limits need a longer pause to let the quota window roll;
                 # ordinary blips recover quickly. Capped well under the old
@@ -2600,6 +2705,45 @@ def cost_at_installs(fixed_total: float, variable_rate: float, n_installs: int) 
         "total_per_install": fixed_pi + variable_rate,
         "total_cost": fixed_total + variable_rate * n_installs,
     }
+
+
+@st.fragment
+def render_cost_slider(fixed_total: float, variable_rate: float, actual_installs: int, sel_month: str):
+    """The install-count slider and its curve.
+
+    A fragment: dragging reruns ONLY this section. Without it every drag
+    re-executes all seven tabs — rebuilding the map's pins and the analytics
+    tables each time — which made the slider feel sluggish and burned cache
+    refreshes (and so quota) for nothing."""
+    sub_hdr("gauge", "Cost At Any Install Count")
+    slider_max = EXPENSE_SLIDER_MAX
+    default_n = int(actual_installs or MONTHLY_TARGET)
+    picked = st.slider("Installs in the month", min_value=0, max_value=slider_max,
+                       value=min(default_n, slider_max), step=25, key=f"exp_slider_{sel_month}",
+                       help="Drag to see how the cost per install changes with volume.")
+    at_pick = cost_at_installs(fixed_total, variable_rate, picked)
+    render_stat_tiles([
+        ("bolt", f"{picked:,}", "Installs", "chosen", "normal"),
+        ("wallet", fmt_rs(at_pick["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
+        ("gauge", fmt_rs(at_pick["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
+        ("target", fmt_rs(at_pick["total_per_install"], 1), "Total", "Rs./install", "normal"),
+    ])
+    st.markdown(
+        f'<div class="info-box">At {picked:,} installs the month costs Rs. {at_pick["total_cost"]:,.0f}'
+        + (f' — Rs. {at_pick["total_per_install"]:,.2f} per install.</div>'
+           if at_pick["total_per_install"] is not None else ' — no installs to divide by.</div>'),
+        unsafe_allow_html=True)
+
+    # The curve behind the slider: fixed cost per install falls as volume
+    # rises, while variable stays flat.
+    pts = [x for x in range(100, slider_max + 1, max(25, slider_max // 40))]
+    if pts:
+        curve = pd.DataFrame(
+            {"Total": [fixed_total / x + variable_rate for x in pts],
+             "Fixed": [fixed_total / x for x in pts],
+             "Variable": [variable_rate for x in pts]},
+            index=pd.Index(pts, name="Installs in the month"))
+        st.line_chart(curve, height=220)
 
 
 def apply_expense_edits(df_exp: pd.DataFrame, edited: pd.DataFrame) -> pd.DataFrame:
@@ -4673,36 +4817,7 @@ with tab_exp:
             f'Month cost at target: Rs. {at_target["total_cost"]:,.0f}.</div>',
             unsafe_allow_html=True)
 
-        # -- Slider: cost per install at any install count ----------------
-        sub_hdr("gauge", "Cost At Any Install Count")
-        slider_max = EXPENSE_SLIDER_MAX
-        default_n = int(summ["installs"] or MONTHLY_TARGET)
-        picked = st.slider("Installs in the month", min_value=0, max_value=slider_max,
-                           value=min(default_n, slider_max), step=25, key=f"exp_slider_{sel_month}",
-                           help="Drag to see how the cost per install changes with volume.")
-        at_pick = cost_at_installs(summ["fixed_total"], summ["variable_rate"], picked)
-        render_stat_tiles([
-            ("bolt", f"{picked:,}", "Installs", "chosen", "normal"),
-            ("wallet", fmt_rs(at_pick["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
-            ("gauge", fmt_rs(at_pick["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
-            ("target", fmt_rs(at_pick["total_per_install"], 1), "Total", "Rs./install", "normal"),
-        ])
-        st.markdown(
-            f'<div class="info-box">At {picked:,} installs the month costs Rs. {at_pick["total_cost"]:,.0f}'
-            + (f' — Rs. {at_pick["total_per_install"]:,.2f} per install.</div>'
-               if at_pick["total_per_install"] is not None else ' — no installs to divide by.</div>'),
-            unsafe_allow_html=True)
-
-        # The curve behind the slider: fixed cost per install falls as volume
-        # rises, while variable stays flat.
-        pts = [x for x in range(100, slider_max + 1, max(25, slider_max // 40))]
-        if pts:
-            curve = pd.DataFrame(
-                {"Total": [summ["fixed_total"] / x + summ["variable_rate"] for x in pts],
-                 "Fixed": [summ["fixed_total"] / x for x in pts],
-                 "Variable": [summ["variable_rate"] for x in pts]},
-                index=pd.Index(pts, name="Installs in the month"))
-            st.line_chart(curve, height=220)
+        render_cost_slider(summ["fixed_total"], summ["variable_rate"], summ["installs"], sel_month)
 
     if summ["by_category"]:
         sub_hdr("chart", "By Category")
