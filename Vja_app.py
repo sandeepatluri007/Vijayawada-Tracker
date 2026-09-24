@@ -1659,7 +1659,7 @@ def _rate_limit_cooloff_active() -> bool:
 # the batch call fails, so this can never be worse than before.
 SHEET_TABS = ("Installations", "Inventory", "Technicians", "Locations", "Supervisors",
               "Settings", "UploadedInstallLog", "AnalyticsRaw", "MapRecords",
-              "Expenses", "Vehicles")
+              "Expenses", "Vehicles", "Liaisoning")
 
 
 @st.cache_resource(show_spinner=False)
@@ -2564,6 +2564,63 @@ MONTHLY_TARGET = int(get_setting("monthly_install_target", DEFAULT_MONTHLY_TARGE
 EXPENSE_COLS = ["expense_id", "month", "cost_type", "category", "item", "vehicle_reg",
                 "amount", "rate_1ph", "rate_3ph", "recurring"]
 VEHICLE_COLS = ["reg_no", "description", "is_active"]
+
+# ── Liaisoning: section codes -> lineman -> payable ────────────────────────
+# Section code = the 6th and 7th digits of the Consumer No / SNO
+# (6436407109849 -> "07"), the same rule the Customer Report uses. Each
+# lineman covers several section codes within a section (location), and is
+# paid per install in those codes.
+#   Liaisoning sheet: location, section_code, lineman, rate
+# One row per (location, section code): that pair is what a lineman is paid
+# for, and the same code can exist under two locations.
+LIAISONING_COLS = ["location", "section_code", "lineman", "rate"]
+
+
+def load_liaisoning() -> pd.DataFrame:
+    df = get_data("Liaisoning")
+    if df.empty:
+        df = pd.DataFrame(columns=LIAISONING_COLS)
+    df = df.copy()
+    for c in LIAISONING_COLS:
+        if c not in df.columns:
+            df[c] = ""
+    df["rate"] = pd.to_numeric(df["rate"], errors="coerce").fillna(0.0)
+    for c in ("location", "section_code", "lineman"):
+        df[c] = df[c].astype(str).str.strip()
+    return df
+
+
+def month_section_counts(mkey: str) -> pd.DataFrame:
+    """Installs per (location, section code) for a calendar month, from the
+    install log — the same ledger the Dashboard totals come from."""
+    df = get_data("UploadedInstallLog")
+    if df.empty or not has_col(df, "date", "sno"):
+        return pd.DataFrame(columns=["location", "section_code", "installs"])
+    df = df.copy()
+    df = df[pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m") == mkey]
+    if df.empty:
+        return pd.DataFrame(columns=["location", "section_code", "installs"])
+    df["section_code"] = df["sno"].apply(extract_section_code)
+    df["location"] = (df["location"].astype(str).str.strip().replace("", "Unspecified")
+                      if "location" in df.columns else "Unspecified")
+    out = df.groupby(["location", "section_code"]).size().reset_index(name="installs")
+    return out.sort_values(["location", "section_code"]).reset_index(drop=True)
+
+
+def liaisoning_table(mkey: str) -> pd.DataFrame:
+    """Every section code worked in the month, with its lineman, rate and
+    payable. Codes with no mapping yet are kept, with a blank lineman, so
+    they are visible rather than silently unpaid."""
+    counts = month_section_counts(mkey)
+    mapping = load_liaisoning()
+    if counts.empty:
+        return pd.DataFrame(columns=["location", "section_code", "installs", "lineman", "rate", "payable"])
+    merged = counts.merge(mapping, on=["location", "section_code"], how="left")
+    merged["lineman"] = merged["lineman"].fillna("").astype(str)
+    merged["rate"] = pd.to_numeric(merged["rate"], errors="coerce").fillna(0.0)
+    merged["payable"] = merged["installs"] * merged["rate"]
+    return merged.sort_values(["location", "section_code"]).reset_index(drop=True)
+
 
 # Upper end of the "Cost At Any Install Count" slider.
 EXPENSE_SLIDER_MAX = 14000
@@ -3799,8 +3856,8 @@ with head_search:
 # ── Tabs Configuration ────────────────────────────────────────────────────────
 # Plain labels — the design system uses no emoji as interface icons, and they
 # render differently on every device.
-tab_dash, tab_analytics, tab_map, tab_exp, tab_inst, tab_inv, tab_admin = st.tabs([
-    "Dashboard", "Analytics", "Map", "Expenses", "Installs", "Store", "Admin"
+tab_dash, tab_analytics, tab_map, tab_exp, tab_liaison, tab_inst, tab_inv, tab_admin = st.tabs([
+    "Dashboard", "Analytics", "Map", "Expenses", "Liaisoning", "Installs", "Store", "Admin"
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -5020,6 +5077,162 @@ with tab_exp:
                 if blocked:
                     st.warning(f"⚠️ {', '.join(blocked)} has costs on record, so it was marked inactive instead of deleted.")
                 st.success("✅ Vehicles updated.")
+                st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LIAISONING — installs by section code, mapped to linemen, and what's payable
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_liaison:
+    tab_action_bar("liaison")
+    _today_l = today_ist()
+    _lmonths = {month_key(_today_l)}
+    _ly, _lm = _today_l.year, _today_l.month
+    for _ in range(11):
+        _lm -= 1
+        if _lm == 0:
+            _ly, _lm = _ly - 1, 12
+        _lmonths.add(f"{_ly:04d}-{_lm:02d}")
+    l_month_opts = sorted(_lmonths, reverse=True)
+    l_month = st.selectbox("Month", l_month_opts, index=l_month_opts.index(month_key(_today_l)),
+                           format_func=month_label, key="liaison_month")
+
+    lt = liaisoning_table(l_month)
+    df_map_l = load_liaisoning()
+
+    sec_hdr("rupee", f"Liaisoning — {month_label(l_month)}")
+    if lt.empty:
+        st.info("No installs with a Consumer No recorded for this month yet.")
+    else:
+        mapped = lt[lt["lineman"] != ""]
+        unmapped = lt[lt["lineman"] == ""]
+        render_stat_tiles([
+            ("bolt", f"{int(lt['installs'].sum()):,}", "Installs", "in month", "normal"),
+            ("pin", f"{lt['section_code'].nunique():,}", "Section", "codes", "normal"),
+            ("users", f"{mapped['lineman'].nunique():,}", "Linemen", "mapped", "normal"),
+            ("rupee", f"{lt['payable'].sum():,.0f}", "Payable", "Rs.", "normal"),
+        ])
+        if not unmapped.empty:
+            st.markdown(
+                f'<div class="warn-box">{len(unmapped)} section code(s) with '
+                f'{int(unmapped["installs"].sum()):,} install(s) have no lineman yet — '
+                f'they are listed below and are not counted in the payable.</div>',
+                unsafe_allow_html=True)
+
+        # -- Payable per lineman ------------------------------------------
+        if not mapped.empty:
+            sub_hdr("users", "Payable By Lineman")
+            per_lineman = mapped.groupby("lineman").agg(
+                Sections=("location", lambda x: ", ".join(sorted(set(x)))),
+                Codes=("section_code", lambda x: ", ".join(sorted(set(x)))),
+                Installs=("installs", "sum"), Payable=("payable", "sum")).reset_index()
+            per_lineman = per_lineman.rename(columns={"lineman": "Lineman"})
+            per_lineman["Installs"] = per_lineman["Installs"].astype(int)
+            per_lineman["Payable"] = per_lineman["Payable"].round(0).astype(int)
+            per_lineman = per_lineman.sort_values("Payable", ascending=False)
+            total_row = pd.DataFrame([{"Lineman": "TOTAL", "Sections": "", "Codes": "",
+                                       "Installs": int(per_lineman["Installs"].sum()),
+                                       "Payable": int(per_lineman["Payable"].sum())}])
+            per_lineman_disp = pd.concat([per_lineman, total_row], ignore_index=True)
+            st.dataframe(per_lineman_disp, use_container_width=True, hide_index=True,
+                         height=dataframe_height(len(per_lineman_disp)))
+            download_image_button(
+                per_lineman_disp, f"Liaisoning_{l_month}.png", key="dl_img_liaison",
+                title=f"Liaisoning Payable — {month_label(l_month)}\n"
+                      f"{int(mapped['installs'].sum()):,} install(s) across {mapped['section_code'].nunique()} section code(s)")
+
+        # -- Section code detail -------------------------------------------
+        sub_hdr("pin", "By Section & Section Code")
+        detail = lt.rename(columns={"location": "Section", "section_code": "Section Code",
+                                    "installs": "Installs", "lineman": "Lineman",
+                                    "rate": "Rate (Rs.)", "payable": "Payable (Rs.)"})
+        detail["Lineman"] = detail["Lineman"].replace("", "— not mapped —")
+        detail["Installs"] = detail["Installs"].astype(int)
+        detail["Payable (Rs.)"] = detail["Payable (Rs.)"].round(0).astype(int)
+        st.dataframe(detail, use_container_width=True, hide_index=True,
+                     height=dataframe_height(len(detail), max_px=520))
+        st.download_button("📥 Download CSV", data=detail.to_csv(index=False).encode("utf-8"),
+                           file_name=f"liaisoning_{l_month}.csv", mime="text/csv",
+                           use_container_width=True, key="liaison_csv", on_click="ignore")
+
+    # -- Map a section code to a lineman -------------------------------------
+    st.divider()
+    sec_hdr("plus", "Map Section Codes To Linemen")
+    if "liaison_form_version" not in st.session_state:
+        st.session_state["liaison_form_version"] = 0
+    lv = st.session_state["liaison_form_version"]
+
+    # Offer the codes actually seen in the data, so nothing is typed by hand.
+    seen = month_section_counts(l_month)
+    known_locs = sorted(set(seen["location"]) | set(df_map_l["location"])) or active_locs
+    lc1, lc2 = st.columns(2)
+    with lc1:
+        m_loc = st.selectbox("Section", known_locs or ["Unspecified"], key=f"liaison_loc_{lv}")
+    codes_here = sorted(set(seen.loc[seen["location"] == m_loc, "section_code"]))
+    already = set(df_map_l.loc[df_map_l["location"] == m_loc, "section_code"])
+    with lc2:
+        m_codes = st.multiselect("Section codes", codes_here,
+                                 default=[c for c in codes_here if c not in already],
+                                 # Keyed on the section: without this the picker keeps the
+                                 # previous section's codes, which aren't valid for the new
+                                 # one, so the selection silently empties.
+                                 key=f"liaison_codes_{lv}_{m_loc}",
+                                 help="Codes seen in this month's installs for that section. Ones already mapped are left unticked.")
+    known_linemen = sorted({x for x in df_map_l["lineman"] if x})
+    lc3, lc4 = st.columns(2)
+    with lc3:
+        pick = st.selectbox("Lineman", ["— new —"] + known_linemen, key=f"liaison_man_pick_{lv}")
+        m_lineman = st.text_input("New lineman name", key=f"liaison_man_{lv}") if pick == "— new —" else pick
+    with lc4:
+        _default_rate = float(df_map_l.loc[df_map_l["lineman"] == pick, "rate"].iloc[0]) if (
+            pick != "— new —" and not df_map_l[df_map_l["lineman"] == pick].empty) else 0.0
+        m_rate = st.number_input("Rate per install (Rs.)", min_value=0.0, step=1.0,
+                                 value=_default_rate, key=f"liaison_rate_{lv}_{pick}")
+    if st.button("➕ Save Mapping", type="primary", use_container_width=True, key="liaison_add"):
+        if not str(m_lineman).strip():
+            st.error("❌ Enter the lineman's name.")
+        elif not m_codes:
+            st.error("❌ Pick at least one section code.")
+        elif m_rate <= 0:
+            st.error("❌ Enter the rate per install.")
+        else:
+            df_new = df_map_l[LIAISONING_COLS].copy()
+            # Re-mapping a code replaces its row rather than adding a second.
+            df_new = df_new[~((df_new["location"] == m_loc) & (df_new["section_code"].isin(m_codes)))]
+            df_new = pd.concat([df_new, pd.DataFrame([
+                {"location": m_loc, "section_code": c, "lineman": str(m_lineman).strip(), "rate": m_rate}
+                for c in m_codes])], ignore_index=True)
+            if safe_update("Liaisoning", df_new):
+                st.session_state["liaison_form_version"] += 1
+                st.success(f"✅ {len(m_codes)} section code(s) mapped to {str(m_lineman).strip()} at Rs. {m_rate:,.0f}/install.")
+                st.rerun()
+
+    # -- Existing mappings ----------------------------------------------------
+    sec_hdr("list", "Current Mappings")
+    if df_map_l.empty or df_map_l["section_code"].eq("").all():
+        st.info("No section codes mapped yet.")
+    else:
+        mv = df_map_l[LIAISONING_COLS].copy()
+        mv.insert(0, "Delete", False)
+        mv = mv.rename(columns={"location": "Section", "section_code": "Section Code",
+                                "lineman": "Lineman", "rate": "Rate (Rs.)"}).sort_values(["Section", "Section Code"])
+        med = st.data_editor(
+            mv, use_container_width=True, hide_index=True,
+            key=f"liaison_editor_{_sheet_version('Liaisoning')}",
+            disabled=["Section", "Section Code"],
+            column_config={"Rate (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="%.2f")},
+            height=dataframe_height(len(mv)))
+        n_del_l = int(med["Delete"].sum())
+        if st.button(f"💾 Save Changes{f' (deleting {n_del_l})' if n_del_l else ''}", type="primary",
+                     use_container_width=True, key="liaison_save"):
+            keep = med[~med["Delete"]]
+            out = pd.DataFrame({
+                "location": keep["Section"], "section_code": keep["Section Code"],
+                "lineman": keep["Lineman"].astype(str).str.strip(),
+                "rate": pd.to_numeric(keep["Rate (Rs.)"], errors="coerce").fillna(0.0),
+            }, columns=LIAISONING_COLS)
+            if safe_update("Liaisoning", out):
+                st.success("✅ Mappings updated.")
                 st.rerun()
 
 
