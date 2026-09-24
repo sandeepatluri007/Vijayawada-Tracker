@@ -2576,6 +2576,17 @@ VEHICLE_COLS = ["reg_no", "description", "is_active"]
 LIAISONING_COLS = ["location", "section_code", "lineman", "rate"]
 
 
+def normalize_section_code(v) -> str:
+    """Section codes are always two digits. Google Sheets stores "07" as the
+    NUMBER 7, so it comes back as "7" (or "7.0") and would never match the
+    "07" read off a Consumer No — the mapping then looked unmapped. Normalise
+    on the way in, which also repairs codes already saved that way."""
+    t = str(v).strip()
+    if t.endswith(".0"):
+        t = t[:-2]
+    return f"{int(t):02d}" if t.isdigit() and len(t) <= 2 else t
+
+
 def parse_section_codes(text: str):
     """'07, 12 26' or a range '07-12' -> ['07','12',...]. Codes are the 6th and
     7th digits of a Consumer No, so they are always two digits: 7 becomes 07."""
@@ -2608,6 +2619,7 @@ def load_liaisoning() -> pd.DataFrame:
     df["rate"] = pd.to_numeric(df["rate"], errors="coerce").fillna(0.0)
     for c in ("location", "section_code", "lineman"):
         df[c] = df[c].astype(str).str.strip()
+    df["section_code"] = df["section_code"].apply(normalize_section_code)
     return df
 
 
@@ -5268,7 +5280,8 @@ with tab_liaison:
                      use_container_width=True, key="liaison_save"):
             keep = med[~med["Delete"]]
             out = pd.DataFrame({
-                "location": keep["Section"], "section_code": keep["Section Code"],
+                "location": keep["Section"],
+                "section_code": keep["Section Code"].apply(normalize_section_code),
                 "lineman": keep["Lineman"].astype(str).str.strip(),
                 "rate": pd.to_numeric(keep["Rate (Rs.)"], errors="coerce").fillna(0.0),
             }, columns=LIAISONING_COLS)
