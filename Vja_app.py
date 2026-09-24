@@ -2576,6 +2576,13 @@ VEHICLE_COLS = ["reg_no", "description", "is_active"]
 LIAISONING_COLS = ["location", "section_code", "lineman", "rate"]
 
 
+def section_key(name) -> str:
+    """Match key for a section name. Install data comes from the MDM export
+    ("CHITTINAGAR") while mappings are typed or picked ("Chittinagar"), and an
+    exact string match silently drops the mapping — so compare on this."""
+    return " ".join(str(name).strip().upper().split())
+
+
 def normalize_section_code(v) -> str:
     """Section codes are always two digits. Google Sheets stores "07" as the
     NUMBER 7, so it comes back as "7" (or "7.0") and would never match the
@@ -2650,15 +2657,23 @@ def liaisoning_table(mkey: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["location", "section_code", "installs", "lineman", "rate", "payable"])
     if counts.empty:
         counts = pd.DataFrame(columns=["location", "section_code", "installs"])
+    # Matched on a normalised section name, so capitalisation or spacing
+    # differences between the install data and the mapping can't drop a lineman.
+    counts = counts.assign(_key=counts["location"].apply(section_key))
+    mapping = mapping.assign(_key=mapping["location"].apply(section_key))
     # OUTER join: every MAPPED code appears even with no installs this month
     # (so the lineman list is complete), and any code with installs but no
     # mapping still shows up to be flagged.
-    merged = counts.merge(mapping, on=["location", "section_code"], how="outer")
+    merged = counts.merge(mapping, on=["_key", "section_code"], how="outer", suffixes=("", "_map"))
+    # Show the name as it appears in the install data, falling back to the
+    # mapping's spelling for codes with no installs yet.
+    merged["location"] = merged["location"].fillna(merged.get("location_map"))
     merged["installs"] = pd.to_numeric(merged["installs"], errors="coerce").fillna(0).astype(int)
     merged["lineman"] = merged["lineman"].fillna("").astype(str)
     merged["rate"] = pd.to_numeric(merged["rate"], errors="coerce").fillna(0.0)
     merged["payable"] = merged["installs"] * merged["rate"]
-    return merged.sort_values(["location", "section_code"]).reset_index(drop=True)
+    cols = ["location", "section_code", "installs", "lineman", "rate", "payable"]
+    return merged[cols].sort_values(["location", "section_code"]).reset_index(drop=True)
 
 
 # Upper end of the "Cost At Any Install Count" slider.
@@ -5198,6 +5213,32 @@ with tab_liaison:
         st.download_button("📥 Download CSV", data=detail.to_csv(index=False).encode("utf-8"),
                            file_name=f"liaisoning_{l_month}.csv", mime="text/csv",
                            use_container_width=True, key="liaison_csv", on_click="ignore")
+
+    # -- Mappings that matched nothing ---------------------------------------
+    # A mapping with no installs is normal early in the month, but a section
+    # name that appears NOWHERE in the install data is a spelling problem —
+    # worth saying so rather than leaving a lineman silently unpaid.
+    _map_all = load_liaisoning()
+    if not _map_all.empty:
+        _counts_all = month_section_counts(l_month)
+        _data_keys = {section_key(x) for x in _counts_all["location"]} if not _counts_all.empty else set()
+        _worked = {(section_key(r["location"]), r["section_code"]) for _, r in _counts_all.iterrows()} if not _counts_all.empty else set()
+        rows = []
+        for _, r in _map_all.iterrows():
+            k = section_key(r["location"])
+            if (k, r["section_code"]) in _worked:
+                continue
+            rows.append({"Section": r["location"], "Section Code": r["section_code"], "Lineman": r["lineman"],
+                         "Why": ("Section name not found in install data — check the spelling against: "
+                                 + ", ".join(sorted({x for x in _counts_all['location']})) if k not in _data_keys
+                                 else "No installs in this section code this month")})
+        if rows:
+            unmatched = pd.DataFrame(rows)
+            bad_name = unmatched["Why"].str.startswith("Section name").sum()
+            with st.expander(f"⚠️ {len(unmatched)} mapping(s) matched no installs"
+                             + (f" — {bad_name} with a section name that isn't in the data" if bad_name else "")):
+                st.dataframe(unmatched, use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(unmatched), max_px=320))
 
     # -- Map a section code to a lineman -------------------------------------
     st.divider()
