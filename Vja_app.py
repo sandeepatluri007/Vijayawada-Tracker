@@ -2576,6 +2576,27 @@ VEHICLE_COLS = ["reg_no", "description", "is_active"]
 LIAISONING_COLS = ["location", "section_code", "lineman", "rate"]
 
 
+def parse_section_codes(text: str):
+    """'07, 12 26' or a range '07-12' -> ['07','12',...]. Codes are the 6th and
+    7th digits of a Consumer No, so they are always two digits: 7 becomes 07."""
+    out, seen = [], set()
+    # Close up spaces around a dash first, so "07 - 09" is one range and not
+    # two separate codes with the range silently lost.
+    text = _re.sub(r"\s*[-–]\s*", "-", str(text or "").strip())
+    for chunk in _re.split(r"[,\s]+", text):
+        if not chunk:
+            continue
+        rng = _re.fullmatch(r"(\d{1,2})\s*[-–]\s*(\d{1,2})", chunk)
+        vals = (range(int(rng.group(1)), int(rng.group(2)) + 1) if rng
+                else ([int(chunk)] if chunk.isdigit() and len(chunk) <= 2 else []))
+        for v in vals:
+            code = f"{v:02d}"
+            if code not in seen:
+                seen.add(code)
+                out.append(code)
+    return out
+
+
 def load_liaisoning() -> pd.DataFrame:
     df = get_data("Liaisoning")
     if df.empty:
@@ -2613,9 +2634,15 @@ def liaisoning_table(mkey: str) -> pd.DataFrame:
     they are visible rather than silently unpaid."""
     counts = month_section_counts(mkey)
     mapping = load_liaisoning()
-    if counts.empty:
+    if counts.empty and mapping.empty:
         return pd.DataFrame(columns=["location", "section_code", "installs", "lineman", "rate", "payable"])
-    merged = counts.merge(mapping, on=["location", "section_code"], how="left")
+    if counts.empty:
+        counts = pd.DataFrame(columns=["location", "section_code", "installs"])
+    # OUTER join: every MAPPED code appears even with no installs this month
+    # (so the lineman list is complete), and any code with installs but no
+    # mapping still shows up to be flagged.
+    merged = counts.merge(mapping, on=["location", "section_code"], how="outer")
+    merged["installs"] = pd.to_numeric(merged["installs"], errors="coerce").fillna(0).astype(int)
     merged["lineman"] = merged["lineman"].fillna("").astype(str)
     merged["rate"] = pd.to_numeric(merged["rate"], errors="coerce").fillna(0.0)
     merged["payable"] = merged["installs"] * merged["rate"]
@@ -5106,22 +5133,25 @@ with tab_liaison:
     else:
         mapped = lt[lt["lineman"] != ""]
         unmapped = lt[lt["lineman"] == ""]
+        worked_unmapped = unmapped[unmapped["installs"] > 0]
         render_stat_tiles([
             ("bolt", f"{int(lt['installs'].sum()):,}", "Installs", "in month", "normal"),
-            ("pin", f"{lt['section_code'].nunique():,}", "Section", "codes", "normal"),
+            ("pin", f"{int((mapped['installs'] > 0).sum()):,}", "Codes", "worked", "normal"),
             ("users", f"{mapped['lineman'].nunique():,}", "Linemen", "mapped", "normal"),
             ("rupee", f"{lt['payable'].sum():,.0f}", "Payable", "Rs.", "normal"),
         ])
-        if not unmapped.empty:
+        if not worked_unmapped.empty:
             st.markdown(
-                f'<div class="warn-box">{len(unmapped)} section code(s) with '
-                f'{int(unmapped["installs"].sum()):,} install(s) have no lineman yet — '
+                f'<div class="warn-box">{len(worked_unmapped)} section code(s) with '
+                f'{int(worked_unmapped["installs"].sum()):,} install(s) have no lineman yet — '
                 f'they are listed below and are not counted in the payable.</div>',
                 unsafe_allow_html=True)
 
         # -- Payable per lineman ------------------------------------------
         if not mapped.empty:
             sub_hdr("users", "Payable By Lineman")
+            # Includes linemen with no installs this month — a zero is itself
+            # information when you are checking who to pay.
             per_lineman = mapped.groupby("lineman").agg(
                 Sections=("location", lambda x: ", ".join(sorted(set(x)))),
                 Codes=("section_code", lambda x: ", ".join(sorted(set(x)))),
@@ -5143,6 +5173,8 @@ with tab_liaison:
 
         # -- Section code detail -------------------------------------------
         sub_hdr("pin", "By Section & Section Code")
+        st.markdown('<div class="info-box">Every mapped section code is listed, including ones '
+                    'with no installs this month.</div>', unsafe_allow_html=True)
         detail = lt.rename(columns={"location": "Section", "section_code": "Section Code",
                                     "installs": "Installs", "lineman": "Lineman",
                                     "rate": "Rate (Rs.)", "payable": "Payable (Rs.)"})
@@ -5162,22 +5194,31 @@ with tab_liaison:
         st.session_state["liaison_form_version"] = 0
     lv = st.session_state["liaison_form_version"]
 
-    # Offer the codes actually seen in the data, so nothing is typed by hand.
     seen = month_section_counts(l_month)
-    known_locs = sorted(set(seen["location"]) | set(df_map_l["location"])) or active_locs
+    known_locs = sorted(set(active_locs) | set(seen["location"]) | set(df_map_l["location"]))
     lc1, lc2 = st.columns(2)
     with lc1:
         m_loc = st.selectbox("Section", known_locs or ["Unspecified"], key=f"liaison_loc_{lv}")
-    codes_here = sorted(set(seen.loc[seen["location"] == m_loc, "section_code"]))
     already = set(df_map_l.loc[df_map_l["location"] == m_loc, "section_code"])
     with lc2:
-        m_codes = st.multiselect("Section codes", codes_here,
-                                 default=[c for c in codes_here if c not in already],
-                                 # Keyed on the section: without this the picker keeps the
-                                 # previous section's codes, which aren't valid for the new
-                                 # one, so the selection silently empties.
-                                 key=f"liaison_codes_{lv}_{m_loc}",
-                                 help="Codes seen in this month's installs for that section. Ones already mapped are left unticked.")
+        # Typed, not picked from a list: codes are mapped up front, before any
+        # installs exist in them.
+        m_codes_raw = st.text_input("Section codes", key=f"liaison_codes_{lv}_{m_loc}",
+                                    placeholder="07, 12, 26  or  07-12",
+                                    help="Two digits each. Separate with commas or spaces, or give a range like 07-12.")
+    m_codes = parse_section_codes(m_codes_raw)
+    if m_codes:
+        dupes = [c for c in m_codes if c in already]
+        st.markdown(
+            f'<div class="info-box">{len(m_codes)} code(s): {", ".join(m_codes)}'
+            + (f' — {", ".join(dupes)} already mapped in {m_loc} and will be reassigned.' if dupes else '')
+            + '</div>', unsafe_allow_html=True)
+    codes_here = sorted(set(seen.loc[seen["location"] == m_loc, "section_code"]))
+    unmapped_here = [c for c in codes_here if c not in already]
+    if unmapped_here:
+        st.markdown(
+            f'<div class="warn-box">Seen in {m_loc}\'s installs but not mapped yet: '
+            f'<b>{", ".join(unmapped_here)}</b></div>', unsafe_allow_html=True)
     known_linemen = sorted({x for x in df_map_l["lineman"] if x})
     lc3, lc4 = st.columns(2)
     with lc3:
@@ -5192,7 +5233,7 @@ with tab_liaison:
         if not str(m_lineman).strip():
             st.error("❌ Enter the lineman's name.")
         elif not m_codes:
-            st.error("❌ Pick at least one section code.")
+            st.error("❌ Enter at least one section code, e.g. 07, 12 or 07-12.")
         elif m_rate <= 0:
             st.error("❌ Enter the rate per install.")
         else:
