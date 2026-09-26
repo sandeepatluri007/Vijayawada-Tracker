@@ -2630,7 +2630,6 @@ def render_daily_calendar(mkey: str):
         return
 
     y, m = int(mkey[:4]), int(mkey[5:])
-    busiest = max(counts.values())
     picked = st.session_state.get("cal_picked_day")
     if picked not in counts:
         picked = max(counts)          # default: the latest day with installs
@@ -2705,8 +2704,25 @@ def render_daily_calendar(mkey: str):
                     st.session_state["cal_picked_day"] = dstr
                     picked = dstr
 
-    st.markdown(f'<div class="info-box">Busiest day this month: <b>{busiest:,}</b> installs · '
-                f'month total <b>{sum(counts.values()):,}</b></div>', unsafe_allow_html=True)
+    # Min ignores zero days: a day nobody worked says nothing about the worst
+    # day's output, and would always read 0 once the month has a gap in it.
+    # Holidays are counted only up to today — a day still to come isn't a day
+    # off, which is the same rule the calendar's colouring follows.
+    worked = {d: int(n) for d, n in counts.items() if int(n) > 0}
+    if worked:
+        hi_day = max(worked, key=worked.get)
+        lo_day = min(worked, key=worked.get)
+        last_day_n = _cal.monthrange(y, m)[1]
+        holidays = [d for d in range(1, last_day_n + 1)
+                    if date(y, m, d) <= today_ist()
+                    and int(counts.get(f"{y:04d}-{m:02d}-{d:02d}", 0)) == 0]
+        fmt_day = lambda ds: datetime.strptime(ds, "%Y-%m-%d").strftime("%d %b")
+        render_stat_tiles([
+            ("chart", f"{worked[hi_day]:,}", "Max", fmt_day(hi_day), "normal"),
+            ("gauge", f"{worked[lo_day]:,}", "Min", fmt_day(lo_day), "normal"),
+            ("calendar", f"{len(holidays)}", "Holidays", "no installs",
+             "danger" if holidays else "normal"),
+        ])
 
     sub_hdr("pin", f"Section-Wise On {picked}")
     breakup = day_section_breakup(picked)
