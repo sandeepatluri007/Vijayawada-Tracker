@@ -2654,6 +2654,20 @@ def render_daily_calendar(mkey: str):
             f'font-size:10.5px;font-weight:700;opacity:.75;}}'
             f'.st-key-cal_{dstr} button p {{font-size:15px !important;font-weight:800 !important;'
             f'margin:0 !important;}}')
+    # On a narrow screen Streamlit stacks a row of columns vertically, which
+    # turned each week into 7 full-width bars. Keep the calendar's rows
+    # side-by-side and size the cells down instead.
+    rules.append(
+        '[class*="st-key-calweek_"] [data-testid="stHorizontalBlock"]{flex-wrap:nowrap !important;gap:3px !important;}'
+        '[class*="st-key-calweek_"] [data-testid="stColumn"]{flex:1 1 0 !important;min-width:0 !important;width:auto !important;}'
+        '@media (max-width:640px){'
+        '[class*="st-key-calweek_"] button{padding:5px 0 !important;}'
+        '[class*="st-key-calweek_"] button p{font-size:12.5px !important;}'
+        '[class*="st-key-calweek_"] button::before{font-size:9px !important;}'
+        '.cal-empty{padding:5px 0 !important;}'
+        '.cal-empty div:first-child{font-size:9px !important;}'
+        '.cal-empty div:last-child{font-size:12.5px !important;}'
+        '}')
     st.markdown("<style>" + "".join(rules) + "</style>", unsafe_allow_html=True)
 
     st.markdown(
@@ -2663,7 +2677,11 @@ def render_daily_calendar(mkey: str):
                   for d in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
         + "</div>", unsafe_allow_html=True)
 
-    for week in _cal.Calendar(firstweekday=0).monthdayscalendar(y, m):
+    # CSS below keys off this container, so only the calendar's rows are
+    # forced to stay 7-across — every other st.columns in the app keeps
+    # Streamlit's normal stacking on a phone.
+    for wk, week in enumerate(_cal.Calendar(firstweekday=0).monthdayscalendar(y, m)):
+      with st.container(key=f"calweek_{mkey}_{wk}"):
         cols = st.columns(7, gap="small")
         for col, dayno in zip(cols, week):
             with col:
@@ -2683,7 +2701,7 @@ def render_daily_calendar(mkey: str):
                     bg = "var(--surface-000)" if future else CF_RED_BG
                     fg = "var(--ink-600)" if future else CF_RED_FONT
                     st.markdown(
-                        f'<div style="text-align:center;border-radius:var(--radius-sm);'
+                        f'<div class="cal-empty" style="text-align:center;border-radius:var(--radius-sm);'
                         f'border:1px solid var(--hairline);background:{bg};color:{fg};'
                         f'padding:7px 2px;line-height:1.15;">'
                         f'<div style="font-size:10.5px;font-weight:700;opacity:.75;">{dayno}</div>'
