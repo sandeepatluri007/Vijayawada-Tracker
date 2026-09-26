@@ -2565,6 +2565,115 @@ EXPENSE_COLS = ["expense_id", "month", "cost_type", "category", "item", "vehicle
                 "amount", "rate_1ph", "rate_3ph", "recurring"]
 VEHICLE_COLS = ["reg_no", "description", "is_active"]
 
+# ── Daily install calendar ─────────────────────────────────────────────────
+# Reads the install log, not AnalyticsRaw: a month-long view needs full
+# history, and AnalyticsRaw only holds recent uploads and is cleared by the
+# end-of-day reset.
+def month_daily_counts(mkey: str) -> dict:
+    """{date -> installs} for a calendar month."""
+    df = get_data("UploadedInstallLog")
+    if df.empty or "date" not in df.columns:
+        return {}
+    d = pd.to_datetime(df["date"], errors="coerce")
+    sub = df[d.dt.strftime("%Y-%m") == mkey]
+    if sub.empty:
+        return {}
+    return sub.groupby("date").size().to_dict()
+
+
+def day_section_breakup(day: str) -> pd.DataFrame:
+    """Section-wise installs for one date, with the 1PH/3PH split."""
+    df = get_data("UploadedInstallLog")
+    if df.empty or "date" not in df.columns:
+        return pd.DataFrame()
+    sub = df[df["date"].astype(str) == str(day)].copy()
+    if sub.empty:
+        return pd.DataFrame()
+    sub["location"] = (sub["location"].astype(str).str.strip().replace("", "Unspecified")
+                       if "location" in sub.columns else "Unspecified")
+    phase = sub["meter_type"].apply(classify_meter_type) if "meter_type" in sub.columns else ""
+    sub["_1"] = (phase == "1PH").astype(int)
+    sub["_3"] = (phase == "3PH").astype(int)
+    out = sub.groupby("location").agg(Installs=("date", "size"), **{"1PH": ("_1", "sum"), "3PH": ("_3", "sum")}).reset_index()
+    out = out.rename(columns={"location": "Section"}).sort_values("Installs", ascending=False)
+    total = {"Section": "TOTAL", "Installs": int(out["Installs"].sum()),
+             "1PH": int(out["1PH"].sum()), "3PH": int(out["3PH"].sum())}
+    return pd.concat([out, pd.DataFrame([total])], ignore_index=True)
+
+
+@st.fragment
+def render_daily_calendar(mkey: str):
+    """Month calendar of daily totals, a chart of the same, and the section
+    breakup for whichever day is tapped.
+
+    A fragment: tapping a day reruns only this block, not all eight tabs."""
+    import calendar as _cal
+    counts = month_daily_counts(mkey)
+    if not counts:
+        st.info(f"No installs recorded in {month_label(mkey)}.")
+        return
+
+    y, m = int(mkey[:4]), int(mkey[5:])
+    busiest = max(counts.values())
+    picked = st.session_state.get("cal_picked_day")
+    if picked not in counts:
+        picked = max(counts)          # default: the latest day with installs
+
+    st.markdown(
+        '<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:var(--space-2);'
+        'margin-bottom:var(--space-2);">'
+        + "".join(f'<div style="text-align:center;font-size:11px;font-weight:700;color:var(--ink-600);">{d}</div>'
+                  for d in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+        + "</div>", unsafe_allow_html=True)
+
+    for week in _cal.Calendar(firstweekday=0).monthdayscalendar(y, m):
+        cols = st.columns(7, gap="small")
+        for col, dayno in zip(cols, week):
+            with col:
+                if dayno == 0:
+                    st.markdown("<div style='height:1px;'></div>", unsafe_allow_html=True)
+                    continue
+                dstr = f"{y:04d}-{m:02d}-{dayno:02d}"
+                n = int(counts.get(dstr, 0))
+                # A day with no installs isn't clickable — there is nothing to
+                # break up, and a dead button invites a pointless rerun.
+                if n == 0:
+                    st.markdown(
+                        f'<div style="text-align:center;padding:6px 0;border-radius:var(--radius-sm);'
+                        f'background:var(--surface-000);color:var(--ink-600);font-size:11px;">'
+                        f'{dayno}<br/><span style="opacity:.5;">—</span></div>', unsafe_allow_html=True)
+                    continue
+                if st.button(f"{dayno}\n\n**{n}**", key=f"cal_{dstr}", use_container_width=True,
+                             type=("primary" if dstr == picked else "secondary"),
+                             help=f"{n} install(s) on {dstr}"):
+                    # No explicit rerun: a button inside a fragment already
+                    # reruns the fragment, and st.rerun(scope="fragment") is
+                    # invalid on a full-script run, which is when the first
+                    # click happens.
+                    st.session_state["cal_picked_day"] = dstr
+                    picked = dstr
+
+    st.markdown(f'<div class="info-box">Busiest day this month: <b>{busiest:,}</b> installs · '
+                f'month total <b>{sum(counts.values()):,}</b></div>', unsafe_allow_html=True)
+
+    # Chart of the same daily totals, across the whole month.
+    last_day = _cal.monthrange(y, m)[1]
+    series = pd.DataFrame(
+        {"Installs": [int(counts.get(f"{y:04d}-{m:02d}-{d:02d}", 0)) for d in range(1, last_day + 1)]},
+        index=pd.Index(range(1, last_day + 1), name=f"Day of {month_label(mkey)}"))
+    st.bar_chart(series, height=240)
+
+    sub_hdr("pin", f"Section-Wise On {picked}")
+    breakup = day_section_breakup(picked)
+    if breakup.empty:
+        st.info("No records for that date.")
+    else:
+        st.dataframe(breakup, use_container_width=True, hide_index=True,
+                     height=dataframe_height(len(breakup)))
+        download_image_button(breakup, f"Sections_{picked}.png", key="dl_img_cal_day",
+                              title=f"Section-Wise Installs — {picked}")
+
+
 # ── 1PH Incentive & Profit Sharing workbook ────────────────────────────────
 # The approved calculator, kept as a live Excel file: the app fills in the
 # inputs (installs from the install log, expense per install from the Expenses
@@ -4679,6 +4788,13 @@ with tab_analytics:
             )
         else:
             st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
+
+        # -- Daily calendar for the month of the date being viewed -----------
+        _cal_month = str(sel_date)[:7]
+        sec_hdr("calendar", f"Daily Installs — {month_label(_cal_month)}")
+        st.markdown('<div class="info-box">From the Installs log, so it covers the whole month. '
+                    'Tap a day for its section-wise breakup.</div>', unsafe_allow_html=True)
+        render_daily_calendar(_cal_month)
 
         # -- Half-day split --------------------------------------------------
         sec_hdr("half", "Half-Day Split")
