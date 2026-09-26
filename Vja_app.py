@@ -2644,8 +2644,17 @@ def render_daily_calendar(mkey: str):
         bg, fg = day_volume_colors(int(n))
         sel = ("border:2px solid var(--ink-900) !important;"
                if dstr == picked else "border:1px solid var(--hairline) !important;")
-        rules.append(f'.st-key-cal_{dstr} button {{background:{bg} !important;color:{fg} !important;'
-                     f'{sel}font-weight:700 !important;padding:6px 2px !important;}}')
+        # The day number is added ABOVE the count with ::before, because a
+        # button's own label renders on a single line — date and count were
+        # ending up side by side. flex-direction:column stacks them.
+        rules.append(
+            f'.st-key-cal_{dstr} button {{background:{bg} !important;color:{fg} !important;'
+            f'{sel}display:flex !important;flex-direction:column !important;gap:1px !important;'
+            f'line-height:1.15 !important;padding:7px 2px !important;min-height:0 !important;}}'
+            f'.st-key-cal_{dstr} button::before {{content:"{int(dstr[-2:])}";display:block;'
+            f'font-size:10.5px;font-weight:700;opacity:.75;}}'
+            f'.st-key-cal_{dstr} button p {{font-size:15px !important;font-weight:800 !important;'
+            f'margin:0 !important;}}')
     st.markdown("<style>" + "".join(rules) + "</style>", unsafe_allow_html=True)
 
     st.markdown(
@@ -2672,7 +2681,9 @@ def render_daily_calendar(mkey: str):
                         f'background:var(--surface-000);color:var(--ink-600);font-size:11px;">'
                         f'{dayno}<br/><span style="opacity:.5;">—</span></div>', unsafe_allow_html=True)
                     continue
-                if st.button(f"{dayno}\n\n**{n}**", key=f"cal_{dstr}", use_container_width=True,
+                # Label is the count only; the day number comes from the CSS
+                # above it (see the ::before rule).
+                if st.button(f"{n}", key=f"cal_{dstr}", use_container_width=True,
                              type=("primary" if dstr == picked else "secondary"),
                              help=f"{n} install(s) on {dstr}"):
                     # No explicit rerun: a button inside a fragment already
