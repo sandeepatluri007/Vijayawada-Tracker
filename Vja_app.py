@@ -2569,6 +2569,22 @@ VEHICLE_COLS = ["reg_no", "description", "is_active"]
 # Reads the install log, not AnalyticsRaw: a month-long view needs full
 # history, and AnalyticsRaw only holds recent uploads and is cleared by the
 # end-of-day reset.
+# Daily-volume bands for the calendar: under 100 red, 100-199 orange,
+# 200-299 yellow, 300+ green. Uses the app's conditional-formatting pairs so
+# the colours match the rest of the app and stay readable.
+DAY_VOLUME_BANDS = (100, 200, 300)
+
+
+def day_volume_colors(n: int):
+    if n < DAY_VOLUME_BANDS[0]:
+        return CF_RED_BG, CF_RED_FONT
+    if n < DAY_VOLUME_BANDS[1]:
+        return CF_ORANGE_BG, CF_ORANGE_FONT
+    if n < DAY_VOLUME_BANDS[2]:
+        return CF_YELLOW_BG, CF_YELLOW_FONT
+    return CF_GREEN_BG, CF_GREEN_FONT
+
+
 def month_daily_counts(mkey: str) -> dict:
     """{date -> installs} for a calendar month."""
     df = get_data("UploadedInstallLog")
@@ -2619,6 +2635,19 @@ def render_daily_calendar(mkey: str):
     if picked not in counts:
         picked = max(counts)          # default: the latest day with installs
 
+    # Each day is a real button, so it is coloured through Streamlit's
+    # per-widget class (st-key-<key>) rather than inline styles. The
+    # background/text pairs are the app's conditional-formatting colours,
+    # which clear the contrast bar.
+    rules = []
+    for dstr, n in counts.items():
+        bg, fg = day_volume_colors(int(n))
+        sel = ("border:2px solid var(--ink-900) !important;"
+               if dstr == picked else "border:1px solid var(--hairline) !important;")
+        rules.append(f'.st-key-cal_{dstr} button {{background:{bg} !important;color:{fg} !important;'
+                     f'{sel}font-weight:700 !important;padding:6px 2px !important;}}')
+    st.markdown("<style>" + "".join(rules) + "</style>", unsafe_allow_html=True)
+
     st.markdown(
         '<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:var(--space-2);'
         'margin-bottom:var(--space-2);">'
@@ -2656,13 +2685,6 @@ def render_daily_calendar(mkey: str):
     st.markdown(f'<div class="info-box">Busiest day this month: <b>{busiest:,}</b> installs · '
                 f'month total <b>{sum(counts.values()):,}</b></div>', unsafe_allow_html=True)
 
-    # Chart of the same daily totals, across the whole month.
-    last_day = _cal.monthrange(y, m)[1]
-    series = pd.DataFrame(
-        {"Installs": [int(counts.get(f"{y:04d}-{m:02d}-{d:02d}", 0)) for d in range(1, last_day + 1)]},
-        index=pd.Index(range(1, last_day + 1), name=f"Day of {month_label(mkey)}"))
-    st.bar_chart(series, height=240)
-
     sub_hdr("pin", f"Section-Wise On {picked}")
     breakup = day_section_breakup(picked)
     if breakup.empty:
@@ -2672,6 +2694,14 @@ def render_daily_calendar(mkey: str):
                      height=dataframe_height(len(breakup)))
         download_image_button(breakup, f"Sections_{picked}.png", key="dl_img_cal_day",
                               title=f"Section-Wise Installs — {picked}")
+
+    # Chart of the same daily totals, across the whole month.
+    last_day = _cal.monthrange(y, m)[1]
+    series = pd.DataFrame(
+        {"Installs": [int(counts.get(f"{y:04d}-{m:02d}-{d:02d}", 0)) for d in range(1, last_day + 1)]},
+        index=pd.Index(range(1, last_day + 1), name=f"Day of {month_label(mkey)}"))
+    st.bar_chart(series, height=240)
+
 
 
 # ── 1PH Incentive & Profit Sharing workbook ────────────────────────────────
@@ -4792,8 +4822,6 @@ with tab_analytics:
         # -- Daily calendar for the month of the date being viewed -----------
         _cal_month = str(sel_date)[:7]
         sec_hdr("calendar", f"Daily Installs — {month_label(_cal_month)}")
-        st.markdown('<div class="info-box">From the Installs log, so it covers the whole month. '
-                    'Tap a day for its section-wise breakup.</div>', unsafe_allow_html=True)
         render_daily_calendar(_cal_month)
 
         # -- Half-day split --------------------------------------------------
