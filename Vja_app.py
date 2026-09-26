@@ -2658,8 +2658,15 @@ def render_daily_calendar(mkey: str):
     # turned each week into 7 full-width bars. Keep the calendar's rows
     # side-by-side and size the cells down instead.
     rules.append(
-        '[class*="st-key-calweek_"] [data-testid="stHorizontalBlock"]{flex-wrap:nowrap !important;gap:3px !important;}'
-        '[class*="st-key-calweek_"] [data-testid="stColumn"]{flex:1 1 0 !important;min-width:0 !important;width:auto !important;}'
+        # display:block + overflow:visible so each week row reports its real
+        # height; without it the row collapsed and the tiles below were drawn
+        # over the last week of the calendar.
+        '[class*="st-key-calweek_"]{display:block !important;overflow:visible !important;margin-bottom:4px !important;}'
+        '[class*="st-key-calweek_"] [data-testid="stHorizontalBlock"]{flex-wrap:nowrap !important;gap:3px !important;'
+        'align-items:stretch !important;overflow:visible !important;}'
+        '[class*="st-key-calweek_"] [data-testid="stColumn"]{flex:1 1 0 !important;min-width:0 !important;'
+        'width:auto !important;overflow:visible !important;}'
+        '[class*="st-key-calweek_"] [data-testid="stElementContainer"]{overflow:visible !important;}'
         '@media (max-width:640px){'
         '[class*="st-key-calweek_"] button{padding:5px 0 !important;}'
         '[class*="st-key-calweek_"] button p{font-size:12.5px !important;}'
@@ -2721,6 +2728,8 @@ def render_daily_calendar(mkey: str):
                     # click happens.
                     st.session_state["cal_picked_day"] = dstr
                     picked = dstr
+
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
 
     # Min ignores zero days: a day nobody worked says nothing about the worst
     # day's output, and would always read 0 once the month has a gap in it.
