@@ -2676,10 +2676,22 @@ def render_daily_calendar(mkey: str):
                 # A day with no installs isn't clickable — there is nothing to
                 # break up, and a dead button invites a pointless rerun.
                 if n == 0:
+                    # Styled like a day cell but not a button: there is no
+                    # breakup to show for a day with nothing on it. A day still
+                    # in the future isn't a shortfall, so it stays neutral —
+                    # only days up to today count as a red zero.
+                    future = date(y, m, dayno) > today_ist()
+                    bg = "var(--surface-000)" if future else CF_RED_BG
+                    fg = "var(--ink-600)" if future else CF_RED_FONT
                     st.markdown(
-                        f'<div style="text-align:center;padding:6px 0;border-radius:var(--radius-sm);'
-                        f'background:var(--surface-000);color:var(--ink-600);font-size:11px;">'
-                        f'{dayno}<br/><span style="opacity:.5;">—</span></div>', unsafe_allow_html=True)
+                        f'<div style="text-align:center;border-radius:var(--radius-sm);'
+                        f'border:1px solid var(--hairline);background:{bg};color:{fg};'
+                        f'padding:7px 2px;line-height:1.15;">'
+                        f'<div style="font-size:10.5px;font-weight:700;opacity:.75;">{dayno}</div>'
+                        f'<div style="font-size:15px;font-weight:800;'
+                        + ('opacity:.45;' if future else '') +
+                        f'">-</div></div>',
+                        unsafe_allow_html=True)
                     continue
                 # Label is the count only; the day number comes from the CSS
                 # above it (see the ::before rule).
