@@ -139,7 +139,10 @@ def today_ist() -> date:
 # The working month runs 3rd to 27th inclusive; the 1st/2nd and 28th-31st are
 # not install days, so "days remaining" must never count them or the per-day
 # target comes out too low to actually hit.
-WORK_DAY_START, WORK_DAY_END = 3, 27
+# Defaults only — the live values are read from the Settings sheet once it is
+# available (see below), so they can be changed in Admin without a redeploy.
+DEFAULT_WORK_DAY_START, DEFAULT_WORK_DAY_END = 3, 27
+WORK_DAY_START, WORK_DAY_END = DEFAULT_WORK_DAY_START, DEFAULT_WORK_DAY_END
 DEFAULT_MONTHLY_TARGET = 5000   # fallback until one is set in Admin
 
 
@@ -2537,19 +2540,34 @@ def get_setting(key: str, default):
         return default
 
 
-def save_setting(key: str, value) -> bool:
-    df = df_settings_master.copy()
+def save_settings(values: dict) -> bool:
+    """Write several settings at once.
+
+    Reads the sheet fresh rather than the snapshot taken at the start of the
+    run: saving keys one after another each rebuilt from that same stale copy,
+    so every save undid the one before it and only the last key survived.
+    One write also costs one API call instead of one per key."""
+    df = get_data("Settings")
     if df.empty or not has_col(df, "key", "value"):
         df = pd.DataFrame(columns=["key", "value"])
-    mask = df["key"].astype(str).str.strip() == key if not df.empty else pd.Series([], dtype=bool)
-    if not df.empty and mask.any():
-        df.loc[mask, "value"] = str(value)
-    else:
-        df = pd.concat([df, pd.DataFrame([{"key": key, "value": str(value)}])], ignore_index=True)
+    for key, value in values.items():
+        mask = df["key"].astype(str).str.strip() == key if not df.empty else pd.Series([], dtype=bool)
+        if not df.empty and mask.any():
+            df.loc[mask, "value"] = str(value)
+        else:
+            df = pd.concat([df, pd.DataFrame([{"key": key, "value": str(value)}])], ignore_index=True)
     return safe_update("Settings", df)
 
 
+def save_setting(key: str, value) -> bool:
+    return save_settings({key: value})
+
+
 MONTHLY_TARGET = int(get_setting("monthly_install_target", DEFAULT_MONTHLY_TARGET))
+# Working days of the month, set in Admin. Read after the Settings sheet is
+# loaded; working_days_* read these at call time, so reassigning here is enough.
+WORK_DAY_START = max(1, min(31, int(get_setting("work_day_start", DEFAULT_WORK_DAY_START))))
+WORK_DAY_END = max(WORK_DAY_START, min(31, int(get_setting("work_day_end", DEFAULT_WORK_DAY_END))))
 
 
 # ── Expenses: cost per install ─────────────────────────────────────────────
@@ -6186,17 +6204,39 @@ with tab_admin:
     """, unsafe_allow_html=True)
 
     # ── Monthly install target ────────────────────────────────────────────────
-    sec_hdr("target", "Monthly Install Target")
-    tg1, tg2 = st.columns([2, 1])
+    sec_hdr("target", "Monthly Install Target & Working Days")
+    tg1, tg2, tg3 = st.columns(3)
     with tg1:
         new_target = st.number_input("Installs target for this month", min_value=0, step=100,
                                      value=int(MONTHLY_TARGET), key="monthly_target_input")
     with tg2:
-        st.write("")
-        if st.button("Save Target", type="primary", use_container_width=True, key="save_monthly_target"):
-            if save_setting("monthly_install_target", int(new_target)):
-                st.success(f"Monthly target set to {int(new_target):,}.")
-                st.rerun()
+        new_wd_start = st.number_input("Working days from", min_value=1, max_value=31, step=1,
+                                       value=int(WORK_DAY_START), key="work_day_start_input")
+    with tg3:
+        new_wd_end = st.number_input("to", min_value=1, max_value=31, step=1,
+                                     value=int(WORK_DAY_END), key="work_day_end_input")
+
+    _today_adm = today_ist()
+    if new_wd_end < new_wd_start:
+        st.markdown('<div class="danger-box">The last working day must not be before the first.</div>',
+                    unsafe_allow_html=True)
+    else:
+        import calendar as _cal_adm
+        _last = _cal_adm.monthrange(_today_adm.year, _today_adm.month)[1]
+        _days = max(0, min(int(new_wd_end), _last) - int(new_wd_start) + 1)
+        st.markdown(
+            f'<div class="info-box">Day {int(new_wd_start)} to {int(new_wd_end)} — '
+            f'<b>{_days}</b> working days in {month_label(month_key(_today_adm))}'
+            + (f', {new_target / _days:,.0f} installs/day to reach {int(new_target):,}.' if _days and new_target else '.')
+            + '</div>', unsafe_allow_html=True)
+
+    if st.button("Save", type="primary", use_container_width=True, key="save_monthly_target",
+                 disabled=new_wd_end < new_wd_start):
+        if save_settings({"monthly_install_target": int(new_target),
+                          "work_day_start": int(new_wd_start),
+                          "work_day_end": int(new_wd_end)}):
+            st.success(f"Target {int(new_target):,}, working days {int(new_wd_start)}–{int(new_wd_end)}.")
+            st.rerun()
 
     st.divider()
 
