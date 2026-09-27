@@ -1114,14 +1114,12 @@ def tab_action_bar(key: str, show_upload: bool = False):
     widths = [1.15, 1.6, 6] if show_upload else [1.15, 7.6]
     cols = st.columns(widths)
     with cols[0]:
-        if st.button("Refresh", use_container_width=True, key=f"refresh_{key}",
-                     help="Reload data from Google Sheets"):
+        if st.button("Refresh", use_container_width=True, key=f"refresh_{key}"):
             st.cache_data.clear()
             st.rerun()
     if show_upload:
         with cols[1]:
-            if st.button("Update Installs", use_container_width=True, key=f"push_{key}",
-                         help="Push this date's Analytics records into Installations"):
+            if st.button("Update Installs", use_container_width=True, key=f"push_{key}"):
                 st.session_state["trigger_analytics_push"] = True
 
 
