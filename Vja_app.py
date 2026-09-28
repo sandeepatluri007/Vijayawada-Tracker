@@ -1772,6 +1772,38 @@ def get_data(worksheet: str, retries: int = 3) -> pd.DataFrame:
                 return pd.DataFrame()
 
 
+@st.cache_resource(show_spinner=False)
+def _worksheet_handles() -> dict:
+    return {}
+
+
+def _worksheet(name: str):
+    """Worksheet handle, kept for the session — fetching it costs an API call."""
+    cache = _worksheet_handles()
+    if name not in cache:
+        cache[name] = _spreadsheet_handle().worksheet(name)
+    return cache[name]
+
+
+def append_rows(worksheet: str, rows, columns) -> bool:
+    """Add rows to the end of a sheet, sending ONLY those rows.
+
+    safe_update() rewrites the whole sheet, so adding one day's installs
+    re-sent every row ever recorded — ~286,000 cells to add 100 installs, and
+    growing every month. That is what made saving slow. Appending sends just
+    the new rows. Returns False if anything goes wrong, so callers can fall
+    back to the full rewrite."""
+    if not rows:
+        return True
+    try:
+        values = [[("" if r.get(c) is None else str(r.get(c, ""))) for c in columns] for r in rows]
+        _worksheet(worksheet).append_rows(values, value_input_option="USER_ENTERED")
+        _bump_sheet_version(worksheet)
+        return True
+    except Exception:
+        return False
+
+
 def safe_update(worksheet: str, data: pd.DataFrame, retries: int = 3) -> bool:
     """Write to Sheets with retries so a dropped connection doesn't lose the entry.
     On repeated failure, the data the user entered is NOT cleared — they can just retry."""
@@ -3446,7 +3478,11 @@ def _execute_push(parsed_records, source_label="install(s)"):
                 "qty_1ph": int(arow["d_1ph"]), "qty_3ph": int(arow["d_3ph"]),
             }])], ignore_index=True)
 
-    if safe_update("Installations", df_inst_existing) and safe_update("UploadedInstallLog", updated_log):
+    # Only the backfill path changes existing rows; otherwise append.
+    log_saved = (safe_update("UploadedInstallLog", updated_log) if backfilled_count
+                 else (append_rows("UploadedInstallLog", new_log_rows, list(updated_log.columns))
+                       or safe_update("UploadedInstallLog", updated_log)))
+    if safe_update("Installations", df_inst_existing) and log_saved:
         map_added, map_ok = mirror_records_to_map(map_batch)
         if not map_ok:
             st.session_state["map_sync_warning"] = (
@@ -3522,7 +3558,10 @@ def mirror_records_to_map(records) -> tuple:
         return 0, True
     updated_map = (pd.concat([df_map_existing, pd.DataFrame(new_map_rows)], ignore_index=True)
                    if new_map_rows else df_map_existing)
-    ok = safe_update("MapRecords", updated_map)
+    if new_map_rows and not filled:
+        ok = append_rows("MapRecords", new_map_rows, map_cols) or safe_update("MapRecords", updated_map)
+    else:
+        ok = safe_update("MapRecords", updated_map)
     return len(new_map_rows) + filled, ok
 
 
@@ -4649,7 +4688,9 @@ def process_analytics_upload(analytics_file) -> dict:
         return {"ok": True, "wrote": False}
 
     merged = pd.concat([df_araw_existing, pd.DataFrame(new_rows)], ignore_index=True) if new_rows else df_araw_existing
-    if safe_update("AnalyticsRaw", merged):
+    saved = (append_rows("AnalyticsRaw", new_rows, list(merged.columns)) or safe_update("AnalyticsRaw", merged)) \
+        if (new_rows and not backfilled_count) else safe_update("AnalyticsRaw", merged)
+    if saved:
         msg = f"✅ Added {len(new_rows)} new record(s) to Analytics."
         if backfilled_count:
             msg += f" Filled in missing details for {backfilled_count} existing record(s)."
