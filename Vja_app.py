@@ -2596,6 +2596,29 @@ def save_setting(key: str, value) -> bool:
 
 
 MONTHLY_TARGET = int(get_setting("monthly_install_target", DEFAULT_MONTHLY_TARGET))
+
+
+def target_for_month(mkey: str) -> int:
+    """A month's install target: the one set for that specific month if there
+    is one, otherwise the default. Stored per month so next month's target can
+    be set in advance without disturbing the month in progress."""
+    return int(get_setting(f"monthly_install_target:{mkey}", MONTHLY_TARGET))
+
+
+def months_with_targets() -> dict:
+    """{month -> target} for every month given its own target."""
+    df = get_data("Settings")
+    if df.empty or not has_col(df, "key", "value"):
+        return {}
+    out = {}
+    for _, r in df.iterrows():
+        k = str(r["key"]).strip()
+        if k.startswith("monthly_install_target:"):
+            try:
+                out[k.split(":", 1)[1]] = int(float(r["value"]))
+            except Exception:
+                continue
+    return dict(sorted(out.items()))
 # Working days of the month, set in Admin. Read after the Settings sheet is
 # loaded; working_days_* read these at call time, so reassigning here is enough.
 WORK_DAY_START = max(1, min(31, int(get_setting("work_day_start", DEFAULT_WORK_DAY_START))))
@@ -4313,10 +4336,11 @@ with tab_dash:
         # counted as a day still available.
         last_install_dt = this_month["_date"].max() if not this_month.empty else None
         last_install_date = last_install_dt.date() if pd.notna(last_install_dt) else None
-        tgt = monthly_target_status(m_total, MONTHLY_TARGET, today, last_install_date)
+        month_target = target_for_month(month_key(today))
+        tgt = monthly_target_status(m_total, month_target, today, last_install_date)
         render_hero_stat(
             "THIS MONTH · INSTALLS VS TARGET",
-            f"{m_total:,} / {MONTHLY_TARGET:,}",
+            f"{m_total:,} / {month_target:,}",
             f"{tgt['pct']:.0f}% of target · {tgt['days_left']} working day(s) left",
             tgt["pct"],
         )
@@ -5288,8 +5312,9 @@ with tab_exp:
 
     if summ["has_entries"]:
         # -- If the monthly target is met --------------------------------
-        at_target = cost_at_installs(summ["fixed_total"], summ["variable_rate"], MONTHLY_TARGET)
-        sub_hdr("target", f"If The Monthly Target Of {MONTHLY_TARGET:,} Is Met")
+        _month_target = target_for_month(sel_month)
+        at_target = cost_at_installs(summ["fixed_total"], summ["variable_rate"], _month_target)
+        sub_hdr("target", f"If The Monthly Target Of {_month_target:,} Is Met")
         now_pi = summ["total_per_install"]
         drop = (now_pi - at_target["total_per_install"]) if (now_pi and at_target["total_per_install"]) else None
         render_stat_tiles([
@@ -6246,9 +6271,48 @@ with tab_admin:
 
     # ── Monthly install target ────────────────────────────────────────────────
     sec_hdr("target", "Monthly Install Target & Working Days")
+    # Month picker so a target can be set ahead: this month, or any of the
+    # next twelve. Months without one of their own use the default below.
+    _today_adm = today_ist()
+    _mo_opts = []
+    _yy, _mm = _today_adm.year, _today_adm.month
+    for _ in range(13):
+        _mo_opts.append(f"{_yy:04d}-{_mm:02d}")
+        _mm = 1 if _mm == 12 else _mm + 1
+        _yy = _yy + 1 if _mm == 1 else _yy
+    tm1, tm2, tm3 = st.columns([1.2, 1, 1])
+    with tm1:
+        tgt_month = st.selectbox("Target for month", _mo_opts, format_func=month_label, key="target_month_pick")
+    with tm2:
+        _cur = target_for_month(tgt_month)
+        month_target_in = st.number_input("Installs target", min_value=0, step=100,
+                                          value=int(_cur), key=f"month_target_{tgt_month}")
+    with tm3:
+        st.write("")
+        if st.button("Save Month Target", type="primary", use_container_width=True, key="save_month_target"):
+            if save_settings({f"monthly_install_target:{tgt_month}": int(month_target_in)}):
+                st.success(f"{month_label(tgt_month)} target set to {int(month_target_in):,}.")
+                st.rerun()
+
+    _set_targets = months_with_targets()
+    if _set_targets:
+        _rows = [{"Month": month_label(k), "Target": f"{v:,}",
+                  "": "in use now" if k == month_key(_today_adm) else ""} for k, v in _set_targets.items()]
+        with st.expander(f"Months with their own target ({len(_set_targets)})"):
+            st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True,
+                         height=dataframe_height(len(_rows), max_px=260))
+            _clear = st.selectbox("Remove a month's target", ["—"] + list(_set_targets), key="clear_month_target",
+                                  format_func=lambda k: k if k == "—" else month_label(k))
+            if _clear != "—" and st.button(f"Remove {month_label(_clear)}", use_container_width=True, key="do_clear_month_target"):
+                _df = get_data("Settings")
+                _df = _df[_df["key"].astype(str).str.strip() != f"monthly_install_target:{_clear}"]
+                if safe_update("Settings", _df):
+                    st.success(f"{month_label(_clear)} now uses the default target.")
+                    st.rerun()
+
     tg1, tg2, tg3 = st.columns(3)
     with tg1:
-        new_target = st.number_input("Installs target for this month", min_value=0, step=100,
+        new_target = st.number_input("Default target (months without their own)", min_value=0, step=100,
                                      value=int(MONTHLY_TARGET), key="monthly_target_input")
     with tg2:
         new_wd_start = st.number_input("Working days from", min_value=1, max_value=31, step=1,
@@ -6257,7 +6321,6 @@ with tab_admin:
         new_wd_end = st.number_input("to", min_value=1, max_value=31, step=1,
                                      value=int(WORK_DAY_END), key="work_day_end_input")
 
-    _today_adm = today_ist()
     if new_wd_end < new_wd_start:
         st.markdown('<div class="danger-box">The last working day must not be before the first.</div>',
                     unsafe_allow_html=True)
