@@ -6326,10 +6326,12 @@ with tab_inv:
         with rv1:
             rdate = st.date_input("Return Date", today_ist(), key="ret_date")
             rtype = st.selectbox("Type", METER_TYPES, key="ret_type")
-            rloc = st.selectbox("Returned from location", (active_locs or ["Unspecified"]), key="ret_loc")
+            # "Unspecified" returns against stock received before locations
+            # were recorded, which otherwise has no way back out.
+            rloc = st.selectbox("Returned from location", list(active_locs) + ["Unspecified"], key="ret_loc")
         with rv2:
             rqty = st.number_input("Quantity", min_value=1, step=1, value=1, key="ret_qty")
-            rdc = st.text_input("DC / Gate Pass No.", key="ret_dc")
+            rdc = st.text_input("DC / Gate Pass No. (optional)", key="ret_dc")
             rremarks = st.text_input("Remarks (optional)", key="ret_remarks",
                                      placeholder="e.g. ageing stock, damaged")
         ret_sub = st.form_submit_button("↩️ Save Return", type="primary")
@@ -6337,9 +6339,7 @@ with tab_inv:
     if ret_sub:
         _avail = next((int(r["Pending"]) for _, r in stock_by_location().iterrows()
                        if r["Location"] == rloc and r["Type"] == rtype), 0)
-        if not rdc.strip():
-            st.error("❌ DC / Gate Pass No. is required.")
-        elif _avail > 0 and rqty > _avail:
+        if _avail > 0 and rqty > _avail:
             st.error(f"❌ Only {_avail:,} × {rtype} pending at {rloc} — can't return {int(rqty):,}.")
         else:
             if _avail <= 0:
@@ -6352,7 +6352,8 @@ with tab_inv:
                                      "location": str(rloc), "dc_no": rdc.strip(), "remarks": rremarks.strip()}])
             if append_rows("Returns", new_ret.to_dict("records"), RETURN_COLS) or \
                safe_update("Returns", pd.concat([df_ret_exist[RETURN_COLS], new_ret], ignore_index=True)):
-                st.success(f"✅ Returned {int(rqty):,} × {rtype} from {rloc} — DC {rdc.strip()}.")
+                st.success(f"✅ Returned {int(rqty):,} × {rtype} from {rloc}"
+                           + (f" — DC {rdc.strip()}." if rdc.strip() else "."))
                 st.rerun()
 
     st.divider()
