@@ -76,7 +76,7 @@ st.set_page_config(
 if not hasattr(st, "_tlis_originals"):
     st._tlis_originals = {n: getattr(st, n) for n in ("success", "info", "warning", "rerun")}
 _ST = st._tlis_originals
-_RUN_MESSAGES = []   # re-created on every run, since the script re-executes
+_RUN_MESSAGES = []   # reset at the top of every full run (see below)
 
 
 def _remembering(kind):
@@ -86,22 +86,51 @@ def _remembering(kind):
     return _show
 
 
+CARRY_MESSAGE_LIMIT = 4
+
+
 def _rerun_keeping_messages(*args, **kwargs):
     if _RUN_MESSAGES:
-        st.session_state["_carry_messages"] = list(_RUN_MESSAGES)
+        # De-duplicated and capped: a run that says the same thing several
+        # times should not replay it several times, and a long list of
+        # notices is noise rather than confirmation.
+        seen, unique = set(), []
+        for item in _RUN_MESSAGES:
+            if item not in seen:
+                seen.add(item)
+                unique.append(item)
+        st.session_state["_carry_messages"] = unique[-CARRY_MESSAGE_LIMIT:]
     return _ST["rerun"](*args, **kwargs)
 
 
+# Only confirmations and warnings are carried across a rerun. st.info is NOT:
+# info is used for empty-state notices ("No installs recorded this month yet"),
+# and carrying those replayed a stack of them at the top of the page after
+# every action — which is what filled the screen with repeated notices.
 st.success = _remembering("success")
-st.info = _remembering("info")
 st.warning = _remembering("warning")
 st.rerun = _rerun_keeping_messages
 
 
+FLASH_SECONDS = 10
+
+
+def flash(kind: str, body: str, seconds: int = FLASH_SECONDS):
+    """A message that clears itself after `seconds`, without a rerun."""
+    cls = {"success": "ok-box", "warning": "warn-box", "info": "info-box"}.get(kind, "info-box")
+    st.markdown(f'<div class="{cls} flash-msg" style="animation-delay:{seconds}s;">{body}</div>',
+                unsafe_allow_html=True)
+
+
 def replay_carried_messages():
-    """Show, once, whatever the previous run said just before it reran."""
+    """Show, once, whatever the previous run said just before it reran.
+
+    Also clears this run's buffer. A fragment rerun does not re-execute the
+    script, so the module-level list is not emptied on its own and would
+    otherwise keep growing for the life of the session."""
+    _RUN_MESSAGES.clear()
     for kind, body in st.session_state.pop("_carry_messages", []):
-        _ST[kind](body)   # the original: replaying must not re-queue itself
+        flash(kind, str(body))   # fades on its own; never re-queued
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -1417,6 +1446,18 @@ button[data-testid="baseButton-primary"]:hover, .stButton>button[type="primary"]
     background:var(--surface-200); border:1px solid var(--card-border); border-radius:var(--radius-md);
     padding:11px 15px; color:var(--ink-soft); font-size:.85rem; margin-bottom:.8rem; font-weight:500;
 }
+/* Confirmations and carried-over messages fade away on their own after a
+   delay, so a login or a save doesn't leave notices sitting on the page. The
+   timing is pure CSS, so nothing has to rerun to clear them. */
+.ok-box {
+    background:#E9F7EF; border:1px solid #A9DFBF; border-radius:var(--radius-md);
+    padding:var(--space-4) 15px; color:var(--success-700); font-size:.85rem; margin-bottom:.8rem; font-weight:600;
+}
+@keyframes tlisFadeOut {
+    to { opacity:0; visibility:hidden; height:0; margin:0; padding:0; border-width:0; }
+}
+.flash-msg { animation: tlisFadeOut .6s ease forwards; }
+
 .danger-box {
     background:#FEF2F2; border:1px solid #FCA5A5; border-radius:var(--radius-md);
     padding:var(--space-4) 15px; color:var(--danger-700); font-size:.85rem; margin-bottom:.8rem; font-weight:600;
@@ -1549,19 +1590,23 @@ if not st.session_state["authenticated"]:
 
     sec_hdr("lock", "Supervisor Login")
     with st.form("login_form"):
-        st.info("Please enter the daily operations PIN to access the system. This browser will stay unlocked going forward.")
+        # No instruction line here: messages shown just before a rerun are
+        # replayed once afterwards, so it reappeared on the Dashboard after
+        # every login.
         pin_entry = st.text_input("Enter PIN", type="password")
         login_btn = st.form_submit_button("Unlock Tracker", type="primary")
         if login_btn:
             if pin_entry == PIN_CODE:
                 st.session_state["authenticated"] = True
+                # Nothing from the login screen should follow you in.
+                st.session_state.pop("_carry_messages", None)
                 st.query_params["k"] = REMEMBER_TOKEN
                 st.components.v1.html(f"""
                 <script>
                 try {{ window.parent.localStorage.setItem('vja_remember_token', '{REMEMBER_TOKEN}'); }} catch (e) {{}}
                 </script>
                 """, height=0)
-                st.success("Access Granted!")
+                st.success("✅ Access granted.")
                 st.rerun()
             else:
                 st.error("❌ Incorrect PIN. Access Denied.")
