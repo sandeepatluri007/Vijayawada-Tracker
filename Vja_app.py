@@ -15,7 +15,7 @@ errors with a missing-module message.
 Google Sheet worksheets required (create these tabs in your Sheet, header row only —
 the app creates and appends data automatically):
   Installations       - date, tech_name, installer_id, location, qty_1ph, qty_3ph
-  Inventory            - date, type, qty, mrn, make
+  Inventory            - date, type, qty, mrn, make, location
   Technicians           - name, phone, aadhar, is_active, login_id, supervisor
   Locations             - location_name
   Supervisors           - supervisor_id, name, phone, is_active
@@ -25,6 +25,8 @@ the app creates and appends data automatically):
                            (Expenses tab: fixed monthly costs use `amount`; variable
                            per-install costs use `rate_1ph` / `rate_3ph`)
   Vehicles              - reg_no, description, is_active
+  Returns               - date, type, qty, location, dc_no, remarks
+                           (ageing material sent back to store; comes off pending stock)
                            (Technicians.supervisor holds the supervisor_id)
   UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type,
                            sno, old_meter_no, new_meter_no, lat, long, source
@@ -86,7 +88,8 @@ def _remembering(kind):
     return _show
 
 
-CARRY_MESSAGE_LIMIT = 4
+CARRY_MESSAGE_LIMIT = 2
+CARRY_KINDS = ("success",)   # warnings are redrawn by the next run anyway
 
 
 def _rerun_keeping_messages(*args, **kwargs):
@@ -96,10 +99,11 @@ def _rerun_keeping_messages(*args, **kwargs):
         # notices is noise rather than confirmation.
         seen, unique = set(), []
         for item in _RUN_MESSAGES:
-            if item not in seen:
+            if item[0] in CARRY_KINDS and item not in seen:
                 seen.add(item)
                 unique.append(item)
-        st.session_state["_carry_messages"] = unique[-CARRY_MESSAGE_LIMIT:]
+        if unique:
+            st.session_state["_carry_messages"] = unique[-CARRY_MESSAGE_LIMIT:]
     return _ST["rerun"](*args, **kwargs)
 
 
@@ -129,7 +133,11 @@ def replay_carried_messages():
     script, so the module-level list is not emptied on its own and would
     otherwise keep growing for the life of the session."""
     _RUN_MESSAGES.clear()
-    for kind, body in st.session_state.pop("_carry_messages", []):
+    carried = st.session_state.pop("_carry_messages", []) or []
+    # Hard stop: a queue should hold one or two confirmations. Anything more
+    # means something went wrong upstream, and a page of notices is worse than
+    # none, so drop them rather than flood the screen.
+    for kind, body in list(carried)[:CARRY_MESSAGE_LIMIT]:
         flash(kind, str(body))   # fades on its own; never re-queued
 
 
@@ -1147,6 +1155,10 @@ def tab_action_bar(key: str, show_upload: bool = False):
     cols = st.columns(widths)
     with cols[0]:
         if st.button("Refresh", use_container_width=True, key=f"refresh_{key}"):
+            # Nothing to confirm, so nothing should be carried into the
+            # reloaded page — this is what flooded it with notices.
+            st.session_state.pop("_carry_messages", None)
+            _RUN_MESSAGES.clear()
             st.cache_data.clear()
             st.rerun()
     if show_upload:
@@ -1454,7 +1466,10 @@ button[data-testid="baseButton-primary"]:hover, .stButton>button[type="primary"]
     padding:var(--space-4) 15px; color:var(--success-700); font-size:.85rem; margin-bottom:.8rem; font-weight:600;
 }
 @keyframes tlisFadeOut {
-    to { opacity:0; visibility:hidden; height:0; margin:0; padding:0; border-width:0; }
+    /* Fades and stops taking space, but is removed from flow with display
+       rather than animating height — collapsing heights made the page look
+       like it had emptied itself. */
+    to { opacity:0; display:none; }
 }
 .flash-msg { animation: tlisFadeOut .6s ease forwards; }
 
@@ -1705,7 +1720,7 @@ def _rate_limit_cooloff_active() -> bool:
 # the batch call fails, so this can never be worse than before.
 SHEET_TABS = ("Installations", "Inventory", "Technicians", "Locations", "Supervisors",
               "Settings", "UploadedInstallLog", "AnalyticsRaw", "MapRecords",
-              "Expenses", "Vehicles", "Liaisoning")
+              "Expenses", "Vehicles", "Liaisoning", "Returns")
 
 
 @st.cache_resource(show_spinner=False)
@@ -2680,6 +2695,109 @@ WORK_DAY_END = max(WORK_DAY_START, min(31, int(get_setting("work_day_end", DEFAU
 EXPENSE_COLS = ["expense_id", "month", "cost_type", "category", "item", "vehicle_reg",
                 "amount", "rate_1ph", "rate_3ph", "recurring"]
 VEHICLE_COLS = ["reg_no", "description", "is_active"]
+
+# ── Stock: received, installed, returned ───────────────────────────────────
+# Material that ages in the field and goes back to the store is NOT installed
+# and is no longer held, so it has to come off the pending figure — otherwise
+# pending overstates what is actually on hand.
+#   Returns sheet: date, type, qty, location, dc_no, remarks
+RETURN_COLS = ["date", "type", "qty", "location", "dc_no", "remarks"]
+METER_TYPES = ("1 PH", "3 PH")
+
+
+def load_returns() -> pd.DataFrame:
+    df = get_data("Returns")
+    if df.empty:
+        df = pd.DataFrame(columns=RETURN_COLS)
+    df = df.copy()
+    for c in RETURN_COLS:
+        if c not in df.columns:
+            df[c] = ""
+    df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
+    for c in ("type", "location", "dc_no", "remarks", "date"):
+        df[c] = df[c].astype(str).str.strip()
+    return df
+
+
+def _loc_or_unspecified(series) -> pd.Series:
+    return series.astype(str).str.strip().replace("", "Unspecified").fillna("Unspecified")
+
+
+def stock_summary() -> dict:
+    """Overall stock per meter type: received, installed, returned, pending."""
+    df_inv, df_inst, df_ret = get_data("Inventory"), get_data("Installations"), load_returns()
+    out = {}
+    for t, qty_col in zip(METER_TYPES, ("qty_1ph", "qty_3ph")):
+        received = int(safe_numeric_col(df_inv[df_inv["type"] == t], "qty").sum()) \
+            if not df_inv.empty and has_col(df_inv, "type", "qty") else 0
+        installed = int(safe_numeric_col(df_inst, qty_col).sum()) \
+            if not df_inst.empty and qty_col in df_inst.columns else 0
+        returned = int(df_ret.loc[df_ret["type"] == t, "qty"].sum()) if not df_ret.empty else 0
+        out[t] = {"received": received, "installed": installed, "returned": returned,
+                  "pending": received - installed - returned}
+    return out
+
+
+def stock_by_location() -> pd.DataFrame:
+    """Same figures split by location. Inward entries recorded before locations
+    were captured carry no location, so they show as Unspecified rather than
+    being dropped or guessed at."""
+    df_inv, df_inst, df_ret = get_data("Inventory"), get_data("Installations"), load_returns()
+    rows = {}
+
+    def cell(loc, t):
+        return rows.setdefault((loc, t), {"Location": loc, "Type": t, "Received": 0,
+                                          "Installed": 0, "Returned": 0})
+
+    if not df_inv.empty and has_col(df_inv, "type", "qty"):
+        inv = df_inv.copy()
+        inv["location"] = _loc_or_unspecified(inv["location"]) if "location" in inv.columns else "Unspecified"
+        inv["qty"] = safe_numeric_col(inv, "qty")
+        for (loc, t), q in inv.groupby(["location", "type"])["qty"].sum().items():
+            cell(loc, t)["Received"] += int(q)
+
+    # Installs draw on the stock received BEFORE locations were recorded
+    # ("Unspecified") first, and only once that is used up does a location
+    # consume its own stock. Allocated in date order — the oldest installs
+    # take the oldest stock — so the split is reproducible and can be checked
+    # against the install log rather than being apportioned by a rule.
+    if not df_inst.empty and has_col(df_inst, "location", "qty_1ph", "qty_3ph"):
+        ins = df_inst.copy()
+        ins["location"] = _loc_or_unspecified(ins["location"])
+        ins["_date"] = pd.to_datetime(ins["date"], errors="coerce") if "date" in ins.columns else pd.NaT
+        ins = ins.sort_values("_date", na_position="last")
+        for t, col in zip(METER_TYPES, ("qty_1ph", "qty_3ph")):
+            ins[col] = safe_numeric_col(ins, col)
+            pool = cell("Unspecified", t)
+            # What the legacy pool still holds after any returns against it.
+            unspecified_left = max(0, pool["Received"] - pool["Returned"])
+            for _, r in ins.iterrows():
+                qty = int(r[col])
+                if qty <= 0:
+                    continue
+                from_pool = min(unspecified_left, qty)
+                if from_pool:
+                    cell("Unspecified", t)["Installed"] += from_pool
+                    unspecified_left -= from_pool
+                if qty - from_pool:
+                    cell(r["location"], t)["Installed"] += qty - from_pool
+
+    if not df_ret.empty:
+        ret = df_ret.copy()
+        ret["location"] = _loc_or_unspecified(ret["location"])
+        for (loc, t), q in ret.groupby(["location", "type"])["qty"].sum().items():
+            cell(loc, t)["Returned"] += int(q)
+
+    if not rows:
+        return pd.DataFrame(columns=["Location", "Type", "Received", "Installed", "Returned", "Pending"])
+    out = pd.DataFrame(rows.values())
+    out["Pending"] = out["Received"] - out["Installed"] - out["Returned"]
+    # Once the legacy pool is used up it has nothing left to say, so it drops
+    # out of the table rather than sitting there at zero for ever.
+    spent = (out["Location"] == "Unspecified") & (out["Pending"] <= 0)
+    out = out[~spent]
+    return out.sort_values(["Location", "Type"]).reset_index(drop=True)
+
 
 # ── Daily install calendar ─────────────────────────────────────────────────
 # Reads the install log, not AnalyticsRaw: a month-long view needs full
@@ -4438,6 +4556,8 @@ with tab_dash:
     st.divider()
     sec_hdr("box", "Live Inventory Stock")
 
+    _stock = stock_summary()
+    _ret_1ph, _ret_3ph = _stock["1 PH"]["returned"], _stock["3 PH"]["returned"]
     if not df_inv.empty and has_col(df_inv, "type", "qty"):
         total_in_1ph = safe_numeric_col(df_inv[df_inv["type"] == "1 PH"], "qty").sum()
         total_in_3ph = safe_numeric_col(df_inv[df_inv["type"] == "3 PH"], "qty").sum()
@@ -4450,8 +4570,8 @@ with tab_dash:
     else:
         total_out_1ph = total_out_3ph = 0
 
-    pending_1ph = int(total_in_1ph - total_out_1ph)
-    pending_3ph = int(total_in_3ph - total_out_3ph)
+    pending_1ph = int(total_in_1ph - total_out_1ph - _ret_1ph)
+    pending_3ph = int(total_in_3ph - total_out_3ph - _ret_3ph)
 
     render_stat_tiles([
         ("bolt",  f"{int(total_in_1ph):,}", "Recv", "1PH", "normal"),
@@ -6174,11 +6294,13 @@ with tab_inv:
         iv1, iv2 = st.columns(2)
         with iv1:
             idate = st.date_input("Received Date", today_ist())
-            itype = st.selectbox("Type", ["1 PH", "3 PH"])
+            itype = st.selectbox("Type", METER_TYPES)
+            iloc = st.selectbox("Location", (active_locs or ["Unspecified"]),
+                                help="Which location this stock is held at.")
         with iv2:
             iqty = st.number_input("Quantity", min_value=1, step=1, value=1)
             imrn = st.text_input("MRN No.")
-        imake = st.selectbox("Make", ["Schneider", "Genus", "Other"])
+            imake = st.selectbox("Make", ["Schneider", "Genus", "Other"])
         iv_sub = st.form_submit_button("📥 Save Stock", type="primary")
 
     if iv_sub:
@@ -6186,29 +6308,87 @@ with tab_inv:
             st.error("❌ MRN No. is required.")
         else:
             df_inv_exist = get_data("Inventory")
-            new_inv = pd.DataFrame([{"date": str(idate), "type": str(itype), "qty": str(iqty), "mrn": imrn.strip(), "make": str(imake)}])
+            new_inv = pd.DataFrame([{"date": str(idate), "type": str(itype), "qty": str(iqty),
+                                     "mrn": imrn.strip(), "make": str(imake), "location": str(iloc)}])
             updated_inv = pd.concat([df_inv_exist, new_inv], ignore_index=True) if not df_inv_exist.empty else new_inv
             if safe_update("Inventory", updated_inv):
                 st.success(f"✅ Inwarded {iqty} × {itype} ({imake}) — MRN {imrn.strip()}")
                 st.rerun()
 
+    # ── Return ageing material to store ───────────────────────────────────
+    st.divider()
+    sec_hdr("upload", "Return Material To Store")
+    st.markdown('<div class="info-box">Material lying in the field that is going back to the store. '
+                'It comes off pending stock — it is neither installed nor still held.</div>',
+                unsafe_allow_html=True)
+    with st.form("return_form", clear_on_submit=True):
+        rv1, rv2 = st.columns(2)
+        with rv1:
+            rdate = st.date_input("Return Date", today_ist(), key="ret_date")
+            rtype = st.selectbox("Type", METER_TYPES, key="ret_type")
+            rloc = st.selectbox("Returned from location", (active_locs or ["Unspecified"]), key="ret_loc")
+        with rv2:
+            rqty = st.number_input("Quantity", min_value=1, step=1, value=1, key="ret_qty")
+            rdc = st.text_input("DC / Gate Pass No.", key="ret_dc")
+            rremarks = st.text_input("Remarks (optional)", key="ret_remarks",
+                                     placeholder="e.g. ageing stock, damaged")
+        ret_sub = st.form_submit_button("↩️ Save Return", type="primary")
+
+    if ret_sub:
+        _avail = next((int(r["Pending"]) for _, r in stock_by_location().iterrows()
+                       if r["Location"] == rloc and r["Type"] == rtype), 0)
+        if not rdc.strip():
+            st.error("❌ DC / Gate Pass No. is required.")
+        elif _avail > 0 and rqty > _avail:
+            st.error(f"❌ Only {_avail:,} × {rtype} pending at {rloc} — can't return {int(rqty):,}.")
+        else:
+            if _avail <= 0:
+                # Pending already at or below zero means stock was received
+                # without a location, or installs outrun receipts. That is a
+                # separate problem; don't block a genuine return over it.
+                st.warning(f"⚠️ {rloc} shows {_avail:,} × {rtype} pending — check the inward entries. Return saved anyway.")
+            df_ret_exist = load_returns()
+            new_ret = pd.DataFrame([{"date": str(rdate), "type": str(rtype), "qty": str(int(rqty)),
+                                     "location": str(rloc), "dc_no": rdc.strip(), "remarks": rremarks.strip()}])
+            if append_rows("Returns", new_ret.to_dict("records"), RETURN_COLS) or \
+               safe_update("Returns", pd.concat([df_ret_exist[RETURN_COLS], new_ret], ignore_index=True)):
+                st.success(f"✅ Returned {int(rqty):,} × {rtype} from {rloc} — DC {rdc.strip()}.")
+                st.rerun()
+
+    st.divider()
     sec_hdr("chart", "Live Stock Summary")
-    df_inv_t = get_data("Inventory")
-    df_inst_s = df_installations_master
+    df_inv_t = get_data("Inventory")   # used by the Inventory Log further down
+    _ss = stock_summary()
+    render_stat_tiles([
+        ("bolt", f"{_ss['1 PH']['received']:,}", "Recv", "1PH", "normal"),
+        ("bolt", f"{_ss['3 PH']['received']:,}", "Recv", "3PH", "normal"),
+        ("upload", f"{_ss['1 PH']['returned'] + _ss['3 PH']['returned']:,}", "Returned", "to store", "normal"),
+        ("box", f"{_ss['1 PH']['pending'] + _ss['3 PH']['pending']:,}", "Pending", "stock", "normal"),
+    ])
+    stock_tbl = pd.DataFrame([
+        {"Type": t, "Received": v["received"], "Installed": v["installed"],
+         "Returned": v["returned"], "Pending": v["pending"]} for t, v in _ss.items()])
+    st.dataframe(stock_tbl, use_container_width=True, hide_index=True, height=dataframe_height(len(stock_tbl)))
 
-    r_1ph = r_3ph = u_1ph = u_3ph = 0
-    if not df_inv_t.empty and has_col(df_inv_t, "type", "qty"):
-        r_1ph = int(safe_numeric_col(df_inv_t[df_inv_t["type"] == "1 PH"], "qty").sum())
-        r_3ph = int(safe_numeric_col(df_inv_t[df_inv_t["type"] == "3 PH"], "qty").sum())
-    if not df_inst_s.empty and has_col(df_inst_s, "qty_1ph", "qty_3ph"):
-        u_1ph = int(safe_numeric_col(df_inst_s, "qty_1ph").sum())
-        u_3ph = int(safe_numeric_col(df_inst_s, "qty_3ph").sum())
+    sub_hdr("pin", "Stock By Location")
+    by_loc = stock_by_location()
+    if by_loc.empty:
+        st.info("No stock recorded yet.")
+    else:
+        st.dataframe(by_loc, use_container_width=True, hide_index=True,
+                     height=dataframe_height(len(by_loc), max_px=420))
+        if (by_loc["Location"] == "Unspecified").any():
+            st.markdown('<div class="warn-box">Stock received before locations were recorded shows as '
+                        '<b>Unspecified</b>. New inward entries carry their location.</div>',
+                        unsafe_allow_html=True)
 
-    sm1, sm2, sm3, sm4 = st.columns(4)
-    sm1.metric("1PH Received", r_1ph)
-    sm2.metric("3PH Received", r_3ph)
-    sm3.metric("1PH Pending Stock", max(r_1ph - u_1ph, 0))
-    sm4.metric("3PH Pending Stock", max(r_3ph - u_3ph, 0))
+    _ret_log = load_returns()
+    if not _ret_log.empty:
+        with st.expander(f"Returns log ({len(_ret_log)})"):
+            st.dataframe(_ret_log.rename(columns={
+                "date": "Date", "type": "Type", "qty": "Qty", "location": "Location",
+                "dc_no": "DC No.", "remarks": "Remarks"}).iloc[::-1],
+                use_container_width=True, hide_index=True, height=dataframe_height(len(_ret_log), max_px=360))
 
     sec_hdr("list", "Inventory Log")
     if df_inv_t.empty:
