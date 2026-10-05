@@ -16,7 +16,7 @@ Google Sheet worksheets required (create these tabs in your Sheet, header row on
 the app creates and appends data automatically):
   Installations       - date, tech_name, installer_id, location, qty_1ph, qty_3ph
   Inventory            - date, type, qty, mrn, make, location
-  Technicians           - name, phone, aadhar, is_active, login_id, supervisor
+  Technicians           - name, phone, aadhar, is_active, login_id, supervisor, site
   Locations             - location_name
   Supervisors           - supervisor_id, name, phone, is_active
   Settings              - key, value   (holds monthly_install_target)
@@ -242,6 +242,17 @@ INCENTIVE_TIER_SLABS_1PH = [
 
 
 def calculate_1ph_incentive_billing(total_installs: int) -> dict:
+    """1PH billing for a month."""
+    return calculate_billing(total_installs, INCENTIVE_UNIT_RATE_1PH, INCENTIVE_FLAT_ADDON_1PH)
+
+
+def calculate_3ph_billing(total_installs: int) -> dict:
+    """3PH billing for a month: its own unit rate and survey, through the SAME
+    tier slabs as 1PH, counted on the 3PH installs alone."""
+    return calculate_billing(total_installs, RATE_3PH_NEW, SURVEY_3PH)
+
+
+def calculate_billing(total_installs: int, unit_rate: float, addon: float) -> dict:
     """Replicates the '1Ph Incentive Tier Calculator' workbook's formula
     exactly: Installs_in_slab = MAX(0, MIN(total,To) - MIN(total,From-1)),
     Slab Incentive = Installs_in_slab x Rate, summed across all slabs.
@@ -255,8 +266,8 @@ def calculate_1ph_incentive_billing(total_installs: int) -> dict:
         slab_amount = installs_in_slab * rate
         tier_incentive += slab_amount
         slab_breakdown.append({"From": lo, "To": hi if hi < 9_999_999 else "∞", "Rate (Rs.)": rate, "Installs": installs_in_slab, "Amount (Rs.)": slab_amount})
-    base_cost = total_installs * INCENTIVE_UNIT_RATE_1PH
-    flat_addon = total_installs * INCENTIVE_FLAT_ADDON_1PH
+    base_cost = total_installs * unit_rate
+    flat_addon = total_installs * addon
     total_cost = base_cost + tier_incentive + flat_addon
     return {
         "base_cost": base_cost, "tier_incentive": tier_incentive, "flat_addon": flat_addon,
@@ -2665,6 +2676,12 @@ def target_for_month(mkey: str) -> int:
     return int(get_setting(f"monthly_install_target:{mkey}", MONTHLY_TARGET))
 
 
+def site_target_for(site: str, mkey: str):
+    """A site's own target for a month, or None if none has been set."""
+    v = get_setting(f"site_target:{site}:{mkey}", 0)
+    return int(v) if v else None
+
+
 def months_with_targets() -> dict:
     """{month -> target} for every month given its own target."""
     df = get_data("Settings")
@@ -2693,7 +2710,11 @@ WORK_DAY_END = max(WORK_DAY_START, min(31, int(get_setting("work_day_end", DEFAU
 #              1PH and 3PH have separate rates, since 3PH work is often paid
 #              differently; leave the 3PH rate at 0 if it isn't.
 EXPENSE_COLS = ["expense_id", "month", "cost_type", "category", "item", "vehicle_reg",
-                "amount", "rate_1ph", "rate_3ph", "recurring"]
+                "amount", "rate_1ph", "rate_3ph", "recurring", "site"]
+# A fixed cost belongs to one site (a Section), or is shared. Shared costs are
+# split equally across the sites active that month. Expenses entered before
+# sites existed have no site and are treated as shared.
+SHARED_SITE = "Shared"
 VEHICLE_COLS = ["reg_no", "description", "is_active"]
 
 # ── Stock: received, installed, returned ───────────────────────────────────
@@ -3010,6 +3031,10 @@ def render_daily_calendar(mkey: str):
 # tab) and leaves every formula in place, so it still recalculates when you
 # edit it in Excel.
 INCENTIVE_OLD_UNIT_RATE_1PH = 150.0   # pre-hike rate, for the profit split
+# 3PH: unit rate + survey, no tier slabs.
+RATE_3PH_NEW = 200.0
+RATE_3PH_OLD = 170.0
+SURVEY_3PH = 15.0
 RETENTION_PCT = 0.15                  # held 90 days on the old base amount
 GST_PCT = 0.09
 PRIMARY_SPLIT = 0.50                  # Sandeep's share of the Sandeep+Raghu pool
@@ -3029,18 +3054,38 @@ def month_installs_1ph(mkey: str) -> int:
     return int((d["meter_type"].apply(classify_meter_type) == "1PH").sum())
 
 
+def month_installs_3ph(mkey: str) -> int:
+    """3PH installs for a calendar month, from the install log."""
+    df = get_data("UploadedInstallLog")
+    if df.empty or not has_col(df, "date", "meter_type"):
+        return 0
+    d = df[pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m") == mkey]
+    return int((d["meter_type"].apply(classify_meter_type) == "3PH").sum()) if not d.empty else 0
+
+
 def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: float,
                            new_rate: float, survey: float, retention_pct: float,
-                           gst_pct: float, split: float) -> dict:
+                           gst_pct: float, split: float, installs_3ph: int = 0,
+                           old_rate_3ph: float = None, new_rate_3ph: float = None,
+                           survey_3ph: float = None) -> dict:
     """The Profit Sharing sheet's arithmetic, in Python, so the app can show
-    the same figures the downloaded workbook will compute."""
-    old_base_revenue = (old_rate + survey) * installs
-    expense_total = cost_per_install * installs
+    the same figures the downloaded workbook will compute.
+
+    1PH and 3PH each contribute their own old-rate revenue, price hike and
+    tier incentive (same slabs, on each type's own count). The expense per
+    install applies to ALL installs, so the month's full cost is charged."""
+    old3 = RATE_3PH_OLD if old_rate_3ph is None else old_rate_3ph
+    new3 = RATE_3PH_NEW if new_rate_3ph is None else new_rate_3ph
+    sv3 = SURVEY_3PH if survey_3ph is None else survey_3ph
+    n3 = installs_3ph
+    old_base_revenue = (old_rate + survey) * installs + (old3 + sv3) * n3
+    expense_total = cost_per_install * (installs + n3)
     base_profit = old_base_revenue - expense_total
     retention = retention_pct * old_base_revenue
     gst_old = gst_pct * old_base_revenue
-    price_hike = (new_rate - old_rate) * installs
-    tier_incentive = calculate_1ph_incentive_billing(installs)["tier_incentive"]
+    price_hike = (new_rate - old_rate) * installs + (new3 - old3) * n3
+    tier_incentive = (calculate_1ph_incentive_billing(installs)["tier_incentive"]
+                      + calculate_3ph_billing(n3)["tier_incentive"])
     additional = price_hike + tier_incentive
     gst_additional = gst_pct * additional
 
@@ -3073,7 +3118,7 @@ def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: flo
 
 def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
                              old_rate: float, retention_pct: float, gst_pct: float,
-                             split: float) -> bytes:
+                             split: float, installs_3ph: int = 0) -> bytes:
     """Fill the approved template's INPUT cells and hand back the workbook.
     Formulas are untouched, so Excel recalculates everything on open."""
     wb = openpyxl.load_workbook(io.BytesIO(base64.b64decode(INCENTIVE_TEMPLATE_B64)))
@@ -3086,9 +3131,46 @@ def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
     calc["E7"] = installs
     calc["A3"] = f"Month: {month_label(mkey)}  |  1PH installs from the install log: {installs:,}"
 
+    # ── 3PH: its own calculator sheet (same layout, same slabs) ──────────
+    calc3 = wb.copy_worksheet(calc)
+    calc3.title = "3Ph Incentive Calc"
+    calc3["B5"] = RATE_3PH_NEW
+    calc3["B6"] = SURVEY_3PH
+    calc3["B7"] = installs_3ph
+    calc3["E5"] = RATE_3PH_OLD
+    calc3["E6"] = SURVEY_3PH
+    calc3["E7"] = installs_3ph
+    for ref in ("A1", "A5"):
+        if isinstance(calc3[ref].value, str):
+            calc3[ref] = calc3[ref].value.replace("1Ph", "3Ph").replace("1PH", "3PH")
+    calc3["A3"] = f"Month: {month_label(mkey)}  |  3PH installs from the install log: {installs_3ph:,}"
+
     ps = wb["Profit Sharing"]
+    # 3PH inputs beside the 1PH ones (E5:E9 were empty), linked to its sheet.
+    ps["B5"] = "1PH Value"
+    ps["E5"] = "3PH Value"
+    ps["E6"] = "='3Ph Incentive Calc'!$B$7"
+    ps["E7"] = "='3Ph Incentive Calc'!$E$5"
+    ps["E8"] = "='3Ph Incentive Calc'!$B$5"
+    ps["E9"] = "='3Ph Incentive Calc'!$B$6"
+    for r in range(5, 10):
+        ps.cell(row=r, column=5)._style = ps.cell(row=r, column=2)._style
+    # The four formulas that carry install-driven amounts now add the 3PH
+    # term. Everything below them — base profit, retention, GST, the
+    # partner split — follows on its own.
+    ps["C17"] = "=(B7+B9)*B6+(E7+E9)*E6"
+    ps["B17"] = "1PH (old rate + survey) x installs + 3PH (old rate + survey) x installs"
+    ps["C18"] = "=B10*(B6+E6)"
+    ps["B18"] = "Expense/install x all installs (1PH + 3PH)"
+    ps["C22"] = "=(B8-B7)*B6+(E8-E7)*E6"
+    ps["B22"] = "1PH (new - old) x installs + 3PH (new - old) x installs"
+    ps["C23"] = "='1Ph Incentive Calc'!$F$19+'3Ph Incentive Calc'!$F$19"
+    ps["B23"] = "1PH tier incentive + 3PH tier incentive"
+    if isinstance(ps["A11"].value, str):
+        ps["A11"] = "Retention % (on the old base amount, 1PH + 3PH)"
+
     ps["B10"] = round(float(cost_per_install), 2)  # <- from the Expenses tab
-    ps["C10"] = f"From the Expenses tab — {month_label(mkey)} total cost / install"
+    ps["C10"] = f"From the Expenses tab — {month_label(mkey)} total cost / install (1PH + 3PH)"
     ps["B11"] = retention_pct
     ps["B12"] = gst_pct
     ps["B13"] = split
@@ -3322,10 +3404,12 @@ def expense_summary(df_exp: pd.DataFrame, mkey: str, n_1ph: int, n_3ph: int) -> 
 
     fixed_total = float(fixed["amount"].sum())
     variable_total = float((var["rate_1ph"] * n_1ph + var["rate_3ph"] * n_3ph).sum())
-    # Variable cost of one more install, used for the target projection and the
-    # slider. 1PH rate only, as agreed — change to a mix here if 3PH is ever
-    # to be projected too.
-    variable_rate = float(var["rate_1ph"].sum())
+    # Variable cost of one more install, for the target projection and the
+    # slider: the 1PH and 3PH rates weighted by this month's actual mix, so
+    # 3PH work is costed at its own rate. Before any installs, the 1PH rate.
+    _r1, _r3 = float(var["rate_1ph"].sum()), float(var["rate_3ph"].sum())
+    _n = n_1ph + n_3ph
+    variable_rate = ((_r1 * n_1ph + _r3 * n_3ph) / _n) if _n else _r1
     total_cost = fixed_total + variable_total
     n = n_1ph + n_3ph
     # None (shown as "—") when there are no installs to divide by, or no costs
@@ -3338,6 +3422,102 @@ def expense_summary(df_exp: pd.DataFrame, mkey: str, n_1ph: int, n_3ph: int) -> 
         "fixed_per_install": per(fixed_total), "variable_per_install": per(variable_total),
         "total_per_install": per(total_cost), "by_category": by_cat,
         "has_entries": not rows.empty,
+    }
+
+
+def month_site_installs(mkey: str) -> pd.DataFrame:
+    """1PH / 3PH installs per site (Section) for a month, from Installations —
+    the same figures the Dashboard reports."""
+    df = get_data("Installations")
+    cols = ["site", "n1", "n3"]
+    if df.empty or not has_col(df, "date", "location", "qty_1ph", "qty_3ph"):
+        return pd.DataFrame(columns=cols)
+    d = df[pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m") == mkey].copy()
+    if d.empty:
+        return pd.DataFrame(columns=cols)
+    d["site"] = d["location"].astype(str).str.strip().replace("", "Unspecified")
+    d["n1"] = safe_numeric_col(d, "qty_1ph")
+    d["n3"] = safe_numeric_col(d, "qty_3ph")
+    out = d.groupby("site")[["n1", "n3"]].sum().reset_index()
+    out["n1"], out["n3"] = out["n1"].astype(int), out["n3"].astype(int)
+    return out
+
+
+def site_cost_breakdown(df_exp: pd.DataFrame, mkey: str) -> dict:
+    """Cost per site and per meter type for a month.
+
+    For each site:
+      fixed  = its own fixed costs + an equal share of the shared fixed costs
+               (shared across sites with installs that month)
+      that fixed cost is split between 1PH and 3PH by BILLING VALUE — 1PH at
+      the month's blended billed rate, 3PH at unit rate + survey
+      variable = the month's 1PH / 3PH variable rates x that site's installs
+    """
+    inst = month_site_installs(mkey)
+    rows = df_exp[df_exp["month"].astype(str) == mkey].copy() if not df_exp.empty else df_exp.copy()
+    if "site" not in rows.columns:
+        rows["site"] = ""
+    rows["site"] = rows["site"].astype(str).str.strip().replace({"": SHARED_SITE, "nan": SHARED_SITE})
+    fixed = rows[rows["cost_type"] == "Fixed"]
+    var = rows[rows["cost_type"] == "Variable"]
+    rate1, rate3 = float(var["rate_1ph"].sum()), float(var["rate_3ph"].sum())
+
+    n1_all = int(inst["n1"].sum()) if not inst.empty else 0
+    n3_all = int(inst["n3"].sum()) if not inst.empty else 0
+    # Per-install billed value at each type's blended rate for the month. The
+    # slabs apply to the month's total for each type, so a per-site slab
+    # calculation would be wrong.
+    v1 = (calculate_1ph_incentive_billing(n1_all)["total_cost"] / n1_all) if n1_all \
+        else (INCENTIVE_UNIT_RATE_1PH + INCENTIVE_FLAT_ADDON_1PH)
+    v3 = (calculate_3ph_billing(n3_all)["total_cost"] / n3_all) if n3_all \
+        else (RATE_3PH_NEW + SURVEY_3PH)
+
+    active = [r["site"] for _, r in inst.iterrows() if (r["n1"] + r["n3"]) > 0]
+    shared_fixed = float(fixed.loc[fixed["site"] == SHARED_SITE, "amount"].sum())
+    shared_each = (shared_fixed / len(active)) if active else 0.0
+
+    sites = sorted(set(active) | set(fixed.loc[fixed["site"] != SHARED_SITE, "site"]))
+    per_site = []
+    for site in sites:
+        r = inst[inst["site"] == site]
+        n1 = int(r["n1"].sum()) if not r.empty else 0
+        n3 = int(r["n3"].sum()) if not r.empty else 0
+        own = float(fixed.loc[fixed["site"] == site, "amount"].sum())
+        fixed_site = own + (shared_each if site in active else 0.0)
+        b1, b3 = n1 * v1, n3 * v3
+        p1 = (b1 / (b1 + b3)) if (b1 + b3) else (1.0 if n1 else 0.0)
+        p3 = 1.0 - p1 if (b1 + b3) else (1.0 if n3 and not n1 else 0.0)
+        f1, f3 = fixed_site * p1, fixed_site * p3
+        c1, c3 = f1 + rate1 * n1, f3 + rate3 * n3
+        # A site with costs but no installs this month: nothing to split by
+        # type, but the cost is still real and must stay in the site total.
+        site_cost = (c1 + c3) if (n1 + n3) else fixed_site
+        per_site.append({
+            "site": site, "n1": n1, "n3": n3, "own_fixed": own,
+            "shared_fixed": fixed_site - own, "fixed": fixed_site,
+            "bill1": b1, "bill3": b3, "pct1": p1, "pct3": p3,
+            "cost1": c1, "cost3": c3, "cost": site_cost,
+            "cpi1": (c1 / n1) if n1 else None, "cpi3": (c3 / n3) if n3 else None,
+            "cpi": ((c1 + c3) / (n1 + n3)) if (n1 + n3) else None,
+        })
+    tot_n1 = sum(x["n1"] for x in per_site)
+    tot_n3 = sum(x["n3"] for x in per_site)
+    tot_c1 = sum(x["cost1"] for x in per_site)
+    tot_c3 = sum(x["cost3"] for x in per_site)
+    # A site's own costs with no installs that month are real, but have no
+    # installs to land on. Kept in the month total and named, not hidden.
+    stranded = sum(x["fixed"] for x in per_site if (x["n1"] + x["n3"]) == 0)
+    # Shared costs with no active site at all (no installs anywhere yet).
+    unallocated_shared = shared_fixed if not active else 0.0
+    total = sum(x["cost"] for x in per_site) + unallocated_shared
+    return {
+        "sites": per_site, "active_sites": active, "shared_fixed": shared_fixed,
+        "shared_each": shared_each, "rate1": rate1, "rate3": rate3, "v1": v1, "v3": v3,
+        "n1": tot_n1, "n3": tot_n3, "cost1": tot_c1, "cost3": tot_c3, "total": total,
+        "stranded": stranded, "unallocated_shared": unallocated_shared,
+        "cpi1": (tot_c1 / tot_n1) if tot_n1 else None,
+        "cpi3": (tot_c3 / tot_n3) if tot_n3 else None,
+        "cpi": (total / (tot_n1 + tot_n3)) if (tot_n1 + tot_n3) else None,
     }
 
 
@@ -3418,6 +3598,8 @@ def apply_expense_edits(df_exp: pd.DataFrame, edited: pd.DataFrame) -> pd.DataFr
         out.at[eid, "rate_1ph"] = float(r["Rate 1PH"] or 0)
         out.at[eid, "rate_3ph"] = float(r["Rate 3PH"] or 0)
         out.at[eid, "recurring"] = "1" if r["Repeats"] else "0"
+        if "Site" in r.index:
+            out.at[eid, "site"] = str(r["Site"] or SHARED_SITE)
     return out.reset_index()[EXPENSE_COLS]
 
 
@@ -4515,43 +4697,71 @@ with tab_dash:
             ("gauge", f"{tgt['per_day_needed']:.0f}", "Need", "per day",
              "normal" if tgt["on_track"] else "danger"),
         ])
-        sub_hdr("rupee", "This Month — 1PH Billing")
+        sub_hdr("rupee", "This Month — Billing")
         month_1ph_count = m_1ph
-        billing = calculate_1ph_incentive_billing(month_1ph_count)
-        # Running cost per install for the same month, from the Expenses tab —
-        # beside the billed rate so the two can be compared at a glance.
+        billing = calculate_1ph_incentive_billing(m_1ph)
+        billing3 = calculate_3ph_billing(m_3ph)
+        # Cost per install by type, from the Expenses tab's site model — beside
+        # the billed rate so the two can be compared at a glance.
+        cost_model = site_cost_breakdown(load_expenses(), month_key(today))
         month_cost = expense_summary(load_expenses(), month_key(today), m_1ph, m_3ph)
-        tb1, tb2, tb3 = st.columns(3)
-        tb1.metric("Total Billing (Rs.)", f"{billing['total_cost']:,.0f}")
-        tb2.metric("Blended Cost / Install (Rs.)", f"{billing['blended_per_install']:,.2f}" if month_1ph_count > 0 else "—")
-        tb3.metric("Total Cost / Install (Rs.)", fmt_rs(month_cost["total_per_install"], 2),
-                   help="This month's fixed + variable costs from the Expenses tab, divided by all installs this month (1PH + 3PH).")
+        bill_tbl = pd.DataFrame([
+            {"Type": "1PH", "Installs": m_1ph, "Billing (Rs.)": round(billing["total_cost"]),
+             "Billed / Install": fmt_rs(billing["blended_per_install"] if m_1ph else None, 2),
+             "Cost / Install": fmt_rs(cost_model["cpi1"], 2)},
+            {"Type": "3PH", "Installs": m_3ph, "Billing (Rs.)": round(billing3["total_cost"]),
+             "Billed / Install": fmt_rs(billing3["blended_per_install"] if m_3ph else None, 2),
+             "Cost / Install": fmt_rs(cost_model["cpi3"], 2)},
+            {"Type": "TOTAL", "Installs": m_1ph + m_3ph,
+             "Billing (Rs.)": round(billing["total_cost"] + billing3["total_cost"]),
+             "Billed / Install": fmt_rs(((billing["total_cost"] + billing3["total_cost"]) / (m_1ph + m_3ph))
+                                        if (m_1ph + m_3ph) else None, 2),
+             "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)},
+        ])
+        st.dataframe(bill_tbl, use_container_width=True, hide_index=True, height=dataframe_height(len(bill_tbl)))
         with st.expander("View slab breakdown"):
-            slab_df = pd.DataFrame(billing["slabs"])
-            if not slab_df.empty:
-                st.dataframe(slab_df, use_container_width=True, hide_index=True)
-            cb1, cb2, cb3 = st.columns(3)
-            cb1.metric("Base Cost (Rs.)", f"{billing['base_cost']:,.0f}")
-            cb2.metric("Tiered Incentive (Rs.)", f"{billing['tier_incentive']:,.0f}")
-            cb3.metric("Survey (Rs.)", f"{billing['flat_addon']:,.0f}")
+            for _lbl, _b in (("1PH", billing), ("3PH", billing3)):
+                st.markdown(f"**{_lbl}**")
+                slab_df = pd.DataFrame(_b["slabs"])
+                if not slab_df.empty:
+                    st.dataframe(slab_df, use_container_width=True, hide_index=True)
+                cb1, cb2, cb3 = st.columns(3)
+                cb1.metric(f"{_lbl} Base (Rs.)", f"{_b['base_cost']:,.0f}")
+                cb2.metric(f"{_lbl} Tiered Incentive (Rs.)", f"{_b['tier_incentive']:,.0f}")
+                cb3.metric(f"{_lbl} Survey (Rs.)", f"{_b['flat_addon']:,.0f}")
 
-        sub_hdr("pin", "This Month, By Location")
+        sub_hdr("pin", "This Month, By Site")
         if this_month.empty:
             st.info("No installs recorded this month yet.")
         else:
+            mk = month_key(today)
+            by_cost = {x["site"]: x for x in cost_model["sites"]}
+            v1, v3 = cost_model["v1"], cost_model["v3"]
             loc_month = this_month.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
-            loc_month["Total"] = loc_month["qty_1ph"] + loc_month["qty_3ph"]
-            loc_month.columns = ["Location", "1PH", "3PH", "Total"]
-            for _qc in ["1PH", "3PH", "Total"]:
-                loc_month[_qc] = loc_month[_qc].astype(int)
-            loc_month = loc_month.sort_values("Total", ascending=False)
-            render_count_cards(
-                [(r["Location"], int(r["Total"])) for _, r in loc_month.iterrows()],
-                columns=3, total_label="Month total",
-            )
-            with st.expander("View as table (1PH / 3PH split)"):
-                st.dataframe(loc_month, use_container_width=True, hide_index=True)
-                download_image_button(loc_month, "This_Month_By_Location.png", key="dl_img_loc_month", title="This Month, By Location")
+            site_rows = []
+            for _, r in loc_month.iterrows():
+                site, n1, n3 = str(r["location"]), int(r["qty_1ph"]), int(r["qty_3ph"])
+                tg = site_target_for(site, mk)
+                c = by_cost.get(site, {})
+                site_rows.append({
+                    "Site": site, "1PH": n1, "3PH": n3, "Total": n1 + n3,
+                    "Target": f"{tg:,}" if tg else "—",
+                    "% Of Target": f"{(n1 + n3) / tg * 100:.0f}%" if tg else "—",
+                    # Billing at the month's blended rate per type, so the
+                    # site figures add up to the billing table above.
+                    "Billing (Rs.)": round(n1 * v1 + n3 * v3),
+                    "Cost / Install": fmt_rs(c.get("cpi"), 2),
+                })
+            site_df = pd.DataFrame(site_rows).sort_values("Total", ascending=False)
+            total_row = {"Site": "TOTAL", "1PH": int(site_df["1PH"].sum()), "3PH": int(site_df["3PH"].sum()),
+                         "Total": int(site_df["Total"].sum()), "Target": f"{month_target:,}",
+                         "% Of Target": f"{site_df['Total'].sum() / month_target * 100:.0f}%" if month_target else "—",
+                         "Billing (Rs.)": int(site_df["Billing (Rs.)"].sum()),
+                         "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)}
+            site_df = pd.concat([site_df, pd.DataFrame([total_row])], ignore_index=True)
+            st.dataframe(site_df, use_container_width=True, hide_index=True, height=dataframe_height(len(site_df)))
+            download_image_button(site_df, "This_Month_By_Site.png", key="dl_img_loc_month",
+                                  title=f"This Month, By Site — {month_label(mk)}")
 
     st.divider()
     sec_hdr("box", "Live Inventory Stock")
@@ -4581,6 +4791,11 @@ with tab_dash:
         ("alert" if pending_3ph < 0 else "bolt", f"{pending_3ph:,}", "Pend", "3PH",
          "danger" if pending_3ph < 0 else "normal"),
     ])
+    _dash_loc = stock_by_location()
+    if not _dash_loc.empty:
+        with st.expander("Stock by site"):
+            st.dataframe(_dash_loc, use_container_width=True, hide_index=True,
+                         height=dataframe_height(len(_dash_loc), max_px=420))
     if pending_1ph < 0 or pending_3ph < 0:
         deficits = [t for t, v in (("1PH", pending_1ph), ("3PH", pending_3ph)) if v < 0]
         st.markdown(f'<div class="danger-box">More {" and ".join(deficits)} meters installed than received — check Inventory entries.</div>', unsafe_allow_html=True)
@@ -4967,22 +5182,38 @@ with tab_analytics:
         picker_slot = st.container()
 
         with picker_slot:
-            vc1, vc2 = st.columns(2)
+            vc1, vc2, vc3 = st.columns(3)
             with vc1:
                 sel_date = st.selectbox("Viewing date", avail_dates, index=0)
             day_df = df_araw[df_araw["date"] == sel_date].copy()
             day_df["hour_int"] = pd.to_numeric(day_df["hour"], errors="coerce")
             day_df["supervisor"] = day_df["installer_id"].apply(supervisor_of)
+            # Site = the Section on each uploaded record, so a technician helping
+            # another site is counted where the work was actually done.
+            day_df["site"] = (day_df["location"].astype(str).str.strip().replace("", "Unspecified")
+                              if "location" in day_df.columns else "Unspecified")
+            day_df["phase"] = (day_df["meter_type"].apply(classify_meter_type)
+                               if "meter_type" in day_df.columns else "")
 
-            # Supervisor scope: every figure below (glance, forecast, hourly,
-            # half-day, pace) reflects the selection, so a supervisor can read the
-            # tab as if it were only their own team.
-            sups_today = sorted(day_df["supervisor"].unique())
-            with vc2:
-                sel_supervisor = st.selectbox("Supervisor", ["All supervisors"] + sups_today, key="analytics_supervisor")
-            # Unscoped copy for the Installs push: the supervisor filter is a VIEW
-            # choice, and must never decide which installs get recorded.
+            # Unscoped copy for the Installs push, taken BEFORE any filter: the
+            # site and supervisor filters are VIEW choices and must never decide
+            # which installs get recorded.
             day_df_all = day_df.copy()
+
+            # Site first, then the supervisors who worked at that site, so a
+            # supervisor with no installs there can't be picked.
+            sites_today = sorted(day_df["site"].unique())
+            with vc2:
+                sel_site = st.selectbox("Site", ["All sites"] + sites_today, key="analytics_site")
+            if sel_site != "All sites":
+                day_df = day_df[day_df["site"] == sel_site]
+
+            sups_today = sorted(day_df["supervisor"].unique())
+            with vc3:
+                # Keyed on the site: the list changes with it, and a supervisor
+                # chosen for one site may not exist in another.
+                sel_supervisor = st.selectbox("Supervisor", ["All supervisors"] + sups_today,
+                                              key=f"analytics_supervisor_{sel_site}")
             if sel_supervisor != "All supervisors":
                 day_df = day_df[day_df["supervisor"] == sel_supervisor]
 
@@ -5014,6 +5245,12 @@ with tab_analytics:
                     render_colored_metric("Forecasted Total", forecast_total, GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
                 else:
                     st.metric("Forecasted Total", "—")
+            _p = day_df["phase"] if "phase" in day_df.columns else pd.Series(dtype=str)
+            render_stat_tiles([
+                ("bolt", f"{int((_p == '1PH').sum()):,}", "1PH", "installs", "normal"),
+                ("bolt", f"{int((_p == '3PH').sum()):,}", "3PH", "installs", "normal"),
+                ("pin", f"{day_df['site'].nunique() if 'site' in day_df.columns else 0}", "Sites", "working", "normal"),
+            ])
             if forecast_total is not None:
                 extended = effective_end[:5] != day_end_choice
                 note = f" (extended past {day_end_choice} — installs still coming in)" if extended else ""
@@ -5025,7 +5262,10 @@ with tab_analytics:
         # One header for every Analytics image export — the same figures as the
         # glance cards above, including the forecast — so all shared images
         # carry an identical, self-explanatory header.
-        _scope_txt = "All supervisors" if sel_supervisor == "All supervisors" else f"Supervisor: {sel_supervisor}"
+        _scope_bits = [("All sites" if sel_site == "All sites" else f"Site: {sel_site}")]
+        if sel_supervisor != "All supervisors":
+            _scope_bits.append(f"Supervisor: {sel_supervisor}")
+        _scope_txt = "   |   ".join(_scope_bits)
         analytics_img_meta = (
             f"{_scope_txt}   |   Last install: {str(max(day_df['time']))[:5]}\n"
             f"Total: {len(day_df)}   |   Active Installers: {len(installers)}   |   "
@@ -5102,18 +5342,25 @@ with tab_analytics:
                 color_grid=grid, title=title,
             )
 
-        if sel_supervisor == "All supervisors" and len(sups_today) > 1:
-            # Combined first for the overall picture, then a separate table per
-            # supervisor, each shareable as its own image.
-            sub_hdr("chart", "All Teams Combined")
-            _render_hourly_block(day_df, "All supervisors", "all")
+        if sel_site == "All sites" and sel_supervisor == "All supervisors" and day_df["site"].nunique() > 1:
+            # Each site is its own team: combined first, then a table per site,
+            # each shareable as its own image.
+            sub_hdr("chart", "All Sites Combined")
+            _render_hourly_block(day_df, "All sites", "all")
+            for i, site in enumerate(day_df.groupby("site").size().sort_values(ascending=False).index):
+                site_df = day_df[day_df["site"] == site]
+                sub_hdr("pin", f"{site} — {len(site_df)} installs")
+                _render_hourly_block(site_df, f"Site: {site}", f"site{i}")
+        elif sel_supervisor == "All supervisors" and len(sups_today) > 1:
+            # One site, several supervisors: split by supervisor within it.
+            sub_hdr("chart", f"{sel_site} — All Teams")
+            _render_hourly_block(day_df, f"Site: {sel_site}", "all")
             for i, sup in enumerate(day_df.groupby("supervisor").size().sort_values(ascending=False).index):
                 sup_df = day_df[day_df["supervisor"] == sup]
                 sub_hdr("users", f"{sup} — {len(sup_df)} installs")
-                _render_hourly_block(sup_df, f"Supervisor: {sup}", f"sup{i}")
+                _render_hourly_block(sup_df, f"Site: {sel_site}   |   Supervisor: {sup}", f"sup{i}")
         else:
-            scope_label = "" if sel_supervisor == "All supervisors" else f"Supervisor: {sel_supervisor}"
-            _render_hourly_block(day_df, scope_label, "single")
+            _render_hourly_block(day_df, _scope_txt, "single")
 
 
         # -- Section-wise summary (combines every section's uploaded file for this date) --
@@ -5121,13 +5368,17 @@ with tab_analytics:
         if has_col(day_df, "location"):
             section_df = day_df.copy()
             section_df["location"] = section_df["location"].replace("", "Unspecified").fillna("Unspecified")
-            section_summary = section_df.groupby("location").size().reset_index(name="Installs")
-            section_summary.columns = ["Section", "Installs"]
-            section_summary = section_summary.sort_values("Installs", ascending=False)
+            section_df["_1"] = (section_df["phase"] == "1PH").astype(int)
+            section_df["_3"] = (section_df["phase"] == "3PH").astype(int)
+            section_summary = section_df.groupby("location").agg(
+                **{"1PH": ("_1", "sum"), "3PH": ("_3", "sum"), "Total": ("_1", "size")}).reset_index()
+            section_summary = section_summary.rename(columns={"location": "Section"}).sort_values("Total", ascending=False)
             render_count_cards(
-                [(r["Section"], int(r["Installs"])) for _, r in section_summary.iterrows()],
-                columns=3, total_label="Total",
+                [(r["Section"], int(r["Total"])) for _, r in section_summary.iterrows()],
+                columns=4, total_label="Total",
             )
+            st.dataframe(section_summary, use_container_width=True, hide_index=True,
+                         height=dataframe_height(len(section_summary)))
         else:
             st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
 
@@ -5497,6 +5748,33 @@ with tab_exp:
 
         render_cost_slider(summ["fixed_total"], summ["variable_rate"], summ["installs"], sel_month)
 
+    # -- By site, and per meter type -----------------------------------------
+    site_cb = site_cost_breakdown(df_exp_all, sel_month)
+    if site_cb["sites"]:
+        render_stat_tiles([
+            ("bolt", fmt_rs(site_cb["cpi1"], 1), "Per 1PH", "Rs./install", "normal"),
+            ("bolt", fmt_rs(site_cb["cpi3"], 1), "Per 3PH", "Rs./install", "normal"),
+            ("users", f"{len(site_cb['active_sites'])}", "Active", "sites", "normal"),
+            ("wallet", fmt_rs(site_cb["shared_each"]), "Shared", "Rs./site", "normal"),
+        ])
+        sub_hdr("pin", "By Site")
+        site_tbl = pd.DataFrame([{
+            "Site": x["site"], "1PH": x["n1"], "3PH": x["n3"],
+            "Own Fixed": round(x["own_fixed"]), "Shared": round(x["shared_fixed"]),
+            "1PH Billing %": f"{x['pct1'] * 100:.1f}%" if (x["n1"] + x["n3"]) else "—",
+            "Cost / 1PH": fmt_rs(x["cpi1"], 2), "Cost / 3PH": fmt_rs(x["cpi3"], 2),
+            "Cost / Install": fmt_rs(x["cpi"], 2), "Site Cost": round(x["cost"]),
+        } for x in site_cb["sites"]])
+        st.dataframe(site_tbl, use_container_width=True, hide_index=True,
+                     height=dataframe_height(len(site_tbl)))
+        if site_cb["stranded"]:
+            st.markdown(f'<div class="warn-box">Rs. {site_cb["stranded"]:,.0f} of costs belong to site(s) '
+                        f'with no installs this month. They are counted in the month\'s total but have no '
+                        f'installs to fall on.</div>', unsafe_allow_html=True)
+        if site_cb["unallocated_shared"]:
+            st.markdown(f'<div class="warn-box">Shared costs of Rs. {site_cb["unallocated_shared"]:,.0f} '
+                        f'are waiting — no site has installs this month yet.</div>', unsafe_allow_html=True)
+
     if summ["by_category"]:
         sub_hdr("chart", "By Category")
         cat_df = pd.DataFrame(summ["by_category"], columns=["Type", "Category", "Month (Rs.)"])
@@ -5540,6 +5818,11 @@ with tab_exp:
                 exp_reg = st.selectbox("Vehicle", ["-- Select --"] + active_regs, key=f"exp_reg_{ev}")
             else:
                 st.write("")
+        # Every fixed cost belongs to one site, or is shared equally across
+        # the sites with installs that month.
+        _site_opts = list(active_locs) + [SHARED_SITE]
+        exp_site = st.selectbox("Site", _site_opts, index=len(_site_opts) - 1, key=f"exp_site_{ev}",
+                                help="Shared costs are split equally across the sites with installs that month.")
         exp_item = st.text_input("Description", key=f"exp_item_{ev}", placeholder=EXPENSE_ITEM_HINT.get(exp_cat, ""))
         ec3, ec4 = st.columns([2, 1], vertical_alignment="bottom")
         with ec3:
@@ -5559,7 +5842,8 @@ with tab_exp:
                 new_row = {"expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Fixed",
                            "category": exp_cat, "item": exp_item.strip(),
                            "vehicle_reg": exp_reg if exp_cat in EXPENSE_VEHICLE_CATEGORIES else "",
-                           "amount": exp_amt, "rate_1ph": 0, "rate_3ph": 0, "recurring": "1" if exp_rec else "0"}
+                           "amount": exp_amt, "rate_1ph": 0, "rate_3ph": 0, "recurring": "1" if exp_rec else "0",
+                           "site": exp_site}
                 if safe_update("Expenses", pd.concat([df_exp_all[EXPENSE_COLS], pd.DataFrame([new_row])], ignore_index=True)):
                     st.session_state["exp_form_version"] += 1
                     st.success(f"✅ Added {exp_cat}: Rs. {exp_amt:,.0f} to {month_label(sel_month)}.")
@@ -5593,7 +5877,7 @@ with tab_exp:
                 df_new = pd.concat([df_new, pd.DataFrame([{
                     "expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Variable",
                     "category": exp_vcat, "item": "", "vehicle_reg": "", "amount": 0,
-                    "rate_1ph": r1, "rate_3ph": r3, "recurring": "1"}])], ignore_index=True)
+                    "rate_1ph": r1, "rate_3ph": r3, "recurring": "1", "site": SHARED_SITE}])], ignore_index=True)
                 if safe_update("Expenses", df_new):
                     st.session_state["exp_form_version"] += 1
                     st.success(f"✅ {exp_vcat} rate saved for {month_label(sel_month)}.")
@@ -5633,9 +5917,10 @@ with tab_exp:
         ed["Repeats"] = ed["recurring"].apply(_truthy)
         ed.insert(0, "Delete", False)
         ed = ed.sort_values(["cost_type", "category"])
-        view = ed[["Delete", "cost_type", "category", "item", "vehicle_reg", "amount", "rate_1ph", "rate_3ph",
+        ed["site"] = ed["site"].astype(str).str.strip().replace({"": SHARED_SITE, "nan": SHARED_SITE})
+        view = ed[["Delete", "cost_type", "site", "category", "item", "vehicle_reg", "amount", "rate_1ph", "rate_3ph",
                    "Repeats", "expense_id"]].rename(columns={
-            "cost_type": "Type", "category": "Category", "item": "Description", "vehicle_reg": "Vehicle",
+            "cost_type": "Type", "site": "Site", "category": "Category", "item": "Description", "vehicle_reg": "Vehicle",
             "amount": "Amount (Rs.)", "rate_1ph": "Rate 1PH", "rate_3ph": "Rate 3PH"})
         edited = st.data_editor(
             view, use_container_width=True, hide_index=True, # Keyed on the sheet's version: after a save the editor starts fresh,
@@ -5643,6 +5928,7 @@ with tab_exp:
             key=f"exp_editor_{sel_month}_{_sheet_version('Expenses')}",
             disabled=["Type", "Category", "Vehicle", "expense_id"],
             column_config={"expense_id": None,
+                           "Site": st.column_config.SelectboxColumn(options=list(active_locs) + [SHARED_SITE]),
                            "Amount (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=100.0, format="%.0f"),
                            "Rate 1PH": st.column_config.NumberColumn(min_value=0.0, step=5.0, format="%.2f"),
                            "Rate 3PH": st.column_config.NumberColumn(min_value=0.0, step=5.0, format="%.2f")},
@@ -5657,11 +5943,12 @@ with tab_exp:
 
     # -- 1PH incentive & profit sharing -------------------------------------
     st.divider()
-    sec_hdr("receipt", "1PH Incentive & Profit Sharing")
+    sec_hdr("receipt", "Incentive & Profit Sharing")
     _n1ph = month_installs_1ph(sel_month)
+    _n3ph = month_installs_3ph(sel_month)
     _cpi = summ["total_per_install"]
-    if _n1ph == 0:
-        st.info(f"No 1PH installs recorded for {month_label(sel_month)} yet.")
+    if (_n1ph + _n3ph) == 0:
+        st.info(f"No installs recorded for {month_label(sel_month)} yet.")
     else:
         if _cpi is None:
             st.markdown('<div class="warn-box">No expenses entered for this month, so the '
@@ -5682,35 +5969,32 @@ with tab_exp:
                                      value=PRIMARY_SPLIT * 100, key="inc_split",
                                      help=f"Of the {PARTNERS[0]} + {PARTNERS[1]} pool; {PARTNERS[1]} gets the rest.") / 100
 
-        # The workbook's revenue side is 1PH only. Charging the whole month's
-        # cost to 1PH keeps the month's total expense whole, which is right
-        # while the work is effectively all 1PH. The pro-rata option is there
-        # for when 3PH volumes start and costs should be split between them.
-        _basis = st.radio(
-            "Expense per install", ["Whole month's cost to 1PH", "Pro rata across all installs (1PH + 3PH)"],
-            horizontal=True, key="inc_expense_basis",
-            help="The workbook multiplies expense/install by 1PH installs. The first option keeps the month's total cost whole; switch to pro rata once 3PH volumes are meaningful.")
-        if _basis.startswith("Whole") and _n1ph:
-            _cpi = (summ["total_cost"] / _n1ph) if summ["has_entries"] else None
+        # 3PH is now part of the workbook's revenue, so the month's full cost is
+        # spread over ALL installs: expense/install x (1PH + 3PH) = the month's
+        # total cost. (The earlier "charge it all to 1PH" choice existed only
+        # because 3PH wasn't in the workbook.)
+        _all = _n1ph + _n3ph
+        _cpi = (summ["total_cost"] / _all) if (summ["has_entries"] and _all) else None
         st.markdown(
             f'<div class="info-box">Expense per install: <b>Rs. {fmt_rs(_cpi, 2)}</b> '
-            f'x {_n1ph:,} 1PH installs = <b>Rs. {fmt_rs((_cpi or 0) * _n1ph)}</b>'
+            f'x {_all:,} installs ({_n1ph:,} 1PH + {_n3ph:,} 3PH) = <b>Rs. {fmt_rs((_cpi or 0) * _all)}</b>'
             f' (month total cost Rs. {fmt_rs(summ["total_cost"])}).</div>', unsafe_allow_html=True)
 
         bill = calculate_1ph_incentive_billing(_n1ph)
+        bill3 = calculate_3ph_billing(_n3ph)
         ps = profit_sharing_summary(_n1ph, _cpi or 0.0, _old_rate, INCENTIVE_UNIT_RATE_1PH,
-                                    INCENTIVE_FLAT_ADDON_1PH, _ret, _gst, _split)
+                                    INCENTIVE_FLAT_ADDON_1PH, _ret, _gst, _split, installs_3ph=_n3ph)
         render_stat_tiles([
-            ("bolt", f"{_n1ph:,}", "1PH", "installs", "normal"),
+            ("bolt", f"{_n1ph:,} / {_n3ph:,}", "1PH / 3PH", "installs", "normal"),
             ("wallet", fmt_rs(_cpi, 1), "Expense", "Rs./install", "normal"),
-            ("rupee", fmt_rs(bill["total_cost"]), "Billing", "Rs.", "normal"),
+            ("rupee", fmt_rs(bill["total_cost"] + bill3["total_cost"]), "Billing", "Rs.", "normal"),
             ("target", fmt_rs(ps["base_profit"] + ps["additional"]), "Profit", "Rs. pool", "normal"),
         ])
 
         sub_hdr("chart", "Pool")
         pool = pd.DataFrame([
             ("Old pricing base revenue", ps["old_base_revenue"]),
-            (f"Total expense ({fmt_rs(_cpi, 2)} x {_n1ph:,})", ps["expense_total"]),
+            (f"Total expense ({fmt_rs(_cpi, 2)} x {_n1ph + _n3ph:,})", ps["expense_total"]),
             ("Base profit (old pricing)", ps["base_profit"]),
             (f"Retention held ({_ret * 100:.0f}%, 90 days)", ps["retention"]),
             (f"GST on old base ({_gst * 100:.0f}%)", ps["gst_old"]),
@@ -5732,7 +6016,8 @@ with tab_exp:
 
         lazy_download_button(
             "📥 Download Excel (Incentive + Profit Sharing)",
-            lambda: build_incentive_workbook(sel_month, _n1ph, _cpi or 0.0, _old_rate, _ret, _gst, _split),
+            lambda: build_incentive_workbook(sel_month, _n1ph, _cpi or 0.0, _old_rate, _ret, _gst, _split,
+                                             installs_3ph=_n3ph),
             f"1Ph_Incentive_Profit_{sel_month}.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "inc_xlsx")
@@ -6520,6 +6805,24 @@ with tab_admin:
                 st.success(f"{month_label(tgt_month)} target set to {int(month_target_in):,}.")
                 st.rerun()
 
+    with st.expander(f"Site targets for {month_label(tgt_month)} (optional)"):
+        _site_vals = {}
+        _sc = st.columns(max(1, min(4, len(active_locs))))
+        for i, _site in enumerate(active_locs):
+            with _sc[i % len(_sc)]:
+                _site_vals[_site] = st.number_input(
+                    _site, min_value=0, step=50, value=int(site_target_for(_site, tgt_month) or 0),
+                    key=f"site_target_{_site}_{tgt_month}")
+        _sum = sum(_site_vals.values())
+        if _sum:
+            st.markdown(f'<div class="info-box">Site targets add up to <b>{_sum:,}</b>'
+                        + (f' — the month target is {int(month_target_in):,}.' if int(month_target_in) != _sum else '.')
+                        + '</div>', unsafe_allow_html=True)
+        if st.button("Save Site Targets", use_container_width=True, key="save_site_targets"):
+            if save_settings({f"site_target:{k}:{tgt_month}": int(v) for k, v in _site_vals.items()}):
+                st.success(f"Site targets saved for {month_label(tgt_month)}.")
+                st.rerun()
+
     _set_targets = months_with_targets()
     if _set_targets:
         _rows = [{"Month": month_label(k), "Target": f"{v:,}",
@@ -6598,6 +6901,9 @@ with tab_admin:
         # Store the stable id, not the name, so renaming a supervisor later
         # doesn't orphan this technician.
         new_t_sup = sup_name_to_id.get(sup_choice, "") if sup_choice != "— none —" else ""
+        new_t_site = st.selectbox("Site", ["— none —"] + list(active_locs), key=f"new_t_site_{tv}",
+                                  help="The site (Section) this technician normally works at.")
+        new_t_site = "" if new_t_site == "— none —" else new_t_site
 
         if st.button("➕ Add To Batch", key="add_tech_batch_btn", type="primary", use_container_width=True):
             if not new_t_name.strip():
@@ -6608,7 +6914,7 @@ with tab_admin:
                 st.session_state["tech_batch"].append({
                     "name": new_t_name.strip(), "phone": new_t_phone.strip(),
                     "aadhar": new_t_aadhar.strip(), "login_id": new_t_login.strip(),
-                    "supervisor": new_t_sup,
+                    "supervisor": new_t_sup, "site": new_t_site,
                 })
                 st.session_state["tech_form_version"] += 1
                 st.rerun()
@@ -6637,7 +6943,7 @@ with tab_admin:
                     if b["name"] in existing_names:
                         skipped.append(b["name"])
                     else:
-                        new_rows.append({"name": b["name"], "phone": b["phone"], "aadhar": b["aadhar"], "is_active": "1", "login_id": b.get("login_id", ""), "supervisor": b.get("supervisor", "")})
+                        new_rows.append({"name": b["name"], "phone": b["phone"], "aadhar": b["aadhar"], "is_active": "1", "login_id": b.get("login_id", ""), "supervisor": b.get("supervisor", ""), "site": b.get("site", "")})
                 if new_rows:
                     updated = pd.concat([df_t_exist, pd.DataFrame(new_rows)], ignore_index=True) if not df_t_exist.empty else pd.DataFrame(new_rows)
                     if safe_update("Technicians", updated):
@@ -6653,7 +6959,7 @@ with tab_admin:
         df_t = df_technicians_master.copy()
         if not df_t.empty:
             df_t = df_t.rename(columns={c: str(c).strip().lower() for c in df_t.columns})
-            for col in ["name", "phone", "aadhar", "is_active", "login_id", "supervisor"]:
+            for col in ["name", "phone", "aadhar", "is_active", "login_id", "supervisor", "site"]:
                 if col not in df_t.columns:
                     df_t[col] = ""
 
@@ -6672,6 +6978,7 @@ with tab_admin:
                         str(row.get("phone", "")), str(row.get("aadhar", "")),
                         (f"Login: {row.get('login_id','')}" if str(row.get("login_id","")).strip() else ""),
                         f"Sup: {resolve_supervisor_name(row.get('supervisor','')) or '—'}",
+                        f"Site: {str(row.get('site','')).strip() or '—'}",
                     ] if x]) or "no details on file"
                     st.markdown(f"""
                     <div class="item-card">
@@ -6704,6 +7011,11 @@ with tab_admin:
                         _sup_idx = _sup_opts.index(_cur_sup_name) if _cur_sup_name in _sup_opts else 0
                         e_sup_name = st.selectbox("Reports to supervisor", _sup_opts, index=_sup_idx)
                         e_sup = sup_name_to_id.get(e_sup_name, "") if e_sup_name != "— none —" else ""
+                        _site_opts = ["— none —"] + list(active_locs)
+                        _cur_site = str(row.get("site", "")).strip()
+                        e_site = st.selectbox("Site", _site_opts,
+                                              index=_site_opts.index(_cur_site) if _cur_site in _site_opts else 0)
+                        e_site = "" if e_site == "— none —" else e_site
                         e_active = st.selectbox("Status", ["Active", "Inactive"], index=0 if is_active else 1)
                         sv, cn = st.columns(2)
                         with sv:
@@ -6714,8 +7026,9 @@ with tab_admin:
                         if not e_name.strip():
                             st.error("❌ Name cannot be empty.")
                         else:
-                            df_t.loc[idx, ["name", "phone", "aadhar", "login_id", "supervisor", "is_active"]] = [
-                                e_name.strip(), e_phone.strip(), e_aadhar.strip(), e_login.strip(), e_sup.strip(), "1" if e_active == "Active" else "0"
+                            df_t.loc[idx, ["name", "phone", "aadhar", "login_id", "supervisor", "site", "is_active"]] = [
+                                e_name.strip(), e_phone.strip(), e_aadhar.strip(), e_login.strip(), e_sup.strip(),
+                                e_site, "1" if e_active == "Active" else "0"
                             ]
                             if safe_update("Technicians", df_t):
                                 del st.session_state["editing_tech_idx"]
