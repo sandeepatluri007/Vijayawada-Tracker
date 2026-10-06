@@ -6695,11 +6695,29 @@ with tab_map:
             # missing-coordinates problem.
             st.warning(f"⚠️ None of the {total_in_range} record(s) in this filter have latitude/longitude on file.")
         else:
-            center_lat, center_lon = pinned["_lat"].mean(), pinned["_long"].mean()
-            tooltip_df = pinned.rename(columns={"_lat": "lat", "_long": "lon"}).copy()
-            for col in ["sno", "old_meter_no", "new_meter_no", "tech_name", "location", "date"]:
-                if col not in tooltip_df.columns:
-                    tooltip_df[col] = ""
+            # Centre on the pins in view. With none — e.g. today before the
+            # day's file is uploaded — the average of no points is NaN, which
+            # is not valid map data and showed as a blank white map. Fall back
+            # to all recorded install locations, else Vijayawada.
+            _centre_src = pinned
+            if _centre_src.empty:
+                _centre_src = df_map.dropna(subset=["_lat", "_long"])
+                _centre_src = _centre_src[(_centre_src["_lat"] != 0) & (_centre_src["_long"] != 0)]
+            if _centre_src.empty:
+                center_lat, center_lon = 16.5062, 80.6480        # Vijayawada
+            else:
+                center_lat, center_lon = float(_centre_src["_lat"].mean()), float(_centre_src["_long"].mean())
+            # Only what the map draws and the tooltip shows. Sending every
+            # column made the map's data several times larger on each refresh.
+            _tip_cols = ["sno", "old_meter_no", "new_meter_no", "tech_name", "location", "date"]
+            # Built column by column rather than by renaming: the records
+            # already carry their own text "lat"/"long" columns, so renaming
+            # the cleaned coordinates to "lat" created two columns of that name.
+            tooltip_df = pd.DataFrame({"lat": pinned["_lat"].astype(float).to_numpy(),
+                                       "lon": pinned["_long"].astype(float).to_numpy()})
+            for col in _tip_cols:
+                tooltip_df[col] = (pinned[col].fillna("").astype(str).to_numpy()
+                                   if col in pinned.columns else "")
             for col in ["sno", "old_meter_no", "new_meter_no"]:
                 tooltip_df[col] = tooltip_df[col].apply(clean_id_value)
 
@@ -6716,7 +6734,8 @@ with tab_map:
                 get_line_color=[255, 255, 255],
                 line_width_min_pixels=1,
             )
-            view_state = pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=13, pitch=0)
+            view_state = pdk.ViewState(latitude=center_lat, longitude=center_lon,
+                                       zoom=13 if not pinned.empty else 12, pitch=0)
             deck = pdk.Deck(
                 layers=[layer],
                 initial_view_state=view_state,
@@ -6729,57 +6748,59 @@ with tab_map:
             )
             st.pydeck_chart(deck, use_container_width=True)
 
-            # -- Select a pin: see lat/long as copyable text -----------------
-            sub_hdr("pin", "Select A Pin")
-            pin_labels = {}
-            for idx, r in pinned.reset_index(drop=True).iterrows():
-                label = f"{r.get('sno') or r.get('tech_name') or 'Install'} — {r.get('date','')} {r.get('time','')} ({r.get('location','')})"
-                pin_labels[label] = idx
-            pinned_reset = pinned.reset_index(drop=True)
-            sel_pin_label = st.selectbox("Pick a record", ["-- Select --"] + list(pin_labels.keys()), key="map_pin_picker")
-            if sel_pin_label != "-- Select --":
-                pin_row = pinned_reset.iloc[pin_labels[sel_pin_label]]
-                pin_lat, pin_lon = pin_row["_lat"], pin_row["_long"]
-                pc1, pc2 = st.columns([2, 1])
-                with pc1:
-                    st.code(f"{pin_lat}, {pin_lon}", language=None)
-                with pc2:
-                    st.markdown(
-                        f'<a href="https://www.google.com/maps?q={pin_lat},{pin_lon}" target="_blank" class="wa-btn" style="background:var(--accent);">📍 Open In Maps</a>',
-                        unsafe_allow_html=True,
+            # Nothing to pick or export until there are pins in view.
+            if not pinned.empty:
+                # -- Select a pin: see lat/long as copyable text -----------------
+                sub_hdr("pin", "Select A Pin")
+                pin_labels = {}
+                for idx, r in pinned.reset_index(drop=True).iterrows():
+                    label = f"{r.get('sno') or r.get('tech_name') or 'Install'} — {r.get('date','')} {r.get('time','')} ({r.get('location','')})"
+                    pin_labels[label] = idx
+                pinned_reset = pinned.reset_index(drop=True)
+                sel_pin_label = st.selectbox("Pick a record", ["-- Select --"] + list(pin_labels.keys()), key="map_pin_picker")
+                if sel_pin_label != "-- Select --":
+                    pin_row = pinned_reset.iloc[pin_labels[sel_pin_label]]
+                    pin_lat, pin_lon = pin_row["_lat"], pin_row["_long"]
+                    pc1, pc2 = st.columns([2, 1])
+                    with pc1:
+                        st.code(f"{pin_lat}, {pin_lon}", language=None)
+                    with pc2:
+                        st.markdown(
+                            f'<a href="https://www.google.com/maps?q={pin_lat},{pin_lon}" target="_blank" class="wa-btn" style="background:var(--accent);">📍 Open In Maps</a>',
+                            unsafe_allow_html=True,
+                        )
+                    detail_bits = [f"**SNO:** {clean_id_value(pin_row.get('sno')) or '—'}", f"**Installer:** {pin_row.get('tech_name','—') or '—'}",
+                                   f"**Old Meter:** {clean_id_value(pin_row.get('old_meter_no')) or '—'}", f"**New Meter:** {clean_id_value(pin_row.get('new_meter_no')) or '—'}"]
+                    st.caption(" · ".join(detail_bits))
+
+                # -- Save view + share (one click, built only when clicked) --------
+                sub_hdr("download", "Export This View")
+                filter_desc = f"{', '.join(map_loc_filter) if map_loc_filter and len(map_loc_filter) < len(loc_options) else 'All Sections'} · {md_start} to {md_end}"
+                ec1, ec2 = st.columns(2)
+                _pins_snap = pinned.copy()
+                with ec1:
+                    lazy_download_button(
+                        "📷 Save Map View As PNG",
+                        lambda: build_map_export_png(_pins_snap, "Install Locations", [filter_desc]),
+                        f"Map_{filter_desc.split(' · ')[0].replace(', ', '_').replace(' ', '_')}.png",
+                        "image/png", "map_png_export",
                     )
-                detail_bits = [f"**SNO:** {clean_id_value(pin_row.get('sno')) or '—'}", f"**Installer:** {pin_row.get('tech_name','—') or '—'}",
-                               f"**Old Meter:** {clean_id_value(pin_row.get('old_meter_no')) or '—'}", f"**New Meter:** {clean_id_value(pin_row.get('new_meter_no')) or '—'}"]
-                st.caption(" · ".join(detail_bits))
+                with ec2:
+                    lazy_download_button(
+                        "🗺️ Share As KML File",
+                        lambda: build_kml(_pins_snap, doc_name=f"Installed Meters — {filter_desc}"),
+                        "installed_meters.kml", "application/vnd.google-earth.kml+xml", "map_kml_export",
+                    )
 
-            # -- Save view + share (one click, built only when clicked) --------
-            sub_hdr("download", "Export This View")
-            filter_desc = f"{', '.join(map_loc_filter) if map_loc_filter and len(map_loc_filter) < len(loc_options) else 'All Sections'} · {md_start} to {md_end}"
-            ec1, ec2 = st.columns(2)
-            _pins_snap = pinned.copy()
-            with ec1:
-                lazy_download_button(
-                    "📷 Save Map View As PNG",
-                    lambda: build_map_export_png(_pins_snap, "Install Locations", [filter_desc]),
-                    f"Map_{filter_desc.split(' · ')[0].replace(', ', '_').replace(' ', '_')}.png",
-                    "image/png", "map_png_export",
-                )
-            with ec2:
-                lazy_download_button(
-                    "🗺️ Share As KML File",
-                    lambda: build_kml(_pins_snap, doc_name=f"Installed Meters — {filter_desc}"),
-                    "installed_meters.kml", "application/vnd.google-earth.kml+xml", "map_kml_export",
-                )
-
-            with st.expander(f"📋 View {len(pinned)} record(s) as a table"):
-                map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
-                map_table_cols = [c for c in map_table_cols if c in pinned.columns]
-                map_table = pinned[map_table_cols].copy()
-                for _idc in ["sno", "old_meter_no", "new_meter_no"]:
-                    if _idc in map_table.columns:
-                        map_table[_idc] = map_table[_idc].apply(clean_id_value)
-                st.dataframe(map_table, use_container_width=True, hide_index=True,
-                             height=dataframe_height(len(pinned), max_px=500))
+                with st.expander(f"📋 View {len(pinned)} record(s) as a table"):
+                    map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
+                    map_table_cols = [c for c in map_table_cols if c in pinned.columns]
+                    map_table = pinned[map_table_cols].copy()
+                    for _idc in ["sno", "old_meter_no", "new_meter_no"]:
+                        if _idc in map_table.columns:
+                            map_table[_idc] = map_table[_idc].apply(clean_id_value)
+                    st.dataframe(map_table, use_container_width=True, hide_index=True,
+                                 height=dataframe_height(len(pinned), max_px=500))
 
     st.divider()
     with st.expander("📤 Upload Legacy/Historical Data (Map Only — does not affect Installations)"):
