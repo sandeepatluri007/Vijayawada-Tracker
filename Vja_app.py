@@ -7851,30 +7851,56 @@ with tab_hr:
         sec_hdr("file", "Offer Letter")
         if _hr_emp_missing:
             _hr_setup_note("Employees", ", ".join(HR_EMP_COLS))
+        _ol_has_emps = not _hr_emp.empty
+        ol_mode = st.radio("Letter for", ["New employee", "Existing employee"], horizontal=True, key="hr_ol_mode",
+                           disabled=not _ol_has_emps,
+                           help=None if _ol_has_emps else "Add employees first to issue them a letter.")
+        _ex = None
+        if ol_mode == "Existing employee" and _ol_has_emps:
+            _ex_labels = {r["emp_id"]: f"{r['emp_id']} — {r['name']} ({r['designation']})" for _, r in _hr_emp.iterrows()}
+            _ex_id = st.selectbox("Employee", list(_ex_labels), format_func=_ex_labels.get, key="hr_ol_existing")
+            _ex = _hr_emp[_hr_emp["emp_id"] == _ex_id].iloc[0]
+            st.markdown('<div class="info-box">Filled in from their record. Changes here affect only this letter; '
+                        'to change the record itself, use the Employees tab.</div>', unsafe_allow_html=True)
+        # Widget keys carry the employee, so picking someone else refills every
+        # field from their record instead of keeping the previous person's text.
+        _tag = f"{hv}_ex_{hr_slug(_ex['emp_id'])}" if _ex is not None else f"{hv}"
+        _role_opts = list(_hr_roles) + ["Other (type below)"]
+        if _ex is not None:
+            _d_sal = _ex["salutation"] if _ex["salutation"] in ("Mr.", "Ms.", "Mrs.") else "Mr."
+            _d_role = _ex["designation"] if _ex["designation"] in _hr_roles else "Other (type below)"
+            _d_custom = "" if _ex["designation"] in _hr_roles else _ex["designation"]
+            _jd0 = pd.to_datetime(_ex["joining_date"], errors="coerce")
+            _d_join = _jd0.date() if pd.notna(_jd0) else _hr_today
+            _d_name, _d_place, _d_salary = _ex["name"], (_ex["location"] or "Vijayawada"), int(_ex["monthly_salary"])
+        else:
+            _d_sal, _d_role, _d_custom, _d_join = "Mr.", _role_opts[0], "", _hr_today
+            _d_name, _d_place, _d_salary = "", "Vijayawada", 0
         oc1, oc2 = st.columns([1, 3])
         with oc1:
-            ol_sal = st.selectbox("Title", ["Mr.", "Ms.", "Mrs."], key=f"hr_ol_sal_{hv}")
+            ol_sal = st.selectbox("Title", ["Mr.", "Ms.", "Mrs."], index=["Mr.", "Ms.", "Mrs."].index(_d_sal),
+                                  key=f"hr_ol_sal_{_tag}")
         with oc2:
-            ol_name = st.text_input("Employee name", key=f"hr_ol_name_{hv}", placeholder="e.g. Ravi Kumar")
+            ol_name = st.text_input("Employee name", value=_d_name, key=f"hr_ol_name_{_tag}", placeholder="e.g. Ravi Kumar")
         oc3, oc4 = st.columns(2)
         with oc3:
-            ol_role = st.selectbox("Designation", list(_hr_roles) + ["Other (type below)"], key=f"hr_ol_role_{hv}")
+            ol_role = st.selectbox("Designation", _role_opts, index=_role_opts.index(_d_role), key=f"hr_ol_role_{_tag}")
         _is_other = ol_role.startswith("Other")
         with oc4:
-            ol_custom = st.text_input("Custom designation", key=f"hr_ol_custom_{hv}",
+            ol_custom = st.text_input("Custom designation", value=_d_custom, key=f"hr_ol_custom_{_tag}",
                                       disabled=not _is_other, placeholder="Only for 'Other'")
         ol_designation = (ol_custom if _is_other else ol_role).strip()
         oc5, oc6 = st.columns(2)
         with oc5:
-            ol_place = st.text_input("Place of work", value="Vijayawada", key=f"hr_ol_place_{hv}")
+            ol_place = st.text_input("Place of work", value=_d_place, key=f"hr_ol_place_{_tag}")
         with oc6:
-            ol_join = st.date_input("Date of joining", value=_hr_today, key=f"hr_ol_join_{hv}")
+            ol_join = st.date_input("Date of joining", value=_d_join, key=f"hr_ol_join_{_tag}")
         oc7, oc8 = st.columns(2)
         with oc7:
-            ol_salary = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500, value=0,
-                                        key=f"hr_ol_salary_{hv}")
+            ol_salary = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500, value=_d_salary,
+                                        key=f"hr_ol_salary_{_tag}")
         with oc8:
-            ol_date = st.date_input("Letter date", value=_hr_today, key=f"hr_ol_date_{hv}")
+            ol_date = st.date_input("Letter date", value=_hr_today, key=f"hr_ol_date_{_tag}")
         if ol_salary:
             st.markdown(f'<div class="info-box">Rs. {hr_inr(ol_salary)} per month &nbsp;·&nbsp; '
                         f'Rs. {hr_inr(ol_salary * 12)} per annum</div>', unsafe_allow_html=True)
@@ -7885,24 +7911,30 @@ with tab_hr:
         # the Roles tab refreshes these boxes instead of showing stale text.
         _fp = hashlib.md5((_duties_default + "|" + _sched_default).encode()).hexdigest()[:6]
         ol_duties = st.text_area("Role and responsibilities (one per line)", value=_duties_default, height=170,
-                                 key=f"hr_ol_duties_{hv}_{hr_slug(ol_role)}_{_fp}")
+                                 key=f"hr_ol_duties_{_tag}_{hr_slug(ol_role)}_{_fp}")
         ol_sched = st.text_area("Working schedule", value=_sched_default, height=88,
-                                key=f"hr_ol_sched_{hv}_{hr_slug(ol_role)}_{_fp}")
-        ol_extra = st.text_area("Additional terms (optional)", value="", height=70, key=f"hr_ol_extra_{hv}",
+                                key=f"hr_ol_sched_{_tag}_{hr_slug(ol_role)}_{_fp}")
+        ol_extra = st.text_area("Additional terms (optional)", value="", height=70, key=f"hr_ol_extra_{_tag}",
                                 placeholder="e.g. accommodation, travel allowance")
         oc9, oc10 = st.columns(2)
         with oc9:
-            ol_project = st.text_input("Project", value=HR_DEFAULT_PROJECT, key=f"hr_ol_project_{hv}",
+            ol_project = st.text_input("Project", value=HR_DEFAULT_PROJECT, key=f"hr_ol_project_{_tag}",
                                        help="Leave blank to leave the project out of the letter.")
         with oc10:
-            ol_signer = st.text_input("Signed by", value=HR_SIGNATORY, key=f"hr_ol_signer_{hv}")
-        ol_fmt = _hr_format_choice(f"hr_ol_fmt_{hv}")
-        ol_add = st.checkbox("Add to employee records", value=not _hr_emp_missing, disabled=_hr_emp_missing,
-                             key=f"hr_ol_add_{hv}")
-        _sug_id = hr_next_emp_id(_hr_emp["emp_id"])
-        ol_empid = st.text_input("Employee ID", value=_sug_id, key=f"hr_ol_empid_{hv}_{_sug_id}") if ol_add else ""
-        _ref = hr_next_offer_ref(_hr_emp["offer_ref"], ol_date)
-        st.caption(f"Reference: {_ref}")
+            ol_signer = st.text_input("Signed by", value=HR_SIGNATORY, key=f"hr_ol_signer_{_tag}")
+        ol_fmt = _hr_format_choice(f"hr_ol_fmt_{_tag}")
+        if _ex is None:
+            ol_add = st.checkbox("Add to employee records", value=not _hr_emp_missing, disabled=_hr_emp_missing,
+                                 key=f"hr_ol_add_{hv}")
+            _sug_id = hr_next_emp_id(_hr_emp["emp_id"])
+            ol_empid = st.text_input("Employee ID", value=_sug_id, key=f"hr_ol_empid_{hv}_{_sug_id}") if ol_add else ""
+        else:
+            ol_add, ol_empid = False, _ex["emp_id"]
+        # An existing employee keeps the reference already on their record, so a
+        # reissued letter carries the same number; otherwise the next one is used.
+        _ref_on_record = _ex is not None and bool(_ex["offer_ref"])
+        _ref = _ex["offer_ref"] if _ref_on_record else hr_next_offer_ref(_hr_emp["offer_ref"], ol_date)
+        st.caption(f"Reference: {_ref}" + (" (from their record)" if _ref_on_record else ""))
 
         if st.button("Generate Offer Letter", type="primary", use_container_width=True, key="hr_ol_go"):
             errs = []
@@ -7950,6 +7982,17 @@ with tab_hr:
                             st.rerun()
                         else:
                             st.warning("⚠️ The letter is ready below, but the employee record wasn't saved.")
+                    elif _ex is not None and not _ref_on_record:
+                        # First letter for someone already on the records:
+                        # note the reference on their record so the number is
+                        # used once and a reissue repeats it.
+                        _upd = _hr_emp.copy()
+                        _upd.loc[_upd["emp_id"] == _ex["emp_id"], "offer_ref"] = _ref
+                        if hr_save_employees(_upd):
+                            st.success(f"✅ Offer letter ready. Reference {_ref} saved to {_ex['emp_id']}'s record.")
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ The letter is ready below, but the reference wasn't saved to the record.")
                     else:
                         st.success("✅ Offer letter ready.")
         _f = st.session_state.get("hr_offer_file")
