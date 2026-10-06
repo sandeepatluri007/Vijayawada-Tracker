@@ -8,3 +8,4 @@ matplotlib
 pydeck
 fpdf2
 requests
+python-docx
