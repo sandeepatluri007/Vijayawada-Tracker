@@ -6,7 +6,7 @@ Theme   : Clean White & Light Greys (Field-Optimized)
 Security: PIN Protected (stays unlocked until the browser tab is closed)
 
 requirements.txt must include: streamlit, streamlit-gsheets-connection, pandas,
-openpyxl, matplotlib (used for the "Download as Image" table exports, the
+openpyxl, python-docx (Word output in the HR tab), matplotlib (used for the "Download as Image" table exports, the
 Hourly Count heatmap view, and the Map's PNG snapshot export). pydeck powers
 the Map tab's pin map — it ships bundled with streamlit, so it normally does
 not need to be listed separately; add it explicitly only if the Map tab
@@ -26,6 +26,11 @@ the app creates and appends data automatically):
                            per-install costs use `rate_1ph` / `rate_3ph`)
   Vehicles              - reg_no, description, is_active
   Returns               - date, type, qty, location, dc_no, remarks
+  Employees             - emp_id, name, salutation, designation, location, monthly_salary,
+                           joining_date, bank, account_no, pan, pf_no, status, offer_ref
+                           (HR tab: offer letters, payslips)
+  Roles                 - designation, duties, schedule
+                           (HR tab: responsibilities offered per role in offer letters)
                            (ageing material sent back to store; comes off pending stock)
                            (Technicians.supervisor holds the supervisor_id)
   UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type,
@@ -1731,7 +1736,7 @@ def _rate_limit_cooloff_active() -> bool:
 # the batch call fails, so this can never be worse than before.
 SHEET_TABS = ("Installations", "Inventory", "Technicians", "Locations", "Supervisors",
               "Settings", "UploadedInstallLog", "AnalyticsRaw", "MapRecords",
-              "Expenses", "Vehicles", "Liaisoning", "Returns")
+              "Expenses", "Vehicles", "Liaisoning", "Returns", "Employees", "Roles")
 
 
 @st.cache_resource(show_spinner=False)
@@ -2818,6 +2823,1066 @@ def stock_by_location() -> pd.DataFrame:
     spent = (out["Location"] == "Unspecified") & (out["Pending"] <= 0)
     out = out[~spent]
     return out.sort_values(["Location", "Type"]).reset_index(drop=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  HR documents — offer letter and payslip as PDF or Word
+# ═══════════════════════════════════════════════════════════════════════════════
+# Each document's wording and figures come from one content builder, so the PDF
+# and the Word file cannot drift apart. Word output needs python-docx; without
+# it the app still runs and the HR tab offers PDF only.
+try:                                    # Word output needs python-docx
+    from docx import Document
+    from docx.enum.table import WD_ROW_HEIGHT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING, WD_TAB_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Mm, Pt, RGBColor
+    HR_DOCX_OK = True
+except ImportError:                     # the app still runs without it
+    HR_DOCX_OK = False
+
+# ── Company details (letterhead) ───────────────────────────────────────────
+HR_COMPANY = "Touch Light Infra Services Pvt. Ltd."
+HR_COMPANY_CAPS = "TOUCH LIGHT INFRA SERVICES PRIVATE LIMITED"
+HR_ADDRESS_1 = "#503, 8-3-167/D, Sai Samrat Sadan, Kalyan Nagar Phase-1,"
+HR_ADDRESS_2 = "Hyderabad - 500038, Telangana"
+HR_PHONE = "8885383910"
+HR_EMAIL = "operations@touchlightinfra.com"
+HR_SIGNATORY = "Sandeep Balaji Atluri"
+HR_DEFAULT_PROJECT = "Adani Smart Metering Project"
+
+# ── Palette: whites and greys. The logo carries the only colour. ───────────
+HR_INK = (31, 41, 55)
+HR_GREY_700 = (55, 65, 81)
+HR_GREY_500 = (107, 114, 128)
+HR_GREY_300 = (209, 213, 219)
+HR_GREY_200 = (229, 231, 235)
+HR_GREY_100 = (243, 244, 246)
+HR_WHITE = (255, 255, 255)
+
+
+def _hr_hex(rgb):
+    return "%02X%02X%02X" % rgb
+
+
+# ── Text cleanup for the PDF's built-in font (Latin-1 only) ────────────────
+_HR_PDF_MAP = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-",
+    "\u2014": "-", "\u2026": "...", "\u20b9": "Rs.", "\u00a0": " ", "\u2022": "-",
+})
+
+
+def _hr_t(s) -> str:
+    return str("" if s is None else s).translate(_HR_PDF_MAP).encode("latin-1", "replace").decode("latin-1")
+
+
+# ── Money: Indian grouping and amount in words ─────────────────────────────
+_HR_ONES = ("ZERO ONE TWO THREE FOUR FIVE SIX SEVEN EIGHT NINE TEN ELEVEN TWELVE THIRTEEN "
+         "FOURTEEN FIFTEEN SIXTEEN SEVENTEEN EIGHTEEN NINETEEN").split()
+_HR_TENS = "_ _ TWENTY THIRTY FORTY FIFTY SIXTY SEVENTY EIGHTY NINETY".split()
+
+
+def _hr_below_100(n):
+    return _HR_ONES[n] if n < 20 else (_HR_TENS[n // 10] + ("" if n % 10 == 0 else " " + _HR_ONES[n % 10]))
+
+
+def _hr_below_1000(n):
+    h, r = divmod(n, 100)
+    out = []
+    if h:
+        out.append(_HR_ONES[h] + " HUNDRED")
+    if r:
+        out.append(_hr_below_100(r))
+    return " ".join(out)
+
+
+def hr_amount_in_words(n) -> str:
+    """32800 -> 'RUPEES THIRTY TWO THOUSAND EIGHT HUNDRED ONLY' (lakh/crore grouping)."""
+    n = int(round(n))
+    if n == 0:
+        return "RUPEES ZERO ONLY"
+    parts = []
+    crore, n = divmod(n, 10_000_000)
+    lakh, n = divmod(n, 100_000)
+    thousand, n = divmod(n, 1000)
+    if crore:
+        parts.append(_hr_below_1000(crore) + " CRORE")
+    if lakh:
+        parts.append(_hr_below_100(lakh) + " LAKH")
+    if thousand:
+        parts.append(_hr_below_100(thousand) + " THOUSAND")
+    if n:
+        parts.append(_hr_below_1000(n))
+    return "RUPEES " + " ".join(parts) + " ONLY"
+
+
+def hr_inr(n) -> str:
+    """300000 -> 3,00,000"""
+    n = int(round(n))
+    s = str(abs(n))
+    if len(s) > 3:
+        head, tail = s[:-3], s[-3:]
+        groups = []
+        while len(head) > 2:
+            groups.insert(0, head[-2:])
+            head = head[:-2]
+        if head:
+            groups.insert(0, head)
+        s = ",".join(groups) + "," + tail
+    return ("-" if n < 0 else "") + s
+
+
+# ── Salary structure ───────────────────────────────────────────────────────
+# Basic is 50% of gross, HRA is 40% of Basic (20% of gross), and Special
+# Allowance is the balance, so the lines always add up to the gross exactly.
+HR_EARNING_LINES = (
+    "Basic Salary (BS)", "House Rent Allowance (HRA)", "Special Allowance (SA)",
+    "Transportation Allowance (TA)", "Mobile & Internet Allowance (MA)", "Food Allowance (FA)",
+    "City Compensatory Allowance (CCA)", "Medical Reimbursement (MR)",
+)
+HR_BASIC_PCT = 0.50
+HR_HRA_PCT_OF_BASIC = 0.40
+
+
+def _hr_round_half_up(x) -> int:
+    return int(x + 0.5)
+
+
+def hr_salary_split(gross) -> list:
+    """Monthly gross -> [(component, amount)] for every earning line."""
+    g = int(round(gross))
+    basic = _hr_round_half_up(g * HR_BASIC_PCT)
+    hra = _hr_round_half_up(basic * HR_HRA_PCT_OF_BASIC)
+    special = g - basic - hra
+    amounts = [basic, hra, special] + [0] * (len(HR_EARNING_LINES) - 3)
+    return list(zip(HR_EARNING_LINES, amounts))
+
+
+def hr_professional_tax(gross) -> int:
+    """Andhra Pradesh / Telangana monthly slab: nil up to 15,000; 150 up to
+    20,000; 200 above."""
+    g = float(gross)
+    if g <= 15000:
+        return 0
+    return 150 if g <= 20000 else 200
+
+
+def hr_payslip_figures(earnings, pt=0, tds=0, other=0, working_days=0, public_holidays=0, days_present=0) -> dict:
+    """Pay is the full monthly amount; attendance is shown, not prorated.
+    Gross = sum of earnings; Net = Gross - deductions."""
+    shown = [(n, int(round(a))) for n, a in earnings if int(round(a))]
+    deductions = [("Professional Tax (PT)", int(round(pt))),
+                  ("Tax Deducted at Source (TDS)", int(round(tds))),
+                  ("Other Deductions (Loans, etc.)", int(round(other)))]
+    gross = sum(a for _, a in shown)
+    total_d = sum(a for _, a in deductions)
+    return {"earnings": shown, "deductions": deductions, "gross": gross,
+            "total_deductions": total_d, "net": gross - total_d,
+            "effective": min(working_days, days_present + public_holidays)}
+
+
+# ── Employee ids and offer-letter references ───────────────────────────────
+HR_EMP_PREFIX = "TLI-"
+HR_EMP_FIRST = 9       # TLI-08 is already in use, so new ids start at TLI-09
+
+
+def hr_next_emp_id(existing_ids) -> str:
+    nums = []
+    for i in existing_ids:
+        m = _re.fullmatch(r"TLI-(\d+)", str(i).strip(), flags=_re.I)
+        if m:
+            nums.append(int(m.group(1)))
+    return f"{HR_EMP_PREFIX}{max(nums + [HR_EMP_FIRST - 1]) + 1:02d}"
+
+
+def hr_financial_year(d: date) -> str:
+    y = d.year if d.month >= 4 else d.year - 1
+    return f"{y}-{str(y + 1)[-2:]}"
+
+
+def hr_next_offer_ref(existing_refs, on: date) -> str:
+    prefix = f"TLIS/HR/OL/{hr_financial_year(on)}/"
+    nums = []
+    for r in existing_refs:
+        r = str(r).strip()
+        if r.startswith(prefix) and r[len(prefix):].isdigit():
+            nums.append(int(r[len(prefix):]))
+    return prefix + f"{max(nums + [0]) + 1:03d}"
+
+
+# Google Sheets turns "012345678901" into the number 12345678901, and shows
+# long ones in scientific notation. A leading '#' keeps account and PF numbers text.
+def hr_guard(v) -> str:
+    v = str(v or "").strip()
+    return ("#" + v) if v and not v.startswith("#") else v
+
+
+def hr_unguard(v) -> str:
+    return str(v or "").strip().lstrip("#")
+
+
+# ── Roles ──────────────────────────────────────────────────────────────────
+_HR_SCHED_FIELD = ("Work follows the project's deployment windows. Installation is paused from the 28th to the "
+                "3rd of each month for the utility's meter reading cycle; weekend work may be required "
+                "during active deployment.")
+_HR_SCHED_OFFICE = "Working days and hours follow the company's schedule and may vary with project requirements."
+
+HR_DEFAULT_ROLES = {
+    "Site Supervisor": {
+        "duties": [
+            "Lead the installation team on site and allocate daily work to technicians.",
+            "Plan meter stock, coordinate collection from the warehouse, and share the bill and e-waybill after every trip.",
+            "Assign meters and other assets to individual technicians, and keep a documented record.",
+            "Ensure new meters are stored securely and old meters are handed over to the designated substation daily.",
+            "Check quality: phase and neutral connections, installation photos and readings in the app, legible "
+            "change slips, and serial marking on old meters.",
+            "Recover enclosure boxes for the lineman at month end; authorise vehicle fuel and submit receipts.",
+        ],
+        "schedule": _HR_SCHED_FIELD,
+    },
+    "Technician (Installer)": {
+        "duties": [
+            "Install smart meters as assigned, with phase and neutral connections executed correctly.",
+            "Upload clear meter installation photos and enter final index readings accurately in the tracking app.",
+            "Write the change slip fully and legibly, and mark the serial number and change slip ID on each old meter.",
+            "Store new meters securely and hand over old meters to the designated substation by the end of each day.",
+            "Collect and store plastic enclosure boxes; do not sell or dispose of them.",
+            "Do not change burnt meters; report them to the supervisor. Take proper care of the company vehicle.",
+        ],
+        "schedule": _HR_SCHED_FIELD,
+    },
+    "Junior Engineer - Operations": {
+        "duties": [
+            "Monitor daily installation progress against targets and report it to management.",
+            "Upload the daily progress data to the tracker and keep installation, material and expense records accurate.",
+            "Coordinate with supervisors on manpower, stock and vehicle requirements.",
+            "Follow up quality issues raised by QC or the client until they are closed.",
+            "Prepare daily and monthly operations reports.",
+        ],
+        "schedule": _HR_SCHED_FIELD,
+    },
+    "Store Keeper": {
+        "duties": [
+            "Receive material, verify quantities against the bill and e-waybill, and record each inward with its MRN.",
+            "Issue meters to supervisors and technicians against a signed record, and keep site-wise 1PH and 3PH stock.",
+            "Receive old meters and returned or ageing material, and update stock the same day.",
+            "Store plastic enclosure boxes and hand them to the concerned lineman at month end.",
+            "Report the stock position and any shortage, loss or damage to management daily.",
+        ],
+        "schedule": _HR_SCHED_OFFICE,
+    },
+    "MIS Executive": {
+        "duties": [
+            "Process the daily progress file and update installation records in the tracker.",
+            "Maintain installer, supervisor and site-wise records, and verify them against uploads.",
+            "Prepare daily and monthly reports on installations, productivity and stock.",
+            "Check data for duplicates and mismatches, and correct them with the supervisors concerned.",
+            "Maintain the records needed for billing and payments.",
+        ],
+        "schedule": _HR_SCHED_OFFICE,
+    },
+    "Liaison Executive": {
+        "duties": [
+            "Coordinate with section offices and linemen for smooth installation in the assigned sections.",
+            "Keep a record of installations by section code and the lineman mapped to each.",
+            "Resolve issues raised by sections, consumers or the utility, and escalate where needed.",
+            "Prepare the monthly liaisoning statement for lineman payments.",
+        ],
+        "schedule": _HR_SCHED_OFFICE,
+    },
+}
+
+
+# ── Offer letter content (one source for PDF and Word) ─────────────────────
+def _hr_first_name(name: str) -> str:
+    toks = name.split()
+    return toks[0] if toks and len(toks[0].rstrip(".")) > 1 else name
+
+
+def _hr_offer_content(*, name, salutation, designation, place, joining, monthly_salary, letter_date, ref_no,
+                   duties, schedule, additional, project, signatory):
+    annual = monthly_salary * 12
+    who = f"{salutation} {name}".strip()
+    for_project = f" for the {project}" if project else ""
+    return {
+        "ref": ref_no, "date": letter_date.strftime("%d %B %Y"), "who": who,
+        "subject": f"Offer of Employment - {designation}",
+        "greeting": f"Dear {_hr_first_name(name)},",
+        "intro": f"We are pleased to offer you the position of {designation} with {HR_COMPANY}{for_project}, "
+                 f"on the terms below.",
+        "terms": [
+            ("Designation", designation),
+            ("Place of Work", place),
+            ("Date of Joining", joining.strftime("%d %B %Y")),
+            ("Monthly Gross Salary", f"Rs. {hr_inr(monthly_salary)} per month "
+                                     f"({hr_amount_in_words(monthly_salary).title()})"),
+            ("Annual CTC", f"Rs. {hr_inr(annual)} per annum ({hr_amount_in_words(annual).title()})"),
+        ],
+        "comp": "Your salary is paid monthly into your bank account on or before the 5th of the following "
+                "month, subject to statutory deductions as applicable (professional tax and, where applicable, TDS).",
+        "duties": [d.strip() for d in duties if d.strip()],
+        "schedule": (schedule or "").strip(),
+        "additional": (additional or "").strip(),
+        "docs": "Educational certificates; ID proof (Aadhaar, Voter ID or Driving Licence); PAN card; two "
+                "passport-size photographs; residence proof (temporary and permanent); bank account details.",
+        "closing": "This offer is subject to verification of these documents. Please sign and return a copy as "
+                   "your acceptance by your date of joining. We look forward to having you on the team.",
+        "signatory": signatory,
+    }
+
+
+# ── PDF ────────────────────────────────────────────────────────────────────
+class _HRPdf(FPDF):
+    def __init__(self, logo_bytes):
+        super().__init__(format="A4")
+        self.logo = logo_bytes
+        self.set_auto_page_break(auto=True, margin=18)
+        self.set_margins(18, 14, 18)
+        self.alias_nb_pages()
+
+    def header(self):
+        self.image(io.BytesIO(self.logo), x=18, y=10, h=16)
+        self.set_xy(60, 11)
+        self.set_font("Helvetica", "B", 11.5)
+        self.set_text_color(*HR_INK)
+        self.cell(0, 5.5, HR_COMPANY_CAPS, align="R", new_x="LMARGIN", new_y="NEXT")
+        self.set_font("Helvetica", "", 8.2)
+        self.set_text_color(*HR_GREY_500)
+        for line in (HR_ADDRESS_1, HR_ADDRESS_2, f"Ph: {HR_PHONE}   |   {HR_EMAIL}"):
+            self.set_x(60)
+            self.cell(0, 4.1, _hr_t(line), align="R", new_x="LMARGIN", new_y="NEXT")
+        self.set_draw_color(*HR_GREY_300)
+        self.set_line_width(0.4)
+        self.line(18, 30.5, 192, 30.5)
+        self.set_y(36)
+
+    def footer(self):
+        self.set_y(-14)
+        self.set_font("Helvetica", "", 7.5)
+        self.set_text_color(*HR_GREY_500)
+        self.cell(0, 6, f"{HR_COMPANY}   |   Page {self.page_no()} of {{nb}}", align="C")
+
+
+def _hr_pdf_heading(pdf, title):
+    pdf.ln(1.8)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*HR_GREY_700)
+    pdf.cell(0, 5.5, title.upper(), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_draw_color(*HR_GREY_300)
+    pdf.set_line_width(0.2)
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+    pdf.ln(1.6)
+    pdf.set_text_color(*HR_INK)
+
+
+def _hr_pdf_para(pdf, text, size=9.6, h=4.9):
+    pdf.set_font("Helvetica", "", size)
+    pdf.set_text_color(*HR_INK)
+    pdf.multi_cell(0, h, _hr_t(text), align="L", new_x="LMARGIN", new_y="NEXT")
+
+
+def _hr_pdf_bullets(pdf, items, size=9.4):
+    pdf.set_font("Helvetica", "", size)
+    pdf.set_text_color(*HR_INK)
+    for it in items:
+        y = pdf.get_y()
+        pdf.set_fill_color(*HR_GREY_500)
+        pdf.ellipse(20.4, y + 1.9, 1.2, 1.2, style="F")
+        pdf.set_x(24)
+        pdf.multi_cell(0, 4.6, _hr_t(it), align="L", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(0.3)
+
+
+def _hr_pdf_kv_row(pdf, label, value, label_w, fill):
+    """One bordered row; the value may wrap onto several lines."""
+    x, y = pdf.l_margin, pdf.get_y()
+    total = pdf.w - pdf.l_margin - pdf.r_margin
+    vw = total - label_w
+    pdf.set_font("Helvetica", "", 9.5)
+    lines = pdf.multi_cell(vw - 3, 4.8, _hr_t(value), dry_run=True, output="LINES")
+    h = max(6.6, len(lines) * 4.8 + 2.0)
+    pdf.set_fill_color(*fill)
+    pdf.rect(x, y, total, h, style="F")
+    pdf.set_draw_color(*HR_GREY_300)
+    pdf.set_line_width(0.2)
+    pdf.line(x, y + h, x + total, y + h)
+    pdf.set_xy(x + 2, y + 1.0)
+    pdf.set_font("Helvetica", "B", 9.2)
+    pdf.set_text_color(*HR_GREY_500)
+    pdf.cell(label_w - 2, 4.8, _hr_t(label))
+    pdf.set_xy(x + label_w + 1, y + 1.0)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(*HR_INK)
+    pdf.multi_cell(vw - 3, 4.8, _hr_t(value), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_y(y + h)
+
+
+def _hr_offer_pdf(c, logo) -> bytes:
+    pdf = _HRPdf(logo)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(*HR_GREY_500)
+    pdf.cell(95, 5, _hr_t(f"Ref: {c['ref']}"))
+    pdf.cell(0, 5, f"Date: {c['date']}", align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+    pdf.set_text_color(*HR_INK)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 5, "To,", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.cell(0, 5.5, _hr_t(c["who"]), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.cell(0, 6, _hr_t(f"Subject: {c['subject']}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1.5)
+    _hr_pdf_para(pdf, c["greeting"])
+    pdf.ln(1)
+    _hr_pdf_para(pdf, c["intro"])
+    pdf.ln(2)
+    for i, (k, v) in enumerate(c["terms"]):
+        _hr_pdf_kv_row(pdf, k, v, 46, HR_GREY_100 if i % 2 == 0 else HR_WHITE)
+
+    _hr_pdf_heading(pdf, "Compensation")
+    _hr_pdf_para(pdf, c["comp"])
+    if c["duties"]:
+        _hr_pdf_heading(pdf, "Role and Responsibilities")
+        _hr_pdf_bullets(pdf, c["duties"])
+    if c["schedule"]:
+        _hr_pdf_heading(pdf, "Working Schedule")
+        _hr_pdf_para(pdf, c["schedule"], size=9.4, h=4.8)
+    if c["additional"]:
+        _hr_pdf_heading(pdf, "Additional Terms")
+        _hr_pdf_para(pdf, c["additional"], size=9.4, h=4.8)
+    _hr_pdf_heading(pdf, "Documents Required on Joining")
+    _hr_pdf_para(pdf, c["docs"], size=9.4, h=4.8)
+    pdf.ln(2)
+    _hr_pdf_para(pdf, c["closing"])
+
+    # Signatures: left blank for a wet signature and the company seal.
+    if pdf.get_y() > 232:
+        pdf.add_page()
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(*HR_INK)
+    pdf.cell(95, 5, f"For {HR_COMPANY}")
+    pdf.cell(0, 5, "Accepted by", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(17)
+    pdf.set_draw_color(*HR_GREY_500)
+    pdf.set_line_width(0.2)
+    pdf.line(18, pdf.get_y(), 78, pdf.get_y())
+    pdf.line(113, pdf.get_y(), 173, pdf.get_y())
+    pdf.ln(1.5)
+    pdf.set_font("Helvetica", "B", 9.5)
+    pdf.cell(95, 5, _hr_t(c["signatory"]))
+    pdf.cell(0, 5, _hr_t(c["who"]), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 8.8)
+    pdf.set_text_color(*HR_GREY_500)
+    pdf.cell(95, 4.5, "Authorized Signatory")
+    pdf.cell(0, 4.5, "Date:", new_x="LMARGIN", new_y="NEXT")
+    return bytes(pdf.output())
+
+
+# ── Payslip content ────────────────────────────────────────────────────────
+def _hr_payslip_content(*, month_label, name, salutation, emp_id, designation, location, earnings,
+                     working_days, public_holidays, days_present, pt, tds, other,
+                     bank, account, pan, pf, remarks):
+    f = hr_payslip_figures(earnings, pt, tds, other, working_days, public_holidays, days_present)
+    return {
+        "title": f"PAYSLIP - {month_label.upper()}",
+        "left": [("Name", f"{salutation} {name}".strip()), ("Emp ID", emp_id), ("Designation", designation),
+                 ("Location", (location or "").upper()), ("Bank", bank or "-"), ("Account Number", account or "-")],
+        "right": [("Working Days", working_days), ("Public Holidays", public_holidays),
+                  ("Days Present", days_present), ("Effective Days", f["effective"]),
+                  ("Income Tax PAN", pan or "-"), ("PF Number", pf or "-")],
+        "f": f, "words": hr_amount_in_words(f["net"]), "remarks": remarks or "-",
+    }
+
+
+def _hr_payslip_pdf(c, logo) -> bytes:
+    f = c["f"]
+    pdf = _HRPdf(logo)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(*HR_INK)
+    pdf.cell(0, 8, c["title"], align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_draw_color(*HR_GREY_500)
+    pdf.set_line_width(0.3)
+    pdf.line(18, pdf.get_y() + 0.5, 192, pdf.get_y() + 0.5)
+    pdf.ln(5)
+
+    pdf.set_draw_color(*HR_GREY_300)
+    pdf.set_line_width(0.2)
+    for (lk, lv), (rk, rv) in zip(c["left"], c["right"]):
+        for k, v, wk, wv in ((lk, lv, 30, 58), (rk, rv, 38, 48)):
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(*HR_GREY_500)
+            pdf.set_fill_color(*HR_GREY_100)
+            pdf.cell(wk, 7, "  " + k, border="B", fill=True)
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(*HR_INK)
+            pdf.cell(wv, 7, " " + _hr_t(v), border="B")
+        pdf.ln(7)
+    pdf.ln(5)
+
+    W = (64, 23, 64, 23)
+    pdf.set_fill_color(*HR_GREY_200)
+    pdf.set_text_color(*HR_INK)
+    pdf.set_font("Helvetica", "B", 9)
+    for w, t, a in zip(W, ("EMOLUMENTS", "AMOUNT Rs.", "DEDUCTIONS", "AMOUNT Rs."), ("L", "R", "L", "R")):
+        pdf.cell(w, 8, ("  " + t) if a == "L" else (t + "  "), align=a, fill=True, border="B")
+    pdf.ln(8)
+    rows = max(len(f["earnings"]), len(f["deductions"]))
+    pdf.set_font("Helvetica", "", 9)
+    show = lambda v: "" if v is None else (hr_inr(v) if v else "-")
+    for i in range(rows):
+        e = f["earnings"][i] if i < len(f["earnings"]) else ("", None)
+        d = f["deductions"][i] if i < len(f["deductions"]) else ("", None)
+        pdf.set_text_color(*HR_INK)
+        pdf.cell(W[0], 7, "  " + _hr_t(e[0]), border="B")
+        pdf.cell(W[1], 7, show(e[1]) + "  ", align="R", border="B")
+        pdf.cell(W[2], 7, "  " + _hr_t(d[0]), border="B")
+        pdf.cell(W[3], 7, show(d[1]) + "  ", align="R", border="B")
+        pdf.ln(7)
+    pdf.set_font("Helvetica", "B", 9.5)
+    pdf.set_fill_color(*HR_GREY_100)
+    pdf.cell(W[0], 8, "  GROSS PAY", fill=True)
+    pdf.cell(W[1], 8, hr_inr(f["gross"]) + "  ", align="R", fill=True)
+    pdf.cell(W[2], 8, "  TOTAL DEDUCTIONS", fill=True)
+    pdf.cell(W[3], 8, hr_inr(f["total_deductions"]) + "  ", align="R", fill=True)
+    pdf.ln(12)
+
+    # Net pay: one bordered, lightly tinted block.
+    x, y = 18, pdf.get_y()
+    pdf.set_fill_color(*HR_GREY_100)
+    pdf.set_draw_color(*HR_GREY_500)
+    pdf.set_line_width(0.3)
+    pdf.rect(x, y, 174, 20, style="DF")
+    pdf.set_xy(x + 3, y + 2)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*HR_GREY_700)
+    pdf.cell(60, 8, "NET PAY")
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(*HR_INK)
+    pdf.cell(108, 8, f"Rs. {hr_inr(f['net'])}", align="R")
+    pdf.set_xy(x + 3, y + 12)
+    pdf.set_font("Helvetica", "B", 8.5)
+    pdf.set_text_color(*HR_GREY_700)
+    pdf.cell(168, 6, c["words"])
+    pdf.set_y(y + 26)
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*HR_GREY_500)
+    pdf.cell(20, 6, "Remarks:")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*HR_INK)
+    pdf.cell(0, 6, _hr_t(c["remarks"]), new_x="LMARGIN", new_y="NEXT")
+
+    # Signature left blank for a wet signature or stamp.
+    pdf.ln(22)
+    pdf.set_draw_color(*HR_GREY_500)
+    pdf.set_line_width(0.2)
+    pdf.line(132, pdf.get_y(), 192, pdf.get_y())
+    pdf.ln(1.5)
+    pdf.set_x(132)
+    pdf.set_font("Helvetica", "B", 9.5)
+    pdf.set_text_color(*HR_INK)
+    pdf.cell(60, 5, "Authorized Signatory", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "I", 7.8)
+    pdf.set_text_color(*HR_GREY_500)
+    pdf.cell(0, 5, "This is a computer-generated payslip.", align="C")
+    return bytes(pdf.output())
+
+
+# ── Word helpers ───────────────────────────────────────────────────────────
+# python-docx appends unknown children at the end, which breaks the schema's
+# element order. insert_element_before() places each one correctly.
+_HR_TC_AFTER_BORDERS = ("w:shd", "w:noWrap", "w:tcMar", "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark")
+_HR_TC_AFTER_SHD = _HR_TC_AFTER_BORDERS[1:]
+_HR_P_AFTER_PBDR = ("w:shd", "w:tabs", "w:suppressAutoHyphens", "w:kinsoku", "w:wordWrap", "w:overflowPunct",
+                 "w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN", "w:bidi", "w:adjustRightInd",
+                 "w:snapToGrid", "w:spacing", "w:ind", "w:contextualSpacing", "w:mirrorIndents",
+                 "w:suppressOverlap", "w:jc", "w:textDirection", "w:textAlignment", "w:textboxTightWrap",
+                 "w:outlineLvl", "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange")
+
+
+def _hr_dx_shade(cell, rgb):
+    tcPr = cell._tc.get_or_add_tcPr()
+    for old in tcPr.findall(qn("w:shd")):
+        tcPr.remove(old)
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")          # "clear", never "solid" (solid renders black)
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), _hr_hex(rgb))
+    tcPr.insert_element_before(shd, *_HR_TC_AFTER_SHD)
+
+
+def _hr_dx_cell_borders(cell, **sides):
+    """sides: top/left/bottom/right = (eighths of a point, rgb)."""
+    tcPr = cell._tc.get_or_add_tcPr()
+    for old in tcPr.findall(qn("w:tcBorders")):
+        tcPr.remove(old)
+    b = OxmlElement("w:tcBorders")
+    for side in ("top", "left", "bottom", "right"):
+        if side in sides:
+            sz, rgb = sides[side]
+            el = OxmlElement(f"w:{side}")
+            el.set(qn("w:val"), "single")
+            el.set(qn("w:sz"), str(sz))
+            el.set(qn("w:space"), "0")
+            el.set(qn("w:color"), _hr_hex(rgb))
+            b.append(el)
+    tcPr.insert_element_before(b, *_HR_TC_AFTER_BORDERS)
+
+
+def _hr_dx_par_bottom_border(p, rgb, sz=4):
+    pPr = p._p.get_or_add_pPr()
+    pb = OxmlElement("w:pBdr")
+    el = OxmlElement("w:bottom")
+    el.set(qn("w:val"), "single")
+    el.set(qn("w:sz"), str(sz))
+    el.set(qn("w:space"), "1")
+    el.set(qn("w:color"), _hr_hex(rgb))
+    pb.append(el)
+    pPr.insert_element_before(pb, *_HR_P_AFTER_PBDR)
+
+
+def _hr_dx_table(container, rows, cols, widths_mm, in_header=False):
+    """Fixed-width table, no borders of its own, tight cell margins. Widths go
+    on both the grid columns and every cell (Word and LibreOffice both need it)."""
+    t = container.add_table(rows, cols, Mm(sum(widths_mm))) if in_header else container.add_table(rows=rows, cols=cols)
+    t.autofit = False
+    tblPr = t._tbl.tblPr
+    tblW = tblPr.find(qn("w:tblW"))
+    if tblW is None:
+        tblW = OxmlElement("w:tblW")
+        tblPr.append(tblW)
+    tblW.set(qn("w:type"), "dxa")
+    tblW.set(qn("w:w"), str(int(sum(widths_mm) * 56.7)))
+    mar = OxmlElement("w:tblCellMar")
+    for side, w in (("top", 40), ("left", 90), ("bottom", 40), ("right", 90)):
+        el = OxmlElement(f"w:{side}")
+        el.set(qn("w:w"), str(w))
+        el.set(qn("w:type"), "dxa")
+        mar.append(el)
+    tblPr.insert_element_before(mar, "w:tblLook", "w:tblCaption", "w:tblDescription", "w:tblPrChange")
+    for i, w in enumerate(widths_mm):
+        t.columns[i].width = Mm(w)
+        for r in t.rows:
+            r.cells[i].width = Mm(w)
+    return t
+
+
+def _hr_dx_text(target, text, *, bold=False, size=9.5, rgb=HR_INK, align=None, italic=False, before=1.5, after=1.5,
+             left=None, right=None):
+    """Write into a cell's first paragraph, or into a paragraph directly."""
+    p = target.paragraphs[0] if hasattr(target, "paragraphs") else target
+    p.paragraph_format.space_before, p.paragraph_format.space_after = Pt(before), Pt(after)
+    if left is not None:
+        p.paragraph_format.left_indent = Mm(left)
+    if right is not None:
+        p.paragraph_format.right_indent = Mm(right)
+    if align is not None:
+        p.alignment = align
+    r = p.add_run(str(text))
+    r.bold, r.italic = bold, italic
+    r.font.size = Pt(size)
+    r.font.color.rgb = RGBColor(*rgb)
+    return p
+
+
+def _hr_dx_small_run(p, text, size, rgb):
+    r = p.add_run(text)
+    r.font.size, r.font.color.rgb = Pt(size), RGBColor(*rgb)
+    return r
+
+
+def _hr_dx_field(p, instr, size, rgb):
+    """A page-number field. Every part is its own formatted run: a field's
+    result takes the formatting of its run, and one shared run rendered the
+    number at the body size."""
+    for kind in ("begin", "instr", "separate", "text", "end"):
+        r = _hr_dx_small_run(p, "", size, rgb)
+        if kind == "instr":
+            el = OxmlElement("w:instrText")
+            el.set(qn("xml:space"), "preserve")
+            el.text = f" {instr} "
+        elif kind == "text":
+            el = OxmlElement("w:t")
+            el.text = "1"
+        else:
+            el = OxmlElement("w:fldChar")
+            el.set(qn("w:fldCharType"), kind)
+        r._r.append(el)
+
+
+def _hr_dx_spacer(doc, pts):
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = p.paragraph_format.space_after = Pt(0)
+    p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    p.paragraph_format.line_spacing = Pt(pts)
+
+
+def _hr_dx_base(logo):
+    doc = Document()
+    st = doc.styles["Normal"]
+    st.font.name = "Arial"
+    st.font.size = Pt(10)
+    st.element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+    st.paragraph_format.space_after = Pt(3)
+    st.paragraph_format.line_spacing = 1.08
+    sec = doc.sections[0]
+    sec.page_width, sec.page_height = Mm(210), Mm(297)
+    sec.left_margin = sec.right_margin = Mm(18)
+    sec.top_margin, sec.bottom_margin = Mm(38), Mm(20)
+    sec.header_distance, sec.footer_distance = Mm(9), Mm(9)
+    doc.core_properties.author = HR_COMPANY
+    doc.core_properties.title = "HR document"
+    zoom = doc.settings.element.find(qn("w:zoom"))   # python-docx's template omits the required percent
+    if zoom is not None:
+        zoom.set(qn("w:percent"), "100")
+
+    # Letterhead: logo left, company details right, a hairline underneath.
+    hdr = sec.header
+    hdr.is_linked_to_previous = False
+    t = _hr_dx_table(hdr, 1, 2, (40, 134), in_header=True)
+    left, right = t.rows[0].cells
+    left.paragraphs[0].add_run().add_picture(io.BytesIO(logo), height=Mm(15))
+    left.paragraphs[0].paragraph_format.space_after = Pt(0)
+    _hr_dx_text(right, HR_COMPANY_CAPS, bold=True, size=11.5, align=WD_ALIGN_PARAGRAPH.RIGHT, before=0, after=1)
+    for line in (HR_ADDRESS_1, HR_ADDRESS_2, f"Ph: {HR_PHONE}   |   {HR_EMAIL}"):
+        _hr_dx_text(right.add_paragraph(), line, size=8.2, rgb=HR_GREY_500, align=WD_ALIGN_PARAGRAPH.RIGHT,
+                 before=0, after=0)
+    rule = hdr.paragraphs[0]               # python-docx starts the header with one paragraph
+    rule._p.addprevious(t._tbl)            # table first, the hairline paragraph after it
+    rule.paragraph_format.space_before, rule.paragraph_format.space_after = Pt(2), Pt(0)
+    rule.add_run("").font.size = Pt(2)
+    _hr_dx_par_bottom_border(rule, HR_GREY_300, 6)
+
+    ft = sec.footer
+    ft.is_linked_to_previous = False
+    p = ft.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for txt, fld in ((f"{HR_COMPANY}   |   Page ", None), ("", "PAGE"), (" of ", None), ("", "NUMPAGES")):
+        if fld:
+            _hr_dx_field(p, fld, 7.5, HR_GREY_500)
+        else:
+            _hr_dx_small_run(p, txt, 7.5, HR_GREY_500)
+
+    body = doc.element.body                # drop any starting paragraph
+    for para in list(body.findall(qn("w:p"))):
+        body.remove(para)
+    return doc
+
+
+def _hr_dx_heading(doc, title):
+    p = doc.add_paragraph()
+    _hr_dx_par_bottom_border(p, HR_GREY_300, 4)
+    p.paragraph_format.space_before, p.paragraph_format.space_after = Pt(9), Pt(3)
+    p.paragraph_format.keep_with_next = True
+    r = p.add_run(title.upper())
+    r.bold, r.font.size, r.font.color.rgb = True, Pt(9), RGBColor(*HR_GREY_700)
+
+
+def _hr_dx_para(doc, text, size=9.6, rgb=HR_INK, bold=False, before=0, after=3, keep_next=False, align=None):
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before, p.paragraph_format.space_after = Pt(before), Pt(after)
+    p.paragraph_format.keep_with_next = keep_next
+    if align is not None:
+        p.alignment = align
+    r = p.add_run(text)
+    r.font.size, r.bold, r.font.color.rgb = Pt(size), bold, RGBColor(*rgb)
+    return p
+
+
+def _hr_offer_docx(c, logo) -> bytes:
+    doc = _hr_dx_base(logo)
+    p = doc.add_paragraph()
+    p.paragraph_format.tab_stops.add_tab_stop(Mm(174), alignment=WD_TAB_ALIGNMENT.RIGHT)
+    r = p.add_run(f"Ref: {c['ref']}\tDate: {c['date']}")
+    r.font.size, r.font.color.rgb = Pt(9.5), RGBColor(*HR_GREY_500)
+    _hr_dx_para(doc, "To,", 10, before=4, after=0)
+    _hr_dx_para(doc, c["who"], 10.5, bold=True, after=6)
+    _hr_dx_para(doc, f"Subject: {c['subject']}", 10.5, bold=True, after=5)
+    _hr_dx_para(doc, c["greeting"])
+    _hr_dx_para(doc, c["intro"], after=5)
+
+    t = _hr_dx_table(doc, len(c["terms"]), 2, (46, 128))
+    for i, (k, v) in enumerate(c["terms"]):
+        a, b = t.rows[i].cells
+        for cell in (a, b):
+            _hr_dx_cell_borders(cell, bottom=(4, HR_GREY_300))
+            if i % 2 == 0:
+                _hr_dx_shade(cell, HR_GREY_100)
+        _hr_dx_text(a, k, bold=True, size=9.2, rgb=HR_GREY_500, before=2.5, after=2.5)
+        _hr_dx_text(b, v, size=9.5, before=2.5, after=2.5)
+
+    _hr_dx_heading(doc, "Compensation")
+    _hr_dx_para(doc, c["comp"])
+    if c["duties"]:
+        _hr_dx_heading(doc, "Role and Responsibilities")
+        for d in c["duties"]:
+            bp = doc.add_paragraph(style="List Bullet")
+            bp.paragraph_format.space_after = Pt(2)
+            bp.add_run(d).font.size = Pt(9.4)
+    if c["schedule"]:
+        _hr_dx_heading(doc, "Working Schedule")
+        _hr_dx_para(doc, c["schedule"], 9.4)
+    if c["additional"]:
+        _hr_dx_heading(doc, "Additional Terms")
+        _hr_dx_para(doc, c["additional"], 9.4)
+    _hr_dx_heading(doc, "Documents Required on Joining")
+    _hr_dx_para(doc, c["docs"], 9.4)
+    _hr_dx_para(doc, c["closing"], before=6, after=6, keep_next=True)
+
+    # Signatures: blank space for a wet signature and the company seal.
+    s = _hr_dx_table(doc, 4, 3, (68, 38, 68))
+    s.rows[1].height, s.rows[1].height_rule = Mm(18), WD_ROW_HEIGHT.AT_LEAST
+    labels = (f"For {HR_COMPANY}", "", "Accepted by")
+    names = ((c["signatory"], True), ("", False), (c["who"], True))
+    subs = ("Authorized Signatory", "", "Date:")
+    for j in (0, 2):
+        _hr_dx_text(s.rows[0].cells[j], labels[j], size=9.5, before=0, after=0)
+        _hr_dx_cell_borders(s.rows[1].cells[j], bottom=(4, HR_GREY_500))
+        _hr_dx_text(s.rows[2].cells[j], names[j][0], bold=names[j][1], size=9.5, before=2, after=0)
+        _hr_dx_text(s.rows[3].cells[j], subs[j], size=8.8, rgb=HR_GREY_500, before=0, after=0)
+    for row in s.rows:
+        for cell in row.cells:
+            for par in cell.paragraphs:
+                par.paragraph_format.keep_with_next = True
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _hr_payslip_docx(c, logo) -> bytes:
+    f = c["f"]
+    R = WD_ALIGN_PARAGRAPH.RIGHT
+    doc = _hr_dx_base(logo)
+    p = _hr_dx_para(doc, c["title"], 13, bold=True, before=4, after=6, align=WD_ALIGN_PARAGRAPH.CENTER)
+    _hr_dx_par_bottom_border(p, HR_GREY_500, 4)
+
+    d = _hr_dx_table(doc, 6, 4, (32, 55, 38, 49))
+    for i, ((lk, lv), (rk, rv)) in enumerate(zip(c["left"], c["right"])):
+        cells = d.rows[i].cells
+        for j, (txt, is_label) in enumerate(((lk, True), (lv, False), (rk, True), (rv, False))):
+            _hr_dx_cell_borders(cells[j], bottom=(4, HR_GREY_300))
+            if is_label:
+                _hr_dx_shade(cells[j], HR_GREY_100)
+            _hr_dx_text(cells[j], txt, bold=is_label, size=9, rgb=HR_GREY_500 if is_label else HR_INK,
+                     before=2.5, after=2.5)
+    _hr_dx_spacer(doc, 10)
+
+    rows = max(len(f["earnings"]), len(f["deductions"]))
+    t = _hr_dx_table(doc, rows + 2, 4, (60, 27, 60, 27))
+    for j, (txt, al) in enumerate((("EMOLUMENTS", None), ("AMOUNT Rs.", R), ("DEDUCTIONS", None), ("AMOUNT Rs.", R))):
+        cell = t.rows[0].cells[j]
+        _hr_dx_cell_borders(cell, bottom=(6, HR_GREY_500))
+        _hr_dx_shade(cell, HR_GREY_200)
+        _hr_dx_text(cell, txt, bold=True, size=9, align=al, before=3, after=3,
+                 left=3 if j == 2 else None, right=2.5 if j in (1, 3) else None)
+    show = lambda v: "" if v is None else (hr_inr(v) if v else "-")
+    for i in range(rows):
+        e = f["earnings"][i] if i < len(f["earnings"]) else ("", None)
+        dd = f["deductions"][i] if i < len(f["deductions"]) else ("", None)
+        cells = t.rows[i + 1].cells
+        for j, (txt, al) in enumerate(((e[0], None), (show(e[1]), R), (dd[0], None), (show(dd[1]), R))):
+            _hr_dx_cell_borders(cells[j], bottom=(4, HR_GREY_300))
+            _hr_dx_text(cells[j], txt, size=9, align=al, before=3, after=3,
+                     left=3 if j == 2 else None, right=2.5 if j in (1, 3) else None)
+    cells = t.rows[rows + 1].cells
+    for j, (txt, al) in enumerate((("GROSS PAY", None), (hr_inr(f["gross"]), R),
+                                   ("TOTAL DEDUCTIONS", None), (hr_inr(f["total_deductions"]), R))):
+        _hr_dx_shade(cells[j], HR_GREY_100)
+        _hr_dx_text(cells[j], txt, bold=True, size=9.5, align=al, before=3.5, after=3.5,
+                 left=3 if j == 2 else None, right=2.5 if j in (1, 3) else None)
+    _hr_dx_spacer(doc, 14)
+
+    # Net pay: a lightly tinted block with a box around it.
+    n = _hr_dx_table(doc, 2, 2, (100, 74))
+    box = (6, HR_GREY_500)
+    _hr_dx_cell_borders(n.rows[0].cells[0], top=box, left=box)
+    _hr_dx_cell_borders(n.rows[0].cells[1], top=box, right=box)
+    for cell in n.rows[0].cells:
+        _hr_dx_shade(cell, HR_GREY_100)
+    _hr_dx_text(n.rows[0].cells[0], "NET PAY", bold=True, size=10, rgb=HR_GREY_700, before=6, after=2)
+    _hr_dx_text(n.rows[0].cells[1], f"Rs. {hr_inr(f['net'])}", bold=True, size=14, align=R, before=4, after=2)
+    merged = n.rows[1].cells[0].merge(n.rows[1].cells[1])
+    _hr_dx_cell_borders(merged, bottom=box, left=box, right=box)
+    _hr_dx_shade(merged, HR_GREY_100)
+    _hr_dx_text(merged, c["words"], bold=True, size=8.5, rgb=HR_GREY_700, before=0, after=6)
+
+    rem = doc.add_paragraph()
+    rem.paragraph_format.space_before = Pt(10)
+    r1 = rem.add_run("Remarks:  ")
+    r1.bold, r1.font.size, r1.font.color.rgb = True, Pt(9), RGBColor(*HR_GREY_500)
+    rem.add_run(c["remarks"]).font.size = Pt(9)
+
+    sig = _hr_dx_table(doc, 2, 2, (114, 60))
+    sig.rows[0].height, sig.rows[0].height_rule = Mm(20), WD_ROW_HEIGHT.AT_LEAST
+    _hr_dx_cell_borders(sig.rows[0].cells[1], bottom=(4, HR_GREY_500))
+    _hr_dx_text(sig.rows[1].cells[1], "Authorized Signatory", bold=True, size=9.5,
+             align=WD_ALIGN_PARAGRAPH.CENTER, before=2, after=0)
+    _hr_dx_para(doc, "This is a computer-generated payslip.", 7.8, rgb=HR_GREY_500, before=14,
+             align=WD_ALIGN_PARAGRAPH.CENTER)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+# ── Public builders ────────────────────────────────────────────────────────
+HR_MIME = {"pdf": "application/pdf",
+           "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+
+
+def hr_build_offer_letter(fmt, logo_bytes, *, name, designation, place, joining, monthly_salary,
+                          letter_date, ref_no, salutation="Mr.", duties=(), schedule="", additional="",
+                          project=HR_DEFAULT_PROJECT, signatory=HR_SIGNATORY) -> bytes:
+    c = _hr_offer_content(name=name, salutation=salutation, designation=designation, place=place, joining=joining,
+                       monthly_salary=int(monthly_salary), letter_date=letter_date, ref_no=ref_no,
+                       duties=duties, schedule=schedule, additional=additional, project=project,
+                       signatory=signatory)
+    if fmt == "docx":
+        if not HR_DOCX_OK:
+            raise RuntimeError("Word output needs python-docx; add it to requirements.txt.")
+        return _hr_offer_docx(c, logo_bytes)
+    return _hr_offer_pdf(c, logo_bytes)
+
+
+def hr_build_payslip(fmt, logo_bytes, *, month_label, name, emp_id, designation, location, earnings,
+                     working_days, public_holidays, days_present, pt=0, tds=0, other=0, bank="",
+                     account="", pan="", pf="", remarks="", salutation="Mr.") -> bytes:
+    c = _hr_payslip_content(month_label=month_label, name=name, salutation=salutation, emp_id=emp_id,
+                         designation=designation, location=location, earnings=earnings,
+                         working_days=working_days, public_holidays=public_holidays,
+                         days_present=days_present, pt=pt, tds=tds, other=other, bank=bank,
+                         account=account, pan=pan, pf=pf, remarks=remarks)
+    if fmt == "docx":
+        if not HR_DOCX_OK:
+            raise RuntimeError("Word output needs python-docx; add it to requirements.txt.")
+        return _hr_payslip_docx(c, logo_bytes)
+    return _hr_payslip_pdf(c, logo_bytes)
+
+
+# ── HR: employee records, roles, and the sheet plumbing ────────────────────
+HR_EMP_COLS = ["emp_id", "name", "salutation", "designation", "location", "monthly_salary",
+               "joining_date", "bank", "account_no", "pan", "pf_no", "status", "offer_ref"]
+HR_ROLE_COLS = ["designation", "duties", "schedule"]
+HR_GUARDED = ("account_no", "pf_no", "joining_date")   # kept as text by the '#' guard
+
+
+@st.cache_resource(show_spinner=False)
+def hr_logo_bytes() -> bytes:
+    return base64.b64decode(LOGO_PRINT_B64)
+
+
+def hr_sheet_missing(name: str) -> bool:
+    """True when the tab hasn't been created in the Google Sheet yet — so the
+    HR tab can say so plainly instead of failing a save three times."""
+    try:
+        got = _batched(name)
+    except Exception:
+        return False
+    return isinstance(got, str) and got == _MISSING
+
+
+def hr_load_employees() -> pd.DataFrame:
+    df = get_data("Employees")
+    if df.empty:
+        df = pd.DataFrame(columns=HR_EMP_COLS)
+    df = df.copy()
+    for c in HR_EMP_COLS:
+        if c not in df.columns:
+            df[c] = ""
+    df = df[HR_EMP_COLS].astype(str)
+    for c in HR_EMP_COLS:
+        df[c] = df[c].str.strip().replace({"nan": "", "None": ""})
+    for c in HR_GUARDED:
+        df[c] = df[c].map(hr_unguard)
+    df["monthly_salary"] = pd.to_numeric(df["monthly_salary"].str.replace(",", "", regex=False),
+                                         errors="coerce").fillna(0).astype(int)
+    df = df[(df["emp_id"] != "") | (df["name"] != "")]
+    return df.reset_index(drop=True)
+
+
+def hr_employees_for_sheet(df: pd.DataFrame) -> pd.DataFrame:
+    out = df[HR_EMP_COLS].copy()
+    for c in HR_GUARDED:
+        out[c] = out[c].map(hr_guard)
+    out["monthly_salary"] = out["monthly_salary"].astype(int)
+    return out
+
+
+def hr_prepare_saved_employees(edited: pd.DataFrame, original: pd.DataFrame) -> pd.DataFrame:
+    """The Employees table as it should be saved, from the editor's output:
+    ticked rows dropped, dates and numbers normalised, and each person's offer
+    reference carried over from their saved record (it isn't shown in the editor)."""
+    keep = edited[~edited["Delete"]].drop(columns=["Delete"]).copy()
+    keep["joining_date"] = keep["joining_date"].map(
+        lambda d: d.isoformat() if hasattr(d, "isoformat") and pd.notna(d) else "")
+    keep["monthly_salary"] = pd.to_numeric(keep["monthly_salary"], errors="coerce").fillna(0).astype(int)
+    for c in ("emp_id", "name", "designation", "location", "bank", "account_no", "pan", "pf_no",
+              "salutation", "status"):
+        keep[c] = keep[c].fillna("").astype(str).str.strip()
+    keep["pan"] = keep["pan"].str.upper()
+    keep["offer_ref"] = keep["emp_id"].map(dict(zip(original["emp_id"], original["offer_ref"]))).fillna("")
+    return keep[HR_EMP_COLS].reset_index(drop=True)
+
+
+def hr_save_employees(df: pd.DataFrame) -> bool:
+    return safe_update("Employees", hr_employees_for_sheet(df))
+
+
+def hr_add_employee(row: dict) -> bool:
+    """Add one employee. Appends only that row; falls back to a full rewrite."""
+    guarded = {c: (hr_guard(row.get(c, "")) if c in HR_GUARDED else row.get(c, "")) for c in HR_EMP_COLS}
+    if append_rows("Employees", [guarded], HR_EMP_COLS):
+        return True
+    cur = hr_load_employees()
+    return hr_save_employees(pd.concat([cur, pd.DataFrame([row])[HR_EMP_COLS]], ignore_index=True))
+
+
+def hr_load_roles() -> dict:
+    """Built-in roles, overlaid with any the user has saved or added."""
+    roles = {k: {"duties": list(v["duties"]), "schedule": v["schedule"], "saved": False}
+             for k, v in HR_DEFAULT_ROLES.items()}
+    df = get_data("Roles")
+    if not df.empty and has_col(df, "designation", "duties"):
+        for _, r in df.iterrows():
+            name = str(r["designation"]).strip()
+            if not name or name == "nan":
+                continue
+            duties = [d.strip() for d in str(r["duties"]).split("\n") if d.strip()]
+            sched = str(r["schedule"]).strip() if "schedule" in df.columns else ""
+            roles[name] = {"duties": duties, "schedule": "" if sched == "nan" else sched, "saved": True}
+    return roles
+
+
+def _hr_roles_frame() -> pd.DataFrame:
+    df = get_data("Roles")
+    if df.empty or "designation" not in df.columns:
+        return pd.DataFrame(columns=HR_ROLE_COLS)
+    df = df.copy()
+    for c in HR_ROLE_COLS:
+        if c not in df.columns:
+            df[c] = ""
+    return df[HR_ROLE_COLS]
+
+
+def hr_save_role(designation: str, duties_text: str, schedule: str) -> bool:
+    df = _hr_roles_frame()
+    df = df[df["designation"].astype(str).str.strip() != designation]
+    row = pd.DataFrame([{"designation": designation, "duties": duties_text.strip(), "schedule": schedule.strip()}])
+    return safe_update("Roles", pd.concat([df, row], ignore_index=True))
+
+
+def hr_delete_role(designation: str) -> bool:
+    df = _hr_roles_frame()
+    return safe_update("Roles", df[df["designation"].astype(str).str.strip() != designation])
+
+
+def hr_slug(text: str) -> str:
+    return _re.sub(r"[^A-Za-z0-9]+", "_", str(text)).strip("_") or "file"
 
 
 # ── Daily install calendar ─────────────────────────────────────────────────
@@ -4644,8 +5709,8 @@ with head_search:
 # ── Tabs Configuration ────────────────────────────────────────────────────────
 # Plain labels — the design system uses no emoji as interface icons, and they
 # render differently on every device.
-tab_dash, tab_analytics, tab_map, tab_exp, tab_liaison, tab_inst, tab_inv, tab_admin = st.tabs([
-    "Dashboard", "Analytics", "Map", "Expenses", "Liaisoning", "Installs", "Store", "Admin"
+tab_dash, tab_analytics, tab_map, tab_exp, tab_liaison, tab_inst, tab_inv, tab_hr, tab_admin = st.tabs([
+    "Dashboard", "Analytics", "Map", "Expenses", "Liaisoning", "Installs", "Store", "HR", "Admin"
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -6756,6 +7821,371 @@ with tab_inv:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ADMIN
 # ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  HR — offer letters, payslips, employee records, roles
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_hr:
+    tab_action_bar("hr")
+    import calendar as _hr_cal
+    _hr_today = today_ist()
+    _hr_emp = hr_load_employees()
+    _hr_roles = hr_load_roles()
+    _hr_emp_missing = hr_sheet_missing("Employees")
+    _hr_roles_missing = hr_sheet_missing("Roles")
+    hv = st.session_state.setdefault("hr_form_version", 0)
+
+    def _hr_setup_note(sheet: str, header: str):
+        st.markdown(
+            f'<div class="warn-box">The <b>{sheet}</b> tab doesn\'t exist in the Google Sheet yet. Create a tab '
+            f'named <b>{sheet}</b> with this header row, then tap Refresh:<br/><code>{header}</code></div>',
+            unsafe_allow_html=True)
+
+    def _hr_format_choice(key: str) -> str:
+        pick = st.radio("File format", ["PDF", "Word (.docx)"], horizontal=True, key=key)
+        return "docx" if pick.startswith("Word") else "pdf"
+
+    hr_t_offer, hr_t_slip, hr_t_emp, hr_t_roles = st.tabs(["Offer Letter", "Payslip", "Employees", "Roles"])
+
+    # ── Offer letter ───────────────────────────────────────────────────────
+    with hr_t_offer:
+        sec_hdr("file", "Offer Letter")
+        if _hr_emp_missing:
+            _hr_setup_note("Employees", ", ".join(HR_EMP_COLS))
+        oc1, oc2 = st.columns([1, 3])
+        with oc1:
+            ol_sal = st.selectbox("Title", ["Mr.", "Ms.", "Mrs."], key=f"hr_ol_sal_{hv}")
+        with oc2:
+            ol_name = st.text_input("Employee name", key=f"hr_ol_name_{hv}", placeholder="e.g. Ravi Kumar")
+        oc3, oc4 = st.columns(2)
+        with oc3:
+            ol_role = st.selectbox("Designation", list(_hr_roles) + ["Other (type below)"], key=f"hr_ol_role_{hv}")
+        _is_other = ol_role.startswith("Other")
+        with oc4:
+            ol_custom = st.text_input("Custom designation", key=f"hr_ol_custom_{hv}",
+                                      disabled=not _is_other, placeholder="Only for 'Other'")
+        ol_designation = (ol_custom if _is_other else ol_role).strip()
+        oc5, oc6 = st.columns(2)
+        with oc5:
+            ol_place = st.text_input("Place of work", value="Vijayawada", key=f"hr_ol_place_{hv}")
+        with oc6:
+            ol_join = st.date_input("Date of joining", value=_hr_today, key=f"hr_ol_join_{hv}")
+        oc7, oc8 = st.columns(2)
+        with oc7:
+            ol_salary = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500, value=0,
+                                        key=f"hr_ol_salary_{hv}")
+        with oc8:
+            ol_date = st.date_input("Letter date", value=_hr_today, key=f"hr_ol_date_{hv}")
+        if ol_salary:
+            st.markdown(f'<div class="info-box">Rs. {hr_inr(ol_salary)} per month &nbsp;·&nbsp; '
+                        f'Rs. {hr_inr(ol_salary * 12)} per annum</div>', unsafe_allow_html=True)
+
+        _base = _hr_roles.get(ol_role, {"duties": [], "schedule": ""})
+        _duties_default, _sched_default = "\n".join(_base["duties"]), _base["schedule"]
+        # The key carries a fingerprint of the saved role, so editing a role in
+        # the Roles tab refreshes these boxes instead of showing stale text.
+        _fp = hashlib.md5((_duties_default + "|" + _sched_default).encode()).hexdigest()[:6]
+        ol_duties = st.text_area("Role and responsibilities (one per line)", value=_duties_default, height=170,
+                                 key=f"hr_ol_duties_{hv}_{hr_slug(ol_role)}_{_fp}")
+        ol_sched = st.text_area("Working schedule", value=_sched_default, height=88,
+                                key=f"hr_ol_sched_{hv}_{hr_slug(ol_role)}_{_fp}")
+        ol_extra = st.text_area("Additional terms (optional)", value="", height=70, key=f"hr_ol_extra_{hv}",
+                                placeholder="e.g. accommodation, travel allowance")
+        oc9, oc10 = st.columns(2)
+        with oc9:
+            ol_project = st.text_input("Project", value=HR_DEFAULT_PROJECT, key=f"hr_ol_project_{hv}",
+                                       help="Leave blank to leave the project out of the letter.")
+        with oc10:
+            ol_signer = st.text_input("Signed by", value=HR_SIGNATORY, key=f"hr_ol_signer_{hv}")
+        ol_fmt = _hr_format_choice(f"hr_ol_fmt_{hv}")
+        ol_add = st.checkbox("Add to employee records", value=not _hr_emp_missing, disabled=_hr_emp_missing,
+                             key=f"hr_ol_add_{hv}")
+        _sug_id = hr_next_emp_id(_hr_emp["emp_id"])
+        ol_empid = st.text_input("Employee ID", value=_sug_id, key=f"hr_ol_empid_{hv}_{_sug_id}") if ol_add else ""
+        _ref = hr_next_offer_ref(_hr_emp["offer_ref"], ol_date)
+        st.caption(f"Reference: {_ref}")
+
+        if st.button("Generate Offer Letter", type="primary", use_container_width=True, key="hr_ol_go"):
+            errs = []
+            if not ol_name.strip():
+                errs.append("Enter the employee's name.")
+            if not ol_designation:
+                errs.append("Enter the designation.")
+            if not ol_place.strip():
+                errs.append("Enter the place of work.")
+            if ol_salary <= 0:
+                errs.append("Enter the monthly salary.")
+            if ol_add and not ol_empid.strip():
+                errs.append("Enter an employee ID.")
+            if ol_add and ol_empid.strip().upper() in set(_hr_emp["emp_id"].str.upper()):
+                errs.append(f"{ol_empid.strip()} is already in the employee records.")
+            if ol_fmt == "docx" and not HR_DOCX_OK:
+                errs.append("Word output needs python-docx in requirements.txt. Choose PDF for now.")
+            if errs:
+                st.error("❌ " + " ".join(errs))
+            else:
+                try:
+                    _bytes = hr_build_offer_letter(
+                        ol_fmt, hr_logo_bytes(), name=ol_name.strip(), designation=ol_designation,
+                        place=ol_place.strip(), joining=ol_join, monthly_salary=int(ol_salary),
+                        letter_date=ol_date, ref_no=_ref, salutation=ol_sal, duties=ol_duties.split("\n"),
+                        schedule=ol_sched, additional=ol_extra, project=ol_project.strip(),
+                        signatory=ol_signer.strip() or HR_SIGNATORY)
+                except Exception as e:
+                    st.error(f"❌ Couldn't build the letter ({e}).")
+                else:
+                    st.session_state["hr_offer_file"] = {
+                        "bytes": _bytes, "mime": HR_MIME[ol_fmt],
+                        "name": f"Offer_Letter_{hr_slug(ol_name)}.{ol_fmt}",
+                        "label": f"{ol_name.strip()} ({ol_fmt.upper()})"}
+                    if ol_add:
+                        _saved = hr_add_employee({
+                            "emp_id": ol_empid.strip(), "name": ol_name.strip(), "salutation": ol_sal,
+                            "designation": ol_designation, "location": ol_place.strip(),
+                            "monthly_salary": int(ol_salary), "joining_date": ol_join.isoformat(),
+                            "bank": "", "account_no": "", "pan": "", "pf_no": "", "status": "Active",
+                            "offer_ref": _ref})
+                        if _saved:
+                            st.session_state["hr_form_version"] = hv + 1
+                            st.success(f"✅ Offer letter ready. {ol_empid.strip()} added to the employee records.")
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ The letter is ready below, but the employee record wasn't saved.")
+                    else:
+                        st.success("✅ Offer letter ready.")
+        _f = st.session_state.get("hr_offer_file")
+        if _f:
+            st.download_button(f"📥 Download {_f['label']}", data=_f["bytes"], file_name=_f["name"],
+                               mime=_f["mime"], key="hr_dl_offer", on_click="ignore", use_container_width=True)
+
+    # ── Payslip ────────────────────────────────────────────────────────────
+    with hr_t_slip:
+        sec_hdr("receipt", "Payslip")
+        _act = _hr_emp[_hr_emp["status"].str.lower() != "exited"]
+        if _hr_emp_missing:
+            _hr_setup_note("Employees", ", ".join(HR_EMP_COLS))
+        elif _act.empty:
+            st.info("No employees yet. Add them in the Employees tab, or tick 'Add to employee records' "
+                    "when generating an offer letter.")
+        else:
+            _labels = {r["emp_id"]: f"{r['emp_id']} — {r['name']} ({r['designation']})" for _, r in _act.iterrows()}
+            ps_emp_id = st.selectbox("Employee", list(_labels), format_func=_labels.get, key="hr_ps_emp")
+            emp = _act[_act["emp_id"] == ps_emp_id].iloc[0]
+            _months = []
+            _y, _m = _hr_today.year, _hr_today.month
+            for _ in range(12):
+                _months.append(f"{_y:04d}-{_m:02d}")
+                _m -= 1
+                if _m == 0:
+                    _y, _m = _y - 1, 12
+            ps_month = st.selectbox("Month", _months, index=1, format_func=month_label, key="hr_ps_month")
+            _py, _pm = int(ps_month[:4]), int(ps_month[5:])
+            _month_long = datetime(_py, _pm, 1).strftime("%B %Y")
+            _dim = _hr_cal.monthrange(_py, _pm)[1]
+            _jd = pd.to_datetime(emp["joining_date"], errors="coerce")
+            if pd.notna(_jd) and ps_month < _jd.strftime("%Y-%m"):
+                st.markdown(f'<div class="warn-box">{emp["name"]} joined in {_jd.strftime("%B %Y")}, after '
+                            f'{_month_long}.</div>', unsafe_allow_html=True)
+
+            ps_salary = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500,
+                                        value=int(emp["monthly_salary"]), key=f"hr_ps_sal_{ps_emp_id}")
+            pc1, pc2, pc3 = st.columns(3)
+            with pc1:
+                ps_wd = st.number_input("Working days", min_value=1, max_value=31, value=_dim, step=1,
+                                        key=f"hr_ps_wd_{ps_month}",
+                                        help="The days in the month. Pay is the full monthly amount; "
+                                             "attendance is shown on the slip, not prorated.")
+            with pc2:
+                ps_ph = st.number_input("Public holidays", min_value=0, max_value=31, value=0, step=1,
+                                        key=f"hr_ps_ph_{ps_month}")
+            with pc3:
+                ps_dp = min(st.number_input("Days present", min_value=0, max_value=31, value=_dim, step=1,
+                                            key=f"hr_ps_dp_{ps_emp_id}_{ps_month}"), ps_wd)
+            dc1, dc2, dc3 = st.columns(3)
+            with dc1:
+                ps_pt = st.number_input("Professional tax (Rs.)", min_value=0, step=50,
+                                        value=hr_professional_tax(ps_salary), key=f"hr_ps_pt_{ps_emp_id}_{ps_salary}",
+                                        help="Andhra Pradesh / Telangana slab: nil to 15,000; 150 to 20,000; 200 above.")
+            with dc2:
+                ps_tds = st.number_input("TDS (Rs.)", min_value=0, step=100, value=0, key=f"hr_ps_tds_{ps_emp_id}")
+            with dc3:
+                ps_other = st.number_input("Other deductions (Rs.)", min_value=0, step=100, value=0,
+                                           key=f"hr_ps_other_{ps_emp_id}", help="Loans, advances, loss of pay.")
+            with st.expander("Salary breakup (edit if needed)"):
+                _split = pd.DataFrame(hr_salary_split(ps_salary), columns=["Component", "Amount (Rs.)"])
+                _edited = st.data_editor(
+                    _split, hide_index=True, use_container_width=True, disabled=["Component"],
+                    key=f"hr_ps_split_{ps_emp_id}_{ps_salary}",
+                    column_config={"Amount (Rs.)": st.column_config.NumberColumn(min_value=0, step=100, format="%d")},
+                    height=dataframe_height(len(_split)))
+            ps_earnings = [(r["Component"], int(r["Amount (Rs.)"] or 0)) for _, r in _edited.iterrows()]
+            ps_remarks = st.text_input("Remarks (optional)", key=f"hr_ps_remarks_{ps_emp_id}")
+            _fig = hr_payslip_figures(ps_earnings, ps_pt, ps_tds, ps_other, ps_wd, ps_ph, ps_dp)
+            if _fig["gross"] != ps_salary:
+                st.markdown(f'<div class="warn-box">The breakup adds up to Rs. {hr_inr(_fig["gross"])}, not the '
+                            f'salary of Rs. {hr_inr(ps_salary)}. The payslip uses the breakup total.</div>',
+                            unsafe_allow_html=True)
+            render_stat_tiles([
+                ("rupee", hr_inr(_fig["gross"]), "Gross", "Rs.", "normal"),
+                ("wallet", hr_inr(_fig["total_deductions"]), "Deductions", "Rs.", "normal"),
+                ("rupee", hr_inr(_fig["net"]), "Net pay", "Rs.", "normal"),
+                ("calendar", f"{_fig['effective']}", "Effective", "days", "normal"),
+            ])
+            ps_fmt = _hr_format_choice("hr_ps_fmt")
+            if st.button("Generate Payslip", type="primary", use_container_width=True, key="hr_ps_go"):
+                if ps_fmt == "docx" and not HR_DOCX_OK:
+                    st.error("❌ Word output needs python-docx in requirements.txt. Choose PDF for now.")
+                else:
+                    try:
+                        _pb = hr_build_payslip(
+                            ps_fmt, hr_logo_bytes(), month_label=_month_long, name=emp["name"],
+                            emp_id=emp["emp_id"], designation=emp["designation"], location=emp["location"],
+                            earnings=ps_earnings, working_days=ps_wd, public_holidays=ps_ph, days_present=ps_dp,
+                            pt=ps_pt, tds=ps_tds, other=ps_other, bank=emp["bank"], account=emp["account_no"],
+                            pan=emp["pan"], pf=emp["pf_no"], remarks=ps_remarks.strip(),
+                            salutation=emp["salutation"] or "Mr.")
+                    except Exception as e:
+                        st.error(f"❌ Couldn't build the payslip ({e}).")
+                    else:
+                        st.session_state["hr_slip_file"] = {
+                            "bytes": _pb, "mime": HR_MIME[ps_fmt],
+                            "name": f"Payslip_{hr_slug(emp['emp_id'])}_{ps_month}.{ps_fmt}",
+                            "label": f"{emp['name']} — {_month_long} ({ps_fmt.upper()})"}
+                        st.success("✅ Payslip ready.")
+            _pf = st.session_state.get("hr_slip_file")
+            if _pf:
+                st.download_button(f"📥 Download {_pf['label']}", data=_pf["bytes"], file_name=_pf["name"],
+                                   mime=_pf["mime"], key="hr_dl_slip", on_click="ignore", use_container_width=True)
+
+    # ── Employees ──────────────────────────────────────────────────────────
+    with hr_t_emp:
+        sec_hdr("users", "Employee Records")
+        if _hr_emp_missing:
+            _hr_setup_note("Employees", ", ".join(HR_EMP_COLS))
+        with st.expander("Add an employee"):
+            ae1, ae2, ae3 = st.columns([1, 1, 3])
+            with ae1:
+                _ae_sug = hr_next_emp_id(_hr_emp["emp_id"])
+                ae_id = st.text_input("Employee ID", value=_ae_sug, key=f"hr_ae_id_{hv}_{_ae_sug}")
+            with ae2:
+                ae_sal = st.selectbox("Title", ["Mr.", "Ms.", "Mrs."], key=f"hr_ae_sal_{hv}")
+            with ae3:
+                ae_name = st.text_input("Name", key=f"hr_ae_name_{hv}")
+            ae4, ae5 = st.columns(2)
+            with ae4:
+                ae_role = st.selectbox("Designation", list(_hr_roles) + ["Other (type below)"], key=f"hr_ae_role_{hv}")
+            with ae5:
+                ae_custom = st.text_input("Custom designation", key=f"hr_ae_custom_{hv}",
+                                          disabled=not ae_role.startswith("Other"))
+            ae6, ae7, ae8 = st.columns(3)
+            with ae6:
+                ae_loc = st.text_input("Location", value="Vijayawada", key=f"hr_ae_loc_{hv}")
+            with ae7:
+                ae_pay = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500, value=0, key=f"hr_ae_pay_{hv}")
+            with ae8:
+                ae_join = st.date_input("Date of joining", value=_hr_today, key=f"hr_ae_join_{hv}")
+            ae9, ae10, ae11, ae12 = st.columns(4)
+            with ae9:
+                ae_bank = st.text_input("Bank", key=f"hr_ae_bank_{hv}")
+            with ae10:
+                ae_acc = st.text_input("Account number", key=f"hr_ae_acc_{hv}")
+            with ae11:
+                ae_pan = st.text_input("PAN", key=f"hr_ae_pan_{hv}")
+            with ae12:
+                ae_pf = st.text_input("PF number", key=f"hr_ae_pf_{hv}")
+            if st.button("Add Employee", type="primary", use_container_width=True, key="hr_ae_go",
+                         disabled=_hr_emp_missing):
+                _des = (ae_custom if ae_role.startswith("Other") else ae_role).strip()
+                if not ae_id.strip() or not ae_name.strip() or not _des:
+                    st.error("❌ Employee ID, name and designation are required.")
+                elif ae_id.strip().upper() in set(_hr_emp["emp_id"].str.upper()):
+                    st.error(f"❌ {ae_id.strip()} already exists.")
+                elif hr_add_employee({
+                        "emp_id": ae_id.strip(), "name": ae_name.strip(), "salutation": ae_sal, "designation": _des,
+                        "location": ae_loc.strip(), "monthly_salary": int(ae_pay), "joining_date": ae_join.isoformat(),
+                        "bank": ae_bank.strip(), "account_no": ae_acc.strip(), "pan": ae_pan.strip().upper(),
+                        "pf_no": ae_pf.strip(), "status": "Active", "offer_ref": ""}):
+                    st.session_state["hr_form_version"] = hv + 1
+                    st.success(f"✅ {ae_id.strip()} — {ae_name.strip()} added.")
+                    st.rerun()
+
+        if _hr_emp.empty:
+            if not _hr_emp_missing:
+                st.info("No employees yet.")
+        else:
+            _view = _hr_emp.drop(columns=["offer_ref"]).copy()
+            _view["joining_date"] = pd.to_datetime(_view["joining_date"], errors="coerce").dt.date
+            _view["joining_date"] = _view["joining_date"].map(lambda d: d if pd.notna(d) else None)
+            _view.insert(0, "Delete", False)
+            _ed = st.data_editor(
+                _view, hide_index=True, use_container_width=True, disabled=["emp_id"],
+                key=f"hr_emp_editor_{_sheet_version('Employees')}",
+                column_config={
+                    "emp_id": st.column_config.TextColumn("ID"),
+                    "salutation": st.column_config.SelectboxColumn("Title", options=["Mr.", "Ms.", "Mrs."]),
+                    "name": st.column_config.TextColumn("Name"),
+                    "designation": st.column_config.TextColumn("Designation"),
+                    "location": st.column_config.TextColumn("Location"),
+                    "monthly_salary": st.column_config.NumberColumn("Salary (Rs.)", min_value=0, step=500, format="%d"),
+                    "joining_date": st.column_config.DateColumn("Joined", format="DD MMM YYYY"),
+                    "bank": st.column_config.TextColumn("Bank"),
+                    "account_no": st.column_config.TextColumn("Account No."),
+                    "pan": st.column_config.TextColumn("PAN"),
+                    "pf_no": st.column_config.TextColumn("PF No."),
+                    "status": st.column_config.SelectboxColumn("Status", options=["Active", "Exited"]),
+                },
+                height=dataframe_height(len(_view), max_px=480))
+            _n_del = int(_ed["Delete"].sum())
+            st.caption("Mark someone as Exited to keep their record but drop them from the payslip list. "
+                       "Account and PF numbers are saved with a leading # so Google Sheets keeps them as text.")
+            if st.button(f"💾 Save Changes{f' (deleting {_n_del})' if _n_del else ''}", type="primary",
+                         use_container_width=True, key="hr_emp_save", disabled=_hr_emp_missing):
+                _keep = hr_prepare_saved_employees(_ed, _hr_emp)
+                if hr_save_employees(_keep):
+                    st.success("✅ Employee records updated.")
+                    st.rerun()
+
+    # ── Roles ──────────────────────────────────────────────────────────────
+    with hr_t_roles:
+        sec_hdr("list", "Roles")
+        st.markdown('<div class="info-box">The responsibilities and working schedule offered for each role in the '
+                    'offer letter. Edit a built-in role or add your own. They can still be changed on each letter.'
+                    '</div>', unsafe_allow_html=True)
+        if _hr_roles_missing:
+            _hr_setup_note("Roles", ", ".join(HR_ROLE_COLS))
+        _pick = st.selectbox("Role", list(_hr_roles) + ["+ New role"], key="hr_role_pick",
+                             format_func=lambda k: k if k == "+ New role" else
+                             f"{k}  ·  {'saved' if _hr_roles[k]['saved'] else 'built-in'}")
+        if _pick == "+ New role":
+            _role_name = st.text_input("Designation", key="hr_role_new", placeholder="e.g. Accounts Executive").strip()
+            _cur = {"duties": [], "schedule": "", "saved": False}
+        else:
+            _role_name, _cur = _pick, _hr_roles[_pick]
+        _rfp = hashlib.md5(("|".join(_cur["duties"]) + _cur["schedule"]).encode()).hexdigest()[:6]
+        _rd = st.text_area("Responsibilities (one per line)", value="\n".join(_cur["duties"]), height=220,
+                           key=f"hr_role_duties_{hr_slug(_pick)}_{_rfp}")
+        _rs = st.text_area("Working schedule", value=_cur["schedule"], height=90,
+                           key=f"hr_role_sched_{hr_slug(_pick)}_{_rfp}")
+        rb1, rb2 = st.columns(2)
+        with rb1:
+            if st.button("Save Role", type="primary", use_container_width=True, key="hr_role_save",
+                         disabled=_hr_roles_missing):
+                if not _role_name:
+                    st.error("❌ Enter a designation.")
+                elif not [d for d in _rd.split("\n") if d.strip()]:
+                    st.error("❌ Add at least one responsibility.")
+                elif hr_save_role(_role_name, _rd, _rs):
+                    st.success(f"✅ {_role_name} saved.")
+                    st.rerun()
+        with rb2:
+            if _cur.get("saved"):
+                _builtin = _pick in HR_DEFAULT_ROLES
+                if st.button("Revert to built-in" if _builtin else "Delete role", use_container_width=True,
+                             key="hr_role_del"):
+                    if hr_delete_role(_pick):
+                        st.success(f"✅ {_pick} {'reverted' if _builtin else 'deleted'}.")
+                        st.rerun()
+
+
 with tab_admin:
     tab_action_bar("admin")
     # App version lives here rather than in the header: it is only needed to
