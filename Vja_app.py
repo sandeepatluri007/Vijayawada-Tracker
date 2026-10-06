@@ -69,6 +69,62 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ── Loading screen and busy indicator ────────────────────────────────────────
+# The TLIS symbol (the meter above "tlis" in the logo), sharp enough to animate.
+TLIS_SYMBOL_B64 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAACwCAMAAABuIJH0AAAAP1BMVEUYHxwRKRcYIBwYIBwAWgAAAAAYIBwYHhwYHxwYIBwYHhwYHhwYHhwZGxsYHhwYIRsAAAAAAAAAAAAAAAAAAABG3eQaAAAAEHRSTlNkDpLjAgDQ0eCurUsuEI0xJF1d3QAADodJREFUeNrtXYmW46gOFc4EsfP/f/vYzWbH2ez0O0VPd1cnVRkJtFxhXYD7Pz7gT4E/Bf4U+FPg/0AB8l/+SmtrLfixLIsQ3A+xLGZZ3EtSWUV+dAUIUV5owRGRMjco9V/5PzB84V+k6H5xYQCs0r+jAFHSSe5EcwJ6CSmNf/YjqBHe86qg08PqCxWIpuBk50k8OpV6e3iFqVjkm2vxxgoQuXDME9sLR7PlrJOP7TekhWLI3VKQsxXQFkQRpBYtGL/7z7lucF4Tfgs3OI7fnX/IK0HOU4BIw5F1E+rt2osMUiqlycTLNbHuTVg4z9OPzXoIUGcooKXpp9BNuptBZ8z6+Po5t0dkxZaCmbmFeH4dnlRAQTNr/m/uJn3NA88FXhe8nP2sH+l0WEB/TQHt7J41ViwWeDMzaRfGMPlz8nR8ypSOK6AMvWG95Iv8UDJyvhF8KivAqJEfV8CaKmAyKuDDmECBSHEh/sGPWtIxBaSoQyY/tsbkFR1K0mB4TIUjClhOcf3cRd2/NkJ2yeH1mArwcBad8RR8g/yA3RNilXQjIlKXyDwOldIqdQA1EDAxLgXMJODhQj5aAWJSfPBRO04+2QvvxnARMARjXa4IQE94KApE7y8DDbg1TJmQb6yAkxQKmHELancykzQeKzRAp0dHK0x1QMPsRQEdVYhaLPr1FbCcpY9x4pPtILhgnLPjQNT9gKsMYNMgCYg1wcGLCmhT0gvdEj94HUPclJOmwmYKWEO43FgJDcjy4hv9igJKsIy55h/gUJEIwuMgNIto2pVnrqJMRRkrb3cwcAuJasCCzOXzCkCaJGTc7qOiCvM7dTwgBQmu+tXEIVA/HOpx/3QveiSKNNp3U9mgkWSe/LMQhjyngDa3JNVUee1zfyO7N2mH6h7mZ+L8HYCnSqhyez6NETIg1jCN+hkFlEjmy5aJRGqhrDUcYSrR3cQ/xnDKLQftyrkZAiJLcSR1XAGb0i7SyUf6mIPV6jsTfhHUkVTWrYNPxIFSm6qjCkByNMbHqQSRpQ9+ucDLmI6kSLDwdSFcphsF0jyFo9l0zhTIyYuZ0Xj4ajms4Ok3cakO6CGvKRuxFlnS20weUUBmfWHMLriW5Rw+Uw0Eh9GS45qtXe4l/ZzGtycaDFKq5FoI04gQZ8mZzqeBqDJln4CNtgJp2kZPhkH+CKPQjvgkvB7Chf0GliYV8BrCPsk5Te0rQHJpamd5OYmv71+R303SkkEG42oys0E0vauAiGlj0FPSXNN8Z/ZLAF8KIoFOPZsMQOwpALc4yfY+caKgg7x/eWQMRxmMk+jHDbYVUBGlDD+accU0L396aJNc4daHcUjblnZLARINaIj/i99O8Qso76cMCFjWz1cvSDRwvqUAxDKozb/kHtKI+0Fh7ycNFzHiDoLpc/KYDaCOQDiukPeLMCE3oe+nDZd7g8129p5AGlIyVSCaWO8AkObf3E8dSyzzemkM619dv9TpKUQ70So+6GIny+9FjQWD7fJZ3JbXEwViCdapTBJUXM6WP0cU2iFiCHVuJSXUDuLf0/33+3UR5HQFnEA4MWkSM9KqFrRpovt2neCnvV8wbKqqJktQRRro3mi/28SqS94vGZJN/FiFlLS+CJXJ+T3/AVrTLnGcOUTvsenF2oagrNekYICI0NVVCiicmHUCFKpTAGLcJT02vXIB0myjmJhFQZXQBFE+mQAqr1MgBs0uMopmWWDFSbQP9xB3bMl1CuiIblobWmJZ1SkgJg4fN/bM/cIR9pcnTrDaFdQO330nn7x2hQ11cyjDtmCvQBRW7hjbVQr0BYDf93GpYK5AI6wWV2axmbnU+W0woTHgkAhoL1VA0qMK8ImwnF6uAMRacFQA5woMTny1D4RA2AGcuMUzVYAOYdR976VhNPYQmmGbcWMFung1zYPngiE6KQniqkwV6OKVpVc7QQRu3TZDC5DaFWjLgVQli8vkJ7FKbB+Pxc2TLQXU6AQXLoFM27G9WeGmAp212fQI7yI4R+KOSAeHY2TdiEK9rJxehyZI2lLuHJOk54JzJ+7L9/S46ZqiXk73tmTqXdhYgX4DSKRt9QuqSpV2OrsYkp8ubzhxH7JU7q08PRkQkR5Hq6FK3F2B1uWJf+QRn9/qOzlX/vRIovO/BVP3y4YCiON2alwafq788YE0dnv9yQO2wFxUrbMWzVOLzJlWlENNX5Cn/U+6qcBke7e4wfjk9XubiqX3QM0qTNwKo9kN7PBxR3q/PlzFzOSXdG3S2coDdPKQW5VOTnOCGWnDNpac1M2E05o401x67BDbhyZbNJ/PvnfJyyPdTgpd/BSr/NyuQOpSG57HEJH6GJCJr+Y0vZSulSHsmfwEHDcVYDY+6Z48UVpY3Cl2M2C+pkJs8wt2cBusdYk9iDdQzS5oX1LGaoHelvn+QJydL6kgeV7nSa+PuSW4mbZstxTQ6SNuY7+IqfpDP68CAb72KY+PpHPPE9X+ScCmAjLXADhrE5R1p6KQn0zNyrdIJAoEjq1KOvlg6EJROxWZ9Ogn2+HYL0pMZUdIjf1Q05bMTTKhy3nSc8YzE80LqOZ5YN2Zk6XjZawlczvMSoUgbwVN77hLpm6E3c2hcZGEp0eIRT61nchS8Qale20S9e3SEvOEyR3c5GldiAWTO9yS8U+6IKHwF+T9mAJrLp/2yypDWdfuaeBpRqQOJCxWzYUz2olfEcNyRzbcjypQFg0nvX8hYoim2x6jEmD1dBG6pSHEej5fPws4pS7JtdPdNshmxwei25QOxcVu+B2jtOOCeoYGAHgq4rggWhPrOceGR/ZA1ce+2TqtlkJaXJtl7BxO9w1lhpUe0XmHqArkLxx4GlGvQOSGNBZPB02dA2XpcNJC21t/Scys4nGoZq+iBXNy2ATe6OOsdGCbfNzA4o7s7rVls0KUIWi6KBAcd+K8LjHnHm4YdqvEIwVIheAmwW21JSOQsk32SUMr7ig1zLdK27n0AQEn+NUxGGIim68A3MeN7DR5O3QiHXySsg1ON0646Z67u/Kg/5sF64Kd+ziymYknTZU+hhX+pJgbaupCD8R6zL3+I/U52VCk0zvvUDuN48rgamMDLoomxI8o4HlYeCu98Yw+arb3nOdMNMknGWRGGQaKt4u1BYBssH9kxRVnk1xq6eM80MT8ErAD2eUYDCXaRjpfovRJS8ijVBfShQLO1v2FaQCMeeDQCrRlBk2tv2/13e8uoWeLM7pW5/M25yOZeAQPVdLyYfvDu1zei7WtUF0wObu1afq0Ap4RmpMWZvb7h0qawkTxGaUiPm43mb+kgDfOCrwE5M7hMyQO7aAVNhGX0cXubVu/pEAq+moGf2ASvrcSRIFpEAmGrKn3991nCgg8svUmTZt04wbHAq+w6z0jjvfMV89u8Q5GHiqwVdQ/3vkQKwsOq4MlfIQnx/TwcNpwHjnGPZHscXhQ+0X9kQKcdwTWxADFgA/8MUIOUOv6mAwSzvVwgrt07VFHoVMWjOdh3cHA8LIPVFHDeh7hDIZihER+S8AfwOPPVTHGVwCYocTsIJxI6zrqTG8qsMLQEDtwOPIFazy9vjRWDiXmo6uCnkgsmyb0PENGQ9qNOsblxgkopc8J/8EVaIpzpIw+x0n3TrDuBZDPKfAaRgjnGXCxVQDURuPDMK/w9Au7eHioInslKwWyczzcTLTHGwQ3Fc6hPZyuoi15TYHDBc0TwrfMIRdEXSxV/jCMOJzYnwKAaqfd5t2+lP/uJ4wPO/H5Y393+t9Q4N9eAfu1KPSnwLEBW32jV3eqH1aAzRQQ13fpHh2xk+sfduLYB/daSXl2ztoxoaVTwIztWr86loYZU9GwRiblTw7dUvny3/G5HtrfV8DG2tR2CkxJc7+bBtae+iIxv7jR+/Do6IU9m1X9vAV13dBQv4GntcW9F4PqFumG0T05uuTnsDRt+BsNp57Vz/N/dgHCvllFaehPNeg53T/pATWvB9r4hD+ejcVAaGhO9ohe8MPJLHfuzk/2yGer0J81onhKx+bZKmEJJiSI30FB6XzkJtvCiLTxVwHFMuuonnG4f7SwScdP7Z3wVIzoF9dAptNDOwOfkQVmp4RdPEg5f/DBKWeJM3MNb+kBiI5yDeeXjZa2czLjhfLjBgdjNHaTDgr+JVRkcpPAgbMWie8TjydHw4+YvzZPnXYZz7cKGoifyMnrGaHTw1GnGeNWNZuSa6ff916m43OnXgm7oCkofa0GmRK0VanAFuzDTS7CqdEH8ynsWzs+sLN5kR6wm8uqTBtII4FSw588d7rqnvb3AFwDPqE07u6EdHiwg5TIHOoK66m6t++vKHC3mDpP3O/lZBU8oykxavb5g7vWQWBtfEZjzxS/YonsGzA8SiLr8fYYjjomJ9h+5pMduD/h8SUisN66hKnp9as6lFP14yUcD5f9SJdc1YLCMDVE/velyTflNhrf9y0f/5+OREhi6gY3FPD5xEDi5PPSgId4o4c6oY6FeGuqi+r8VUOf10GV7tfctq4PGevxq4wwx7V0YOY717i1M+/7pXi5cSNycQ/PEDzjXXXTq/uHeOPw/tXs4z0ka0dzMNLjn/sMSiBS9H1xyKu7H8hz8x6EN6IhBoa276dy5pMwxxraXUTnm+D85RtPOgUhofGYtTe+sOfZCS9cabe015hEMlWi8pFH19oRYq1MfY5dK6mX/nmTfAVo1tfyFXpYIPh43BeuW5IgrVWkDOsvcfEXNeF6c2K9jt6j4CWs8iJS9hcjtmTIlZ6H6RpTXO+nRGRtV2/d1uvDm4FXkdYbUN8GDtx6nensGtO9Dl4sXdMxIJNzFSApjERXrFBr3yeN09tBY9+xvw3yzZT4gWJLKzACaUWB25n5sl5e9ksvlx20sIlpS1OPPWYmZV6TRIgLTv65Kwk/oUBFGdFEKeXDTSDg5kOLuL9iyt8xJf0NU0M++4kVmMd8fxWWvxTrixXE3x3dfwr8KfCnwLXjf18PxqhekvMpAAAAAElFTkSuQmCC"
+
+# First load of a session: a full-screen TLIS symbol instead of a blank page
+# while the data is read. Cleared at the end of that run and wherever the
+# login or connection-error screens stop early; if a run ever fails partway it
+# fades on its own after 30 s, so an error underneath is never hidden.
+_TLIS_ANIM_CSS = """
+@keyframes tlisBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+@keyframes tlisShadow{0%,100%{transform:scaleX(1);opacity:1}50%{transform:scaleX(.68);opacity:.45}}
+@keyframes tlisSplashOut{to{opacity:0;visibility:hidden}}
+"""
+_SPLASH_HTML = ("<style>" + _TLIS_ANIM_CSS + """
+.tlis-splash{position:fixed;inset:0;z-index:999999;background:#fafafa;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;animation:tlisSplashOut .4s ease 30s forwards}
+.tlis-splash img{width:76px;height:auto;animation:tlisBob 1.3s ease-in-out infinite}
+.tlis-splash .tlis-shadow{width:56px;height:7px;border-radius:50%;background:rgba(20,24,31,.14);
+  animation:tlisShadow 1.3s ease-in-out infinite}
+.tlis-splash .tlis-text{font:700 13px/16px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  color:#4b4f56;margin-top:8px}
+@media (prefers-reduced-motion: reduce){.tlis-splash img,.tlis-splash .tlis-shadow{animation:none}}
+</style>
+<div class="tlis-splash" role="status" aria-live="polite">
+<img src="data:image/png;base64,""" + TLIS_SYMBOL_B64 + """" alt="">
+<div class="tlis-shadow"></div>
+<div class="tlis-text">Loading Smart Meter Tracker</div>
+</div>""")
+
+# Its holder sits outside the page flow, so it leaves no gap once cleared.
+st.markdown("<style>.st-key-tlis_splash,.st-key-tlis_busy{position:absolute!important}</style>",
+            unsafe_allow_html=True)
+_splash = st.container(key="tlis_splash").empty()
+if not st.session_state.get("_splash_done"):
+    _splash.markdown(_SPLASH_HTML, unsafe_allow_html=True)
+
+# Every later click: a small TLIS symbol at the top of the screen while the
+# app works. Streamlit's own running figure lives in the page header, which
+# this app hides, so until now a click gave no sign anything was happening.
+# The page carries data-test-script-state="running" while a run is in
+# progress; the pill appears only then, after a short delay so quick runs
+# don't flicker.
+with st.container(key="tlis_busy"):
+    st.markdown("<style>" + _TLIS_ANIM_CSS + """
+.tlis-busy{position:fixed;top:12px;left:50%;z-index:999998;display:flex;align-items:center;gap:8px;
+  padding:6px 13px 6px 9px;background:#ffffff;border-radius:999px;box-shadow:0 2px 12px rgba(20,24,31,.14);
+  font:700 12px/14px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#4b4f56;
+  opacity:0;transform:translate(-50%,-8px);pointer-events:none;transition:opacity .15s ease,transform .15s ease}
+.tlis-busy img{width:22px;height:auto;animation:tlisBob 1s ease-in-out infinite}
+.stApp[data-test-script-state="running"] .tlis-busy,
+.stApp[data-test-script-state="rerunRequested"] .tlis-busy{opacity:1;transform:translate(-50%,0);transition-delay:.3s}
+@media (prefers-reduced-motion: reduce){.tlis-busy img{animation:none}}
+</style>
+<div class="tlis-busy" aria-hidden="true"><img src="data:image/png;base64,""" + TLIS_SYMBOL_B64 + """" alt="">Loading…</div>""",
+                unsafe_allow_html=True)
+
 # ── Messages that survive st.rerun() ──────────────────────────────────────────
 # st.rerun() discards everything drawn in the current run, so a confirmation
 # like "✅ Added 150 records" followed by a rerun was wiped before anyone could
@@ -687,6 +743,11 @@ def build_map_snapshot_png(df: pd.DataFrame, title: str) -> bytes:
 
 
 # ── Real-basemap map snapshot (used by the weekly customer report) ──────────
+MAP_PIN_LIMIT = 3000       # above this, the Map shows density instead of every pin
+MAP_PICKER_LIMIT = 50      # pins listed in the Map's "Select A Pin" picker
+MAP_TABLE_LIMIT = 1000     # rows shown in the Map's records table (all in the CSV)
+LOG_PICKER_LIMIT = 200     # records listed in the Installation Log picker
+
 # The interactive Map tab's pydeck view shows real street-map tiles without
 # needing an API key (pydeck's default free tile provider). matplotlib can't
 # fetch map tiles on its own, so for a static PNG we fetch the same style of
@@ -1641,6 +1702,7 @@ if not st.session_state["authenticated"]:
                 st.rerun()
             else:
                 st.error("❌ Incorrect PIN. Access Denied.")
+    _splash.empty()
     st.stop()
 
 # ── Cloud Crash Guard: Google Sheets Connection ──────────────────────────────
@@ -1650,6 +1712,7 @@ except Exception as e:
     st.error("🛑 Database Connection Failed!")
     st.write(f"Error Details: `{e}`")
     st.info("💡 **Fix:** Ensure your `st.secrets` are properly configured and `st-gsheets-connection` is in requirements.txt")
+    _splash.empty()
     st.stop()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1735,7 +1798,7 @@ def _rate_limit_cooloff_active() -> bool:
 # "limit reached" messages. Falls back to per-sheet reads if anything about
 # the batch call fails, so this can never be worse than before.
 SHEET_TABS = ("Installations", "Inventory", "Technicians", "Locations", "Supervisors",
-              "Settings", "UploadedInstallLog", "AnalyticsRaw", "MapRecords",
+              "Settings", "UploadedInstallLog", "AnalyticsRaw",
               "Expenses", "Vehicles", "Liaisoning", "Returns", "Employees", "Roles")
 
 
@@ -1791,12 +1854,26 @@ def _batch_version() -> int:
     return sum(_sheet_versions().values())
 
 
+# st.cache_data hands back a fresh copy of the cached value on every call, and
+# a page run asks for data ~40 times — each one unpacking every sheet again.
+# Holding the result for the rest of the run, keyed on the data version so a
+# save mid-run is still seen, unpacks it once. The script re-executes on every
+# full run, so this starts empty each time.
+_RUN_BATCH = {}
+_RUN_MEMO = {}
+
+
 def _batched(worksheet: str):
     """The worksheet from the batched read, or None to fall back."""
     if worksheet not in SHEET_TABS or st.session_state.get("_batch_read_off"):
         return None
     try:
-        data = _batch_read_sheets(SHEET_TABS, _batch_version())
+        _v = _batch_version()
+        data = _RUN_BATCH.get(_v)
+        if data is None:
+            data = _batch_read_sheets(SHEET_TABS, _v)
+            _RUN_BATCH.clear()
+            _RUN_BATCH[_v] = data
     except Exception:
         # Don't retry the batch for the rest of this session; per-sheet reads
         # still work, and retrying a broken batch every call would be costly.
@@ -2093,6 +2170,38 @@ def extract_section_code(sno) -> str:
     return digits[5:7]
 
 
+def section_codes(series: pd.Series) -> pd.Series:
+    """extract_section_code() for a whole column at once, giving exactly the
+    same answer for every value. The per-value version ran character by
+    character over every Consumer No on each page load (43,000 calls on five
+    months of data). Values in scientific notation, or that merely contain an
+    "e", are rare and still go through the original function."""
+    s = series.astype(str).str.strip()
+    out = pd.Series("Unclassified", index=series.index, dtype=object)
+    odd = s.str.lower().str.contains("e", regex=False)
+    if odd.any():
+        out[odd] = series[odd].map(extract_section_code)
+    plain = s[~odd].str.replace(r"\.0$", "", regex=True)
+    digits = plain.str.replace(r"\D", "", regex=True)
+    ok = digits.str.len() >= 7
+    out.loc[ok[ok].index] = digits[ok].str[5:7]
+    return out
+
+
+def map_unique(series: pd.Series, fn) -> pd.Series:
+    """fn applied once per distinct value, not once per row. Same result as
+    series.apply(fn) for any fn; much faster on columns with few distinct
+    values, such as meter type."""
+    codes, uniques = pd.factorize(series, use_na_sentinel=True)
+    table = [fn(u) for u in uniques] + [fn(float("nan"))]    # last slot: missing values (code -1)
+    return pd.Series(pd.Series(table, dtype=object).to_numpy()[codes], index=series.index)
+
+
+def meter_phases(series: pd.Series) -> pd.Series:
+    """classify_meter_type() for a whole column."""
+    return map_unique(series, classify_meter_type)
+
+
 REPORT_MAX_MAP_SNIPPETS = 6  # keeps the report to one page — extra sections get a text note instead
 
 
@@ -2123,10 +2232,10 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
         # Classify rather than exact-match: real values carry ratings
         # ("1PH 5-30A") and would never equal the plain "1 PH" label.
         want = "1PH" if "1" in meter_type_filter else "3PH"
-        df = df[df["meter_type"].apply(classify_meter_type) == want]
+        df = df[meter_phases(df["meter_type"]) == want]
     if location_filter and "location" in df.columns:
         df = df[df["location"].astype(str).str.strip().isin(location_filter)]
-    df["section_code"] = df["sno"].apply(extract_section_code)
+    df["section_code"] = section_codes(df["sno"])
     if section_filter:
         df = df[df["section_code"].isin(section_filter)]
 
@@ -2782,6 +2891,16 @@ def stock_by_location() -> pd.DataFrame:
         for (loc, t), q in inv.groupby(["location", "type"])["qty"].sum().items():
             cell(loc, t)["Received"] += int(q)
 
+    # Returns are counted BEFORE installs are allocated: stock sent back from
+    # the location-less pool is no longer there for installs to draw on. They
+    # used to be added only after allocation, so a return from that pool was
+    # also counted as used by installs, and the sites carried too little.
+    if not df_ret.empty:
+        ret = df_ret.copy()
+        ret["location"] = _loc_or_unspecified(ret["location"])
+        for (loc, t), q in ret.groupby(["location", "type"])["qty"].sum().items():
+            cell(loc, t)["Returned"] += int(q)
+
     # Installs draw on the stock received BEFORE locations were recorded
     # ("Unspecified") first, and only once that is used up does a location
     # consume its own stock. Allocated in date order — the oldest installs
@@ -2797,22 +2916,17 @@ def stock_by_location() -> pd.DataFrame:
             pool = cell("Unspecified", t)
             # What the legacy pool still holds after any returns against it.
             unspecified_left = max(0, pool["Received"] - pool["Returned"])
-            for _, r in ins.iterrows():
-                qty = int(r[col])
-                if qty <= 0:
-                    continue
-                from_pool = min(unspecified_left, qty)
-                if from_pool:
-                    cell("Unspecified", t)["Installed"] += from_pool
-                    unspecified_left -= from_pool
-                if qty - from_pool:
-                    cell(r["location"], t)["Installed"] += qty - from_pool
-
-    if not df_ret.empty:
-        ret = df_ret.copy()
-        ret["location"] = _loc_or_unspecified(ret["location"])
-        for (loc, t), q in ret.groupby(["location", "type"])["qty"].sum().items():
-            cell(loc, t)["Returned"] += int(q)
+            # One pass over the column instead of a Python loop over every row:
+            # in date order, the running total draws on the pool until it is
+            # used up; whatever each row needs beyond that is its own site's.
+            qty = ins[col].astype(int).clip(lower=0)
+            from_pool_total = qty.cumsum().clip(upper=unspecified_left)
+            from_pool = from_pool_total.diff().fillna(from_pool_total.iloc[0] if len(from_pool_total) else 0)
+            rest = qty - from_pool
+            if int(from_pool.sum()):
+                pool["Installed"] += int(from_pool.sum())
+            for _loc, _q in rest[rest > 0].groupby(ins.loc[rest > 0, "location"]).sum().items():
+                cell(_loc, t)["Installed"] += int(_q)
 
     if not rows:
         return pd.DataFrame(columns=["Location", "Type", "Received", "Installed", "Returned", "Pending"])
@@ -3958,13 +4072,34 @@ def day_volume_colors(n: int):
     return CF_GREEN_BG, CF_GREEN_FONT
 
 
+def install_log_prepared() -> pd.DataFrame:
+    """The install log with what several views derive from it worked out once
+    per run: _month (YYYY-MM), _phase (1PH/3PH), _section (code from the SNO)
+    and _site. Five places used to re-parse every date and re-classify every
+    row of the full log separately. Shared for the run — callers filter it and
+    must not modify it in place."""
+    key = ("install_log", _sheet_version("UploadedInstallLog"), _batch_version())
+    hit = _RUN_MEMO.get(key)
+    if hit is not None:
+        return hit
+    df = get_data("UploadedInstallLog")
+    if not df.empty:
+        df["_month"] = (pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m")
+                        if "date" in df.columns else None)
+        df["_phase"] = meter_phases(df["meter_type"]) if "meter_type" in df.columns else ""
+        df["_section"] = section_codes(df["sno"]) if "sno" in df.columns else "Unclassified"
+        df["_site"] = (df["location"].astype(str).str.strip().replace("", "Unspecified")
+                       if "location" in df.columns else "Unspecified")
+    _RUN_MEMO[key] = df
+    return df
+
+
 def month_daily_counts(mkey: str) -> dict:
     """{date -> installs} for a calendar month."""
-    df = get_data("UploadedInstallLog")
+    df = install_log_prepared()
     if df.empty or "date" not in df.columns:
         return {}
-    d = pd.to_datetime(df["date"], errors="coerce")
-    sub = df[d.dt.strftime("%Y-%m") == mkey]
+    sub = df[df["_month"] == mkey]
     if sub.empty:
         return {}
     return sub.groupby("date").size().to_dict()
@@ -3972,15 +4107,14 @@ def month_daily_counts(mkey: str) -> dict:
 
 def day_section_breakup(day: str) -> pd.DataFrame:
     """Section-wise installs for one date, with the 1PH/3PH split."""
-    df = get_data("UploadedInstallLog")
+    df = install_log_prepared()
     if df.empty or "date" not in df.columns:
         return pd.DataFrame()
     sub = df[df["date"].astype(str) == str(day)].copy()
     if sub.empty:
         return pd.DataFrame()
-    sub["location"] = (sub["location"].astype(str).str.strip().replace("", "Unspecified")
-                       if "location" in sub.columns else "Unspecified")
-    phase = sub["meter_type"].apply(classify_meter_type) if "meter_type" in sub.columns else ""
+    sub["location"] = sub["_site"]
+    phase = sub["_phase"] if "meter_type" in sub.columns else ""
     sub["_1"] = (phase == "1PH").astype(int)
     sub["_3"] = (phase == "3PH").astype(int)
     out = sub.groupby("location").agg(Installs=("date", "size"), **{"1PH": ("_1", "sum"), "3PH": ("_3", "sum")}).reset_index()
@@ -4163,22 +4297,18 @@ INCENTIVE_TEMPLATE_B64 = "UEsDBBQABgAIAAAAIQDHepeQdQEAACAGAAATAAgCW0NvbnRlbnRfVH
 def month_installs_1ph(mkey: str) -> int:
     """1PH installs for a calendar month, counted from the install log — the
     same ledger the Dashboard and the Customer Report use."""
-    df = get_data("UploadedInstallLog")
+    df = install_log_prepared()
     if df.empty or not has_col(df, "date", "meter_type"):
         return 0
-    d = df[pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m") == mkey]
-    if d.empty:
-        return 0
-    return int((d["meter_type"].apply(classify_meter_type) == "1PH").sum())
+    return int((df.loc[df["_month"] == mkey, "_phase"] == "1PH").sum())
 
 
 def month_installs_3ph(mkey: str) -> int:
     """3PH installs for a calendar month, from the install log."""
-    df = get_data("UploadedInstallLog")
+    df = install_log_prepared()
     if df.empty or not has_col(df, "date", "meter_type"):
         return 0
-    d = df[pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m") == mkey]
-    return int((d["meter_type"].apply(classify_meter_type) == "3PH").sum()) if not d.empty else 0
+    return int((df.loc[df["_month"] == mkey, "_phase"] == "3PH").sum())
 
 
 def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: float,
@@ -4378,16 +4508,14 @@ def load_liaisoning() -> pd.DataFrame:
 def month_section_counts(mkey: str) -> pd.DataFrame:
     """Installs per (location, section code) for a calendar month, from the
     install log — the same ledger the Dashboard totals come from."""
-    df = get_data("UploadedInstallLog")
+    df = install_log_prepared()
     if df.empty or not has_col(df, "date", "sno"):
         return pd.DataFrame(columns=["location", "section_code", "installs"])
-    df = df.copy()
-    df = df[pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m") == mkey]
+    df = df[df["_month"] == mkey].copy()
     if df.empty:
         return pd.DataFrame(columns=["location", "section_code", "installs"])
-    df["section_code"] = df["sno"].apply(extract_section_code)
-    df["location"] = (df["location"].astype(str).str.strip().replace("", "Unspecified")
-                      if "location" in df.columns else "Unspecified")
+    df["section_code"] = df["_section"]
+    df["location"] = df["_site"]
     out = df.groupby(["location", "section_code"]).size().reset_index(name="installs")
     return out.sort_values(["location", "section_code"]).reset_index(drop=True)
 
@@ -4927,7 +5055,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
 
     # 2) aggregate the NEW rows only, by date + tech_name + location
     new_log_df = pd.DataFrame(new_log_rows)
-    _phase = new_log_df["meter_type"].apply(classify_meter_type)
+    _phase = meter_phases(new_log_df["meter_type"])
     new_log_df["is_1ph"] = _phase == "1PH"
     new_log_df["is_3ph"] = _phase == "3PH"
     unclassified = int((~new_log_df["is_1ph"] & ~new_log_df["is_3ph"]).sum())
@@ -5187,7 +5315,7 @@ def reduce_rows_to_upload_counts(keys) -> int:
     df_inst = df_inst.copy()
     for col in ("qty_1ph", "qty_3ph"):
         df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
-    phase = df_log["meter_type"].apply(classify_meter_type) if "meter_type" in df_log.columns else pd.Series("", index=df_log.index)
+    phase = meter_phases(df_log["meter_type"]) if "meter_type" in df_log.columns else pd.Series("", index=df_log.index)
     log = df_log.assign(_1=(phase == "1PH").astype(int), _3=(phase == "3PH").astype(int))
     truth = log.groupby(["date", "tech_name", "location"])[["_1", "_3"]].sum()
 
@@ -5341,7 +5469,7 @@ def remove_install_log_rows(keys_to_remove) -> int:
             df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
         if "meter_type" not in removed_rows.columns:
             removed_rows["meter_type"] = ""
-        _phase = removed_rows["meter_type"].apply(classify_meter_type)
+        _phase = meter_phases(removed_rows["meter_type"])
         removed_rows["is_1ph"] = _phase == "1PH"
         removed_rows["is_3ph"] = _phase == "3PH"
         agg = removed_rows.groupby(["date", "tech_name", "location"]).agg(
@@ -5494,7 +5622,7 @@ def plan_phase_count_repair():
     old = log["meter_type"].apply(_old_phase_flags)
     log["old_1"] = old.apply(lambda t: int(t[0]))
     log["old_3"] = old.apply(lambda t: int(t[1]))
-    new = log["meter_type"].apply(classify_meter_type)
+    new = meter_phases(log["meter_type"])
     log["new_1"] = (new == "1PH").astype(int)
     log["new_3"] = (new == "3PH").astype(int)
 
@@ -5561,7 +5689,7 @@ def cleanup_non_tl_records():
                     df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
                 if "meter_type" not in bad_rows.columns:
                     bad_rows["meter_type"] = ""
-                _phase = bad_rows["meter_type"].apply(classify_meter_type)
+                _phase = meter_phases(bad_rows["meter_type"])
                 bad_rows["is_1ph"] = _phase == "1PH"
                 bad_rows["is_3ph"] = _phase == "3PH"
                 agg = bad_rows.groupby(["date", "tech_name", "location"]).agg(
@@ -5762,343 +5890,347 @@ with head_search:
 # ── Tabs Configuration ────────────────────────────────────────────────────────
 # Plain labels — the design system uses no emoji as interface icons, and they
 # render differently on every device.
+# Only the open tab runs. Every tab used to run on every click — ticking a box
+# on one tab paid for all nine. Switching tabs now reruns the page and runs
+# just the tab being opened; the selection is kept under "main_tabs".
 tab_dash, tab_analytics, tab_map, tab_exp, tab_liaison, tab_inst, tab_inv, tab_hr, tab_admin = st.tabs([
     "Dashboard", "Analytics", "Map", "Expenses", "Liaisoning", "Installs", "Store", "HR", "Admin"
-])
+], key="main_tabs", on_change="rerun")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_dash:
-    tab_action_bar("dash")
-    df_inst = df_installations_master
-    df_inv = df_inventory_master
+    if tab_dash.open:   # only the open tab runs (tabs are created with on_change="rerun")
+        tab_action_bar("dash")
+        df_inst = df_installations_master
+        df_inv = df_inventory_master
 
-    sec_hdr("calendar", "Monthly Installs Overview")
+        sec_hdr("calendar", "Monthly Installs Overview")
 
-    if df_inst.empty or not has_col(df_inst, "date", "qty_1ph", "qty_3ph", "location"):
-        st.info("No installation data yet.")
-    else:
-        df_month = df_inst.copy()
-        df_month["_date"] = pd.to_datetime(df_month["date"], errors="coerce")
-        df_month["qty_1ph"] = safe_numeric_col(df_month, "qty_1ph")
-        df_month["qty_3ph"] = safe_numeric_col(df_month, "qty_3ph")
+        if df_inst.empty or not has_col(df_inst, "date", "qty_1ph", "qty_3ph", "location"):
+            st.info("No installation data yet.")
+        else:
+            df_month = df_inst.copy()
+            df_month["_date"] = pd.to_datetime(df_month["date"], errors="coerce")
+            df_month["qty_1ph"] = safe_numeric_col(df_month, "qty_1ph")
+            df_month["qty_3ph"] = safe_numeric_col(df_month, "qty_3ph")
 
-        today = today_ist()
-        this_month = df_month[(df_month["_date"].dt.month == today.month) & (df_month["_date"].dt.year == today.year)]
+            today = today_ist()
+            this_month = df_month[(df_month["_date"].dt.month == today.month) & (df_month["_date"].dt.year == today.year)]
 
-        m_1ph = int(this_month["qty_1ph"].sum())
-        m_3ph = int(this_month["qty_3ph"].sum())
-        m_total = m_1ph + m_3ph
+            m_1ph = int(this_month["qty_1ph"].sum())
+            m_3ph = int(this_month["qty_3ph"].sum())
+            m_total = m_1ph + m_3ph
 
-        # HeroStat measures against the monthly TARGET (set in Admin), not
-        # against stock received — stock on hand says nothing about whether
-        # the month is on course.
-        # Days remaining are counted from the last date that actually has
-        # installs recorded, so a day already counted in m_total is not also
-        # counted as a day still available.
-        last_install_dt = this_month["_date"].max() if not this_month.empty else None
-        last_install_date = last_install_dt.date() if pd.notna(last_install_dt) else None
-        month_target = target_for_month(month_key(today))
-        tgt = monthly_target_status(m_total, month_target, today, last_install_date)
-        render_hero_stat(
-            "THIS MONTH · INSTALLS VS TARGET",
-            f"{m_total:,} / {month_target:,}",
-            f"{tgt['pct']:.0f}% of target · {tgt['days_left']} working day(s) left",
-            tgt["pct"],
-        )
+            # HeroStat measures against the monthly TARGET (set in Admin), not
+            # against stock received — stock on hand says nothing about whether
+            # the month is on course.
+            # Days remaining are counted from the last date that actually has
+            # installs recorded, so a day already counted in m_total is not also
+            # counted as a day still available.
+            last_install_dt = this_month["_date"].max() if not this_month.empty else None
+            last_install_date = last_install_dt.date() if pd.notna(last_install_dt) else None
+            month_target = target_for_month(month_key(today))
+            tgt = monthly_target_status(m_total, month_target, today, last_install_date)
+            render_hero_stat(
+                "THIS MONTH · INSTALLS VS TARGET",
+                f"{m_total:,} / {month_target:,}",
+                f"{tgt['pct']:.0f}% of target · {tgt['days_left']} working day(s) left",
+                tgt["pct"],
+            )
+
+            render_stat_tiles([
+                ("bolt", f"{m_1ph:,}", "1PH", "month", "normal"),
+                ("bolt", f"{m_3ph:,}", "3PH", "month", "normal"),
+                ("target", f"{tgt['remaining']:,}", "Still", "to go", "normal"),
+                ("gauge", f"{tgt['per_day_needed']:.0f}", "Need", "per day",
+                 "normal" if tgt["on_track"] else "danger"),
+            ])
+            sub_hdr("rupee", "This Month — Billing")
+            month_1ph_count = m_1ph
+            billing = calculate_1ph_incentive_billing(m_1ph)
+            billing3 = calculate_3ph_billing(m_3ph)
+            # Cost per install by type, from the Expenses tab's site model — beside
+            # the billed rate so the two can be compared at a glance.
+            cost_model = site_cost_breakdown(load_expenses(), month_key(today))
+            month_cost = expense_summary(load_expenses(), month_key(today), m_1ph, m_3ph)
+            bill_tbl = pd.DataFrame([
+                {"Type": "1PH", "Installs": m_1ph, "Billing (Rs.)": round(billing["total_cost"]),
+                 "Billed / Install": fmt_rs(billing["blended_per_install"] if m_1ph else None, 2),
+                 "Cost / Install": fmt_rs(cost_model["cpi1"], 2)},
+                {"Type": "3PH", "Installs": m_3ph, "Billing (Rs.)": round(billing3["total_cost"]),
+                 "Billed / Install": fmt_rs(billing3["blended_per_install"] if m_3ph else None, 2),
+                 "Cost / Install": fmt_rs(cost_model["cpi3"], 2)},
+                {"Type": "TOTAL", "Installs": m_1ph + m_3ph,
+                 "Billing (Rs.)": round(billing["total_cost"] + billing3["total_cost"]),
+                 "Billed / Install": fmt_rs(((billing["total_cost"] + billing3["total_cost"]) / (m_1ph + m_3ph))
+                                            if (m_1ph + m_3ph) else None, 2),
+                 "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)},
+            ])
+            st.dataframe(bill_tbl, use_container_width=True, hide_index=True, height=dataframe_height(len(bill_tbl)))
+            with st.expander("View slab breakdown"):
+                for _lbl, _b in (("1PH", billing), ("3PH", billing3)):
+                    st.markdown(f"**{_lbl}**")
+                    slab_df = pd.DataFrame(_b["slabs"])
+                    if not slab_df.empty:
+                        st.dataframe(slab_df, use_container_width=True, hide_index=True)
+                    cb1, cb2, cb3 = st.columns(3)
+                    cb1.metric(f"{_lbl} Base (Rs.)", f"{_b['base_cost']:,.0f}")
+                    cb2.metric(f"{_lbl} Tiered Incentive (Rs.)", f"{_b['tier_incentive']:,.0f}")
+                    cb3.metric(f"{_lbl} Survey (Rs.)", f"{_b['flat_addon']:,.0f}")
+
+            sub_hdr("pin", "This Month, By Site")
+            if this_month.empty:
+                st.info("No installs recorded this month yet.")
+            else:
+                mk = month_key(today)
+                by_cost = {x["site"]: x for x in cost_model["sites"]}
+                v1, v3 = cost_model["v1"], cost_model["v3"]
+                loc_month = this_month.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
+                site_rows = []
+                for _, r in loc_month.iterrows():
+                    site, n1, n3 = str(r["location"]), int(r["qty_1ph"]), int(r["qty_3ph"])
+                    tg = site_target_for(site, mk)
+                    c = by_cost.get(site, {})
+                    site_rows.append({
+                        "Site": site, "1PH": n1, "3PH": n3, "Total": n1 + n3,
+                        "Target": f"{tg:,}" if tg else "—",
+                        "% Of Target": f"{(n1 + n3) / tg * 100:.0f}%" if tg else "—",
+                        # Billing at the month's blended rate per type, so the
+                        # site figures add up to the billing table above.
+                        "Billing (Rs.)": round(n1 * v1 + n3 * v3),
+                        "Cost / Install": fmt_rs(c.get("cpi"), 2),
+                    })
+                site_df = pd.DataFrame(site_rows).sort_values("Total", ascending=False)
+                total_row = {"Site": "TOTAL", "1PH": int(site_df["1PH"].sum()), "3PH": int(site_df["3PH"].sum()),
+                             "Total": int(site_df["Total"].sum()), "Target": f"{month_target:,}",
+                             "% Of Target": f"{site_df['Total'].sum() / month_target * 100:.0f}%" if month_target else "—",
+                             "Billing (Rs.)": int(site_df["Billing (Rs.)"].sum()),
+                             "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)}
+                site_df = pd.concat([site_df, pd.DataFrame([total_row])], ignore_index=True)
+                st.dataframe(site_df, use_container_width=True, hide_index=True, height=dataframe_height(len(site_df)))
+                download_image_button(site_df, "This_Month_By_Site.png", key="dl_img_loc_month",
+                                      title=f"This Month, By Site — {month_label(mk)}")
+
+        st.divider()
+        sec_hdr("box", "Live Inventory Stock")
+
+        _stock = stock_summary()
+        _ret_1ph, _ret_3ph = _stock["1 PH"]["returned"], _stock["3 PH"]["returned"]
+        if not df_inv.empty and has_col(df_inv, "type", "qty"):
+            total_in_1ph = safe_numeric_col(df_inv[df_inv["type"] == "1 PH"], "qty").sum()
+            total_in_3ph = safe_numeric_col(df_inv[df_inv["type"] == "3 PH"], "qty").sum()
+        else:
+            total_in_1ph = total_in_3ph = 0
+
+        if not df_inst.empty and has_col(df_inst, "qty_1ph", "qty_3ph"):
+            total_out_1ph = safe_numeric_col(df_inst, "qty_1ph").sum()
+            total_out_3ph = safe_numeric_col(df_inst, "qty_3ph").sum()
+        else:
+            total_out_1ph = total_out_3ph = 0
+
+        pending_1ph = int(total_in_1ph - total_out_1ph - _ret_1ph)
+        pending_3ph = int(total_in_3ph - total_out_3ph - _ret_3ph)
 
         render_stat_tiles([
-            ("bolt", f"{m_1ph:,}", "1PH", "month", "normal"),
-            ("bolt", f"{m_3ph:,}", "3PH", "month", "normal"),
-            ("target", f"{tgt['remaining']:,}", "Still", "to go", "normal"),
-            ("gauge", f"{tgt['per_day_needed']:.0f}", "Need", "per day",
-             "normal" if tgt["on_track"] else "danger"),
+            ("bolt",  f"{int(total_in_1ph):,}", "Recv", "1PH", "normal"),
+            ("bolt",  f"{int(total_in_3ph):,}", "Recv", "3PH", "normal"),
+            ("alert" if pending_1ph < 0 else "bolt", f"{pending_1ph:,}", "Pend", "1PH",
+             "danger" if pending_1ph < 0 else "normal"),
+            ("alert" if pending_3ph < 0 else "bolt", f"{pending_3ph:,}", "Pend", "3PH",
+             "danger" if pending_3ph < 0 else "normal"),
         ])
-        sub_hdr("rupee", "This Month — Billing")
-        month_1ph_count = m_1ph
-        billing = calculate_1ph_incentive_billing(m_1ph)
-        billing3 = calculate_3ph_billing(m_3ph)
-        # Cost per install by type, from the Expenses tab's site model — beside
-        # the billed rate so the two can be compared at a glance.
-        cost_model = site_cost_breakdown(load_expenses(), month_key(today))
-        month_cost = expense_summary(load_expenses(), month_key(today), m_1ph, m_3ph)
-        bill_tbl = pd.DataFrame([
-            {"Type": "1PH", "Installs": m_1ph, "Billing (Rs.)": round(billing["total_cost"]),
-             "Billed / Install": fmt_rs(billing["blended_per_install"] if m_1ph else None, 2),
-             "Cost / Install": fmt_rs(cost_model["cpi1"], 2)},
-            {"Type": "3PH", "Installs": m_3ph, "Billing (Rs.)": round(billing3["total_cost"]),
-             "Billed / Install": fmt_rs(billing3["blended_per_install"] if m_3ph else None, 2),
-             "Cost / Install": fmt_rs(cost_model["cpi3"], 2)},
-            {"Type": "TOTAL", "Installs": m_1ph + m_3ph,
-             "Billing (Rs.)": round(billing["total_cost"] + billing3["total_cost"]),
-             "Billed / Install": fmt_rs(((billing["total_cost"] + billing3["total_cost"]) / (m_1ph + m_3ph))
-                                        if (m_1ph + m_3ph) else None, 2),
-             "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)},
-        ])
-        st.dataframe(bill_tbl, use_container_width=True, hide_index=True, height=dataframe_height(len(bill_tbl)))
-        with st.expander("View slab breakdown"):
-            for _lbl, _b in (("1PH", billing), ("3PH", billing3)):
-                st.markdown(f"**{_lbl}**")
-                slab_df = pd.DataFrame(_b["slabs"])
-                if not slab_df.empty:
-                    st.dataframe(slab_df, use_container_width=True, hide_index=True)
-                cb1, cb2, cb3 = st.columns(3)
-                cb1.metric(f"{_lbl} Base (Rs.)", f"{_b['base_cost']:,.0f}")
-                cb2.metric(f"{_lbl} Tiered Incentive (Rs.)", f"{_b['tier_incentive']:,.0f}")
-                cb3.metric(f"{_lbl} Survey (Rs.)", f"{_b['flat_addon']:,.0f}")
+        _dash_loc = stock_by_location()
+        if not _dash_loc.empty:
+            with st.expander("Stock by site"):
+                st.dataframe(_dash_loc, use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(_dash_loc), max_px=420))
+        if pending_1ph < 0 or pending_3ph < 0:
+            deficits = [t for t, v in (("1PH", pending_1ph), ("3PH", pending_3ph)) if v < 0]
+            st.markdown(f'<div class="danger-box">More {" and ".join(deficits)} meters installed than received — check Inventory entries.</div>', unsafe_allow_html=True)
 
-        sub_hdr("pin", "This Month, By Site")
-        if this_month.empty:
-            st.info("No installs recorded this month yet.")
+        # ── Monthly Installs Overview ────────────────────────────────────────────
+        st.divider()
+        sec_hdr("plug", "Installation Summary")
+
+        if df_inst.empty or not has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
+            st.info("No installation data yet. Add entries in the Installs tab.")
         else:
-            mk = month_key(today)
-            by_cost = {x["site"]: x for x in cost_model["sites"]}
-            v1, v3 = cost_model["v1"], cost_model["v3"]
-            loc_month = this_month.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
-            site_rows = []
-            for _, r in loc_month.iterrows():
-                site, n1, n3 = str(r["location"]), int(r["qty_1ph"]), int(r["qty_3ph"])
-                tg = site_target_for(site, mk)
-                c = by_cost.get(site, {})
-                site_rows.append({
-                    "Site": site, "1PH": n1, "3PH": n3, "Total": n1 + n3,
-                    "Target": f"{tg:,}" if tg else "—",
-                    "% Of Target": f"{(n1 + n3) / tg * 100:.0f}%" if tg else "—",
-                    # Billing at the month's blended rate per type, so the
-                    # site figures add up to the billing table above.
-                    "Billing (Rs.)": round(n1 * v1 + n3 * v3),
-                    "Cost / Install": fmt_rs(c.get("cpi"), 2),
-                })
-            site_df = pd.DataFrame(site_rows).sort_values("Total", ascending=False)
-            total_row = {"Site": "TOTAL", "1PH": int(site_df["1PH"].sum()), "3PH": int(site_df["3PH"].sum()),
-                         "Total": int(site_df["Total"].sum()), "Target": f"{month_target:,}",
-                         "% Of Target": f"{site_df['Total'].sum() / month_target * 100:.0f}%" if month_target else "—",
-                         "Billing (Rs.)": int(site_df["Billing (Rs.)"].sum()),
-                         "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)}
-            site_df = pd.concat([site_df, pd.DataFrame([total_row])], ignore_index=True)
-            st.dataframe(site_df, use_container_width=True, hide_index=True, height=dataframe_height(len(site_df)))
-            download_image_button(site_df, "This_Month_By_Site.png", key="dl_img_loc_month",
-                                  title=f"This Month, By Site — {month_label(mk)}")
+            f1, f2 = st.columns(2)
+            with f1:
+                date_range = st.date_input("Date Range", [today_ist(), today_ist()])
+            with f2:
+                meter_filter = st.multiselect("Meter Type", ["1 PH", "3 PH"], default=["1 PH", "3 PH"])
 
-    st.divider()
-    sec_hdr("box", "Live Inventory Stock")
+            if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+                d_start, d_end = date_range[0], date_range[1]
+            elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
+                d_start = d_end = date_range[0]
+            else:
+                d_start = d_end = date_range
 
-    _stock = stock_summary()
-    _ret_1ph, _ret_3ph = _stock["1 PH"]["returned"], _stock["3 PH"]["returned"]
-    if not df_inv.empty and has_col(df_inv, "type", "qty"):
-        total_in_1ph = safe_numeric_col(df_inv[df_inv["type"] == "1 PH"], "qty").sum()
-        total_in_3ph = safe_numeric_col(df_inv[df_inv["type"] == "3 PH"], "qty").sum()
-    else:
-        total_in_1ph = total_in_3ph = 0
+            show_1ph, show_3ph = "1 PH" in meter_filter, "3 PH" in meter_filter
 
-    if not df_inst.empty and has_col(df_inst, "qty_1ph", "qty_3ph"):
-        total_out_1ph = safe_numeric_col(df_inst, "qty_1ph").sum()
-        total_out_3ph = safe_numeric_col(df_inst, "qty_3ph").sum()
-    else:
-        total_out_1ph = total_out_3ph = 0
+            # Work out what was actually installed in the chosen dates FIRST, so
+            # the Location and Technician lists only offer people and places with
+            # installs in that range. Previously both lists came from all data
+            # ever recorded, so long-idle installers still appeared.
+            in_range = df_inst.copy()
+            in_range["_date"] = pd.to_datetime(in_range["date"], errors="coerce").dt.date
+            in_range = in_range[(in_range["_date"] >= d_start) & (in_range["_date"] <= d_end)]
+            in_range["qty_1ph"] = safe_numeric_col(in_range, "qty_1ph")
+            in_range["qty_3ph"] = safe_numeric_col(in_range, "qty_3ph")
+            # "Did installs" respects the meter-type filter too: with only 3PH
+            # selected, someone who fitted only 1PH meters did no relevant work.
+            in_range["_qty"] = (in_range["qty_1ph"] if show_1ph else 0) + (in_range["qty_3ph"] if show_3ph else 0)
+            active = in_range[in_range["_qty"] > 0]
 
-    pending_1ph = int(total_in_1ph - total_out_1ph - _ret_1ph)
-    pending_3ph = int(total_in_3ph - total_out_3ph - _ret_3ph)
+            loc_list = sorted([l for l in active["location"].astype(str).unique() if l.strip()])
 
-    render_stat_tiles([
-        ("bolt",  f"{int(total_in_1ph):,}", "Recv", "1PH", "normal"),
-        ("bolt",  f"{int(total_in_3ph):,}", "Recv", "3PH", "normal"),
-        ("alert" if pending_1ph < 0 else "bolt", f"{pending_1ph:,}", "Pend", "1PH",
-         "danger" if pending_1ph < 0 else "normal"),
-        ("alert" if pending_3ph < 0 else "bolt", f"{pending_3ph:,}", "Pend", "3PH",
-         "danger" if pending_3ph < 0 else "normal"),
-    ])
-    _dash_loc = stock_by_location()
-    if not _dash_loc.empty:
-        with st.expander("Stock by site"):
-            st.dataframe(_dash_loc, use_container_width=True, hide_index=True,
-                         height=dataframe_height(len(_dash_loc), max_px=420))
-    if pending_1ph < 0 or pending_3ph < 0:
-        deficits = [t for t, v in (("1PH", pending_1ph), ("3PH", pending_3ph)) if v < 0]
-        st.markdown(f'<div class="danger-box">More {" and ".join(deficits)} meters installed than received — check Inventory entries.</div>', unsafe_allow_html=True)
+            f3, f4 = st.columns(2)
+            with f3:
+                loc_filter = st.multiselect("Locations", loc_list, default=loc_list)
+            # Technicians narrow to the chosen locations as well, so nobody is
+            # listed who didn't install in the places being looked at.
+            active_scoped = active[active["location"].isin(loc_filter)] if loc_filter else active
+            tech_list = sorted([t for t in active_scoped["tech_name"].astype(str).unique() if t.strip()])
+            with f4:
+                tech_filter = st.multiselect("Technicians", tech_list, default=tech_list)
 
-    # ── Monthly Installs Overview ────────────────────────────────────────────
-    st.divider()
-    sec_hdr("plug", "Installation Summary")
+            # No message when the chosen dates hold nothing: the filters and totals
+            # already read zero, and today is empty every morning until the day's
+            # file is uploaded.
 
-    if df_inst.empty or not has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
-        st.info("No installation data yet. Add entries in the Installs tab.")
-    else:
-        f1, f2 = st.columns(2)
-        with f1:
-            date_range = st.date_input("Date Range", [today_ist(), today_ist()])
-        with f2:
-            meter_filter = st.multiselect("Meter Type", ["1 PH", "3 PH"], default=["1 PH", "3 PH"])
+            filtered = in_range
+            if loc_filter:
+                filtered = filtered[filtered["location"].isin(loc_filter)]
+            if tech_filter:
+                filtered = filtered[filtered["tech_name"].isin(tech_filter)]
+            sum_1ph = int(filtered["qty_1ph"].sum()) if show_1ph else 0
+            sum_3ph = int(filtered["qty_3ph"].sum()) if show_3ph else 0
 
-        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-            d_start, d_end = date_range[0], date_range[1]
-        elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
-            d_start = d_end = date_range[0]
-        else:
-            d_start = d_end = date_range
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Filtered 1PH", sum_1ph)
+            m2.metric("Filtered 3PH", sum_3ph)
+            m3.metric("Grand Total", sum_1ph + sum_3ph)
 
-        show_1ph, show_3ph = "1 PH" in meter_filter, "3 PH" in meter_filter
+            if not filtered.empty:
+                sec_hdr("users", "Technician Breakdown")
+                group_df = filtered.groupby(["tech_name", "location"])[["qty_1ph", "qty_3ph"]].sum().reset_index()
+                group_df["Total"] = group_df["qty_1ph"] + group_df["qty_3ph"]
+                # Same rule as the filters: no card for a technician/location with
+                # nothing installed in these dates.
+                group_df = group_df[group_df["Total"] > 0]
+                group_df.columns = ["Technician", "Location", "1PH", "3PH", "Total"]
+                # Counts are whole meters — the upstream to_numeric leaves them as
+                # floats, which renders as "12.0".
+                for _qc in ["1PH", "3PH", "Total"]:
+                    group_df[_qc] = group_df[_qc].astype(int)
+                group_df = group_df.sort_values("Total", ascending=False)
+                st.caption(f"{len(group_df)} technician(s) · sorted by total")
+                # Two-up card grid rather than one row each: at 30-50 technicians a
+                # full-width list is a scroll marathon, and the fix is arrangement,
+                # not smaller type.
+                render_technician_cards(
+                    [(r["Technician"], r["Location"], int(r["Total"])) for _, r in group_df.iterrows()],
+                    INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MAX,
+                )
+                with st.expander("View as table (1PH / 3PH split)"):
+                    st.dataframe(group_df, use_container_width=True, hide_index=True,
+                                 height=dataframe_height(len(group_df)))
+                download_image_button(
+                    group_df, "Technician_Breakdown.png", key="dl_img_group_df",
+                    color_grid=build_single_col_color_grid(group_df, "Total", lambda v: tier_colors(v, INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)),
+                    title="Technician Breakdown",
+                )
 
-        # Work out what was actually installed in the chosen dates FIRST, so
-        # the Location and Technician lists only offer people and places with
-        # installs in that range. Previously both lists came from all data
-        # ever recorded, so long-idle installers still appeared.
-        in_range = df_inst.copy()
-        in_range["_date"] = pd.to_datetime(in_range["date"], errors="coerce").dt.date
-        in_range = in_range[(in_range["_date"] >= d_start) & (in_range["_date"] <= d_end)]
-        in_range["qty_1ph"] = safe_numeric_col(in_range, "qty_1ph")
-        in_range["qty_3ph"] = safe_numeric_col(in_range, "qty_3ph")
-        # "Did installs" respects the meter-type filter too: with only 3PH
-        # selected, someone who fitted only 1PH meters did no relevant work.
-        in_range["_qty"] = (in_range["qty_1ph"] if show_1ph else 0) + (in_range["qty_3ph"] if show_3ph else 0)
-        active = in_range[in_range["_qty"] > 0]
+                sec_hdr("download", "Export & Share")
+                export_df = group_df.copy()
+                export_df.loc[len(export_df)] = ["---", "---", "---", "---", "---"]
+                export_df.loc[len(export_df)] = ["GRAND TOTAL", "", sum_1ph, sum_3ph, sum_1ph + sum_3ph]
+                export_df.loc[len(export_df)] = ["PENDING STOCK", "", pending_1ph, pending_3ph, ""]
 
-        loc_list = sorted([l for l in active["location"].astype(str).unique() if l.strip()])
+                csv_data = export_df.to_csv(index=False).encode("utf-8")
+                st.download_button("📥 Download CSV Report", data=csv_data, file_name="Installation_Summary.csv", mime="text/csv", use_container_width=True, on_click="ignore")
 
-        f3, f4 = st.columns(2)
-        with f3:
-            loc_filter = st.multiselect("Locations", loc_list, default=loc_list)
-        # Technicians narrow to the chosen locations as well, so nobody is
-        # listed who didn't install in the places being looked at.
-        active_scoped = active[active["location"].isin(loc_filter)] if loc_filter else active
-        tech_list = sorted([t for t in active_scoped["tech_name"].astype(str).unique() if t.strip()])
-        with f4:
-            tech_filter = st.multiselect("Technicians", tech_list, default=tech_list)
+                date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
+                wa_loc_df = filtered.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
 
-        # No message when the chosen dates hold nothing: the filters and totals
-        # already read zero, and today is empty every morning until the day's
-        # file is uploaded.
+                wa_lines = ["DPR- Touchlight Infra", f"Date: {date_str}\n"]
+                for _, row in wa_loc_df.iterrows():
+                    wa_lines.append(f"{row['location']}:")
+                    wa_lines.append(f"1PH: {int(row['qty_1ph']) if show_1ph else 0}, 3PH: {int(row['qty_3ph']) if show_3ph else 0}\n")
 
-        filtered = in_range
-        if loc_filter:
-            filtered = filtered[filtered["location"].isin(loc_filter)]
-        if tech_filter:
-            filtered = filtered[filtered["tech_name"].isin(tech_filter)]
-        sum_1ph = int(filtered["qty_1ph"].sum()) if show_1ph else 0
-        sum_3ph = int(filtered["qty_3ph"].sum()) if show_3ph else 0
+                wa_lines.append(f"Total 1PH: {sum_1ph} | Total 3PH: {sum_3ph} | Grand Total: {sum_1ph + sum_3ph}")
+                wa_lines.append(f"Pending Stock: 1PH: {pending_1ph} | 3PH: {pending_3ph}")
 
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Filtered 1PH", sum_1ph)
-        m2.metric("Filtered 3PH", sum_3ph)
-        m3.metric("Grand Total", sum_1ph + sum_3ph)
+                wa_text = "\n".join(wa_lines)
+                wa_url = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
+                st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Send to WhatsApp</a>', unsafe_allow_html=True)
 
-        if not filtered.empty:
-            sec_hdr("users", "Technician Breakdown")
-            group_df = filtered.groupby(["tech_name", "location"])[["qty_1ph", "qty_3ph"]].sum().reset_index()
-            group_df["Total"] = group_df["qty_1ph"] + group_df["qty_3ph"]
-            # Same rule as the filters: no card for a technician/location with
-            # nothing installed in these dates.
-            group_df = group_df[group_df["Total"] > 0]
-            group_df.columns = ["Technician", "Location", "1PH", "3PH", "Total"]
-            # Counts are whole meters — the upstream to_numeric leaves them as
-            # floats, which renders as "12.0".
-            for _qc in ["1PH", "3PH", "Total"]:
-                group_df[_qc] = group_df[_qc].astype(int)
-            group_df = group_df.sort_values("Total", ascending=False)
-            st.caption(f"{len(group_df)} technician(s) · sorted by total")
-            # Two-up card grid rather than one row each: at 30-50 technicians a
-            # full-width list is a scroll marathon, and the fix is arrangement,
-            # not smaller type.
-            render_technician_cards(
-                [(r["Technician"], r["Location"], int(r["Total"])) for _, r in group_df.iterrows()],
-                INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MAX,
-            )
-            with st.expander("View as table (1PH / 3PH split)"):
-                st.dataframe(group_df, use_container_width=True, hide_index=True,
-                             height=dataframe_height(len(group_df)))
-            download_image_button(
-                group_df, "Technician_Breakdown.png", key="dl_img_group_df",
-                color_grid=build_single_col_color_grid(group_df, "Total", lambda v: tier_colors(v, INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)),
-                title="Technician Breakdown",
-            )
+        st.divider()
+        sec_hdr("file", "Customer Report")
 
-            sec_hdr("download", "Export & Share")
-            export_df = group_df.copy()
-            export_df.loc[len(export_df)] = ["---", "---", "---", "---", "---"]
-            export_df.loc[len(export_df)] = ["GRAND TOTAL", "", sum_1ph, sum_3ph, sum_1ph + sum_3ph]
-            export_df.loc[len(export_df)] = ["PENDING STOCK", "", pending_1ph, pending_3ph, ""]
+        rf1, rf2 = st.columns(2)
+        with rf1:
+            report_date_range = st.date_input("Date Range", [today_ist() - timedelta(days=6), today_ist()], key="report_date_range")
+        with rf2:
+            report_meter_type = st.selectbox("Meter Type", ["All", "1 PH", "3 PH"], key="report_meter_type")
 
-            csv_data = export_df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download CSV Report", data=csv_data, file_name="Installation_Summary.csv", mime="text/csv", use_container_width=True, on_click="ignore")
+        df_log_for_report = get_data("UploadedInstallLog")
 
-            date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
-            wa_loc_df = filtered.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
+        # Two levels: Section = the named Location (e.g. CHITTINAGAR); Section Code
+        # = the 2-digit code from the SNO, several of which sit under one Location.
+        all_locations = (
+            sorted([l for l in df_log_for_report["location"].astype(str).str.strip().unique() if l and l != "Unspecified"])
+            if not df_log_for_report.empty and "location" in df_log_for_report.columns else []
+        )
+        rf3, rf4 = st.columns(2)
+        with rf3:
+            report_locations = st.multiselect("Section (all if none picked)", all_locations, key="report_locations")
 
-            wa_lines = ["DPR- Touchlight Infra", f"Date: {date_str}\n"]
-            for _, row in wa_loc_df.iterrows():
-                wa_lines.append(f"{row['location']}:")
-                wa_lines.append(f"1PH: {int(row['qty_1ph']) if show_1ph else 0}, 3PH: {int(row['qty_3ph']) if show_3ph else 0}\n")
+        # Codes offered are limited to the chosen Sections, so you can't pick a
+        # combination that returns nothing.
+        scoped = df_log_for_report
+        if report_locations and not scoped.empty and "location" in scoped.columns:
+            scoped = scoped[scoped["location"].astype(str).str.strip().isin(report_locations)]
+        all_section_codes = sorted(section_codes(scoped["sno"]).unique()) if not scoped.empty and "sno" in scoped.columns else []
+        with rf4:
+            report_sections = st.multiselect("Section Code (all if none picked)", all_section_codes, key="report_sections")
 
-            wa_lines.append(f"Total 1PH: {sum_1ph} | Total 3PH: {sum_3ph} | Grand Total: {sum_1ph + sum_3ph}")
-            wa_lines.append(f"Pending Stock: 1PH: {pending_1ph} | 3PH: {pending_3ph}")
+        if not df_log_for_report.empty and "sno" in df_log_for_report.columns:
+            codes = section_codes(df_log_for_report["sno"])
+            unclassified_n = int((codes == "Unclassified").sum())
+            if unclassified_n:
+                sample = df_log_for_report.loc[codes == "Unclassified", "sno"].astype(str).head(3).tolist()
+                st.warning(f"⚠️ {unclassified_n} record(s) have an unreadable Consumer No and can't be assigned a section code. Examples: {', '.join(repr(s) for s in sample)}")
 
-            wa_text = "\n".join(wa_lines)
-            wa_url = f"https://wa.me/?text={urllib.parse.quote(wa_text)}"
-            st.markdown(f'<a href="{wa_url}" target="_blank" class="wa-btn">💬 Send to WhatsApp</a>', unsafe_allow_html=True)
+        if st.button("Generate Report", type="primary", use_container_width=True, key="generate_weekly_report_btn"):
+            if isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 2:
+                rd_start, rd_end = report_date_range
+            elif isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 1:
+                rd_start = rd_end = report_date_range[0]
+            else:
+                rd_start = rd_end = report_date_range
+            with st.spinner("Generating report..."):
+                pdf_bytes, err = build_weekly_report_pdf(
+                    rd_start, rd_end,
+                    section_filter=report_sections or None,
+                    meter_type_filter=report_meter_type,
+                    location_filter=report_locations or None,
+                )
+            if err:
+                st.error(f"❌ {err}")
+            else:
+                st.session_state["weekly_report_pdf"] = pdf_bytes
+                st.session_state["weekly_report_name"] = f"Weekly_Report_{rd_start}_to_{rd_end}.pdf"
+                st.success("✅ Report ready below.")
 
-    st.divider()
-    sec_hdr("file", "Customer Report")
-
-    rf1, rf2 = st.columns(2)
-    with rf1:
-        report_date_range = st.date_input("Date Range", [today_ist() - timedelta(days=6), today_ist()], key="report_date_range")
-    with rf2:
-        report_meter_type = st.selectbox("Meter Type", ["All", "1 PH", "3 PH"], key="report_meter_type")
-
-    df_log_for_report = get_data("UploadedInstallLog")
-
-    # Two levels: Section = the named Location (e.g. CHITTINAGAR); Section Code
-    # = the 2-digit code from the SNO, several of which sit under one Location.
-    all_locations = (
-        sorted([l for l in df_log_for_report["location"].astype(str).str.strip().unique() if l and l != "Unspecified"])
-        if not df_log_for_report.empty and "location" in df_log_for_report.columns else []
-    )
-    rf3, rf4 = st.columns(2)
-    with rf3:
-        report_locations = st.multiselect("Section (all if none picked)", all_locations, key="report_locations")
-
-    # Codes offered are limited to the chosen Sections, so you can't pick a
-    # combination that returns nothing.
-    scoped = df_log_for_report
-    if report_locations and not scoped.empty and "location" in scoped.columns:
-        scoped = scoped[scoped["location"].astype(str).str.strip().isin(report_locations)]
-    all_section_codes = sorted(scoped["sno"].apply(extract_section_code).unique()) if not scoped.empty and "sno" in scoped.columns else []
-    with rf4:
-        report_sections = st.multiselect("Section Code (all if none picked)", all_section_codes, key="report_sections")
-
-    if not df_log_for_report.empty and "sno" in df_log_for_report.columns:
-        codes = df_log_for_report["sno"].apply(extract_section_code)
-        unclassified_n = int((codes == "Unclassified").sum())
-        if unclassified_n:
-            sample = df_log_for_report.loc[codes == "Unclassified", "sno"].astype(str).head(3).tolist()
-            st.warning(f"⚠️ {unclassified_n} record(s) have an unreadable Consumer No and can't be assigned a section code. Examples: {', '.join(repr(s) for s in sample)}")
-
-    if st.button("Generate Report", type="primary", use_container_width=True, key="generate_weekly_report_btn"):
-        if isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 2:
-            rd_start, rd_end = report_date_range
-        elif isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 1:
-            rd_start = rd_end = report_date_range[0]
-        else:
-            rd_start = rd_end = report_date_range
-        with st.spinner("Generating report..."):
-            pdf_bytes, err = build_weekly_report_pdf(
-                rd_start, rd_end,
-                section_filter=report_sections or None,
-                meter_type_filter=report_meter_type,
-                location_filter=report_locations or None,
-            )
-        if err:
-            st.error(f"❌ {err}")
-        else:
-            st.session_state["weekly_report_pdf"] = pdf_bytes
-            st.session_state["weekly_report_name"] = f"Weekly_Report_{rd_start}_to_{rd_end}.pdf"
-            st.success("✅ Report ready below.")
-
-    if "weekly_report_pdf" in st.session_state:
-        st.download_button("Download Report (PDF)", data=st.session_state["weekly_report_pdf"],
-                            file_name=st.session_state["weekly_report_name"], mime="application/pdf",
-                            use_container_width=True, key="download_weekly_report", on_click="ignore")
+        if "weekly_report_pdf" in st.session_state:
+            st.download_button("Download Report (PDF)", data=st.session_state["weekly_report_pdf"],
+                                file_name=st.session_state["weekly_report_name"], mime="application/pdf",
+                                use_container_width=True, key="download_weekly_report", on_click="ignore")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ANALYTICS  (fully independent of Installations/Inventory/Technicians —
@@ -6226,371 +6358,372 @@ def process_analytics_upload(analytics_file) -> dict:
 
 
 with tab_analytics:
-    tab_action_bar("analytics", show_upload=True)
+    if tab_analytics.open:   # only the open tab runs (tabs are created with on_change="rerun")
+        tab_action_bar("analytics", show_upload=True)
 
-    sec_hdr("upload", "Upload Progress File")
-    up_col, go_col = st.columns([6, 1], vertical_alignment="center")
-    with up_col:
-        analytics_file = st.file_uploader(
-            "MDM export (.xlsx)", type=["xlsx"], key="analytics_uploader",
-            label_visibility="collapsed",
-        )
-    with go_col:
-        # GO re-runs "Add & Process" on demand. New files still process
-        # automatically on upload; GO is for a retry or a forced re-run.
-        go_clicked = st.button("GO", type="primary", use_container_width=True,
-                               key="analytics_go", disabled=analytics_file is None,
-                               help="Add & process this file")
-
-    SLOW_PROCESS_SECONDS = 5
-
-    if analytics_file is not None:
-        # Hash the actual bytes rather than name+size: the MDM export keeps the
-        # same filename every day, and two different days' files can coincide
-        # on size — which would make a genuinely new upload look "already
-        # processed" and silently skip it.
-        _fp_bytes = analytics_file.getvalue()
-        file_fp = hashlib.sha256(_fp_bytes).hexdigest()[:16]
-        analytics_file.seek(0)
-
-        if st.session_state.get("analytics_last_fp") != file_fp:
-            t0 = time.time()
-            with st.spinner("📊 Processing and adding to Analytics..."):
-                result = process_analytics_upload(analytics_file)
-            st.session_state["analytics_last_fp"] = file_fp
-            st.session_state["analytics_last_ok"] = result["ok"]
-            st.session_state["analytics_last_slow"] = (time.time() - t0) > SLOW_PROCESS_SECONDS
-            if result["wrote"]:
-                st.rerun()
-
-        last_ok = st.session_state.get("analytics_last_ok", True)
-        last_slow = st.session_state.get("analytics_last_slow", False)
-        needs_attention = (not last_ok) or last_slow
-
-        if needs_attention:
-            st.warning(("⚠️ Automatic processing failed — tap GO to retry." if not last_ok
-                        else "⏳ Processing took a while — tap GO if the figures below don't look up to date."))
-
-        if go_clicked:
-            t0 = time.time()
-            with st.spinner("📊 Processing and adding to Analytics..."):
-                result = process_analytics_upload(analytics_file)
-            st.session_state["analytics_last_fp"] = file_fp
-            st.session_state["analytics_last_ok"] = result["ok"]
-            st.session_state["analytics_last_slow"] = (time.time() - t0) > SLOW_PROCESS_SECONDS
-            if result["wrote"]:
-                st.rerun()
-
-    # ── Build analytics tables from stored raw data ─────────────────────────
-    st.divider()
-    df_araw = get_data("AnalyticsRaw")
-
-    if df_araw.empty or not has_col(df_araw, "date", "time", "installer_id", "hour"):
-        st.info("No analytics data yet — upload a progress file above to get started.")
-    else:
-        avail_dates = sorted(df_araw["date"].unique(), reverse=True)
-
-        # Display order is glance -> "work until" -> date/supervisor, but the
-        # logic needs the reverse: the pickers decide which installs the glance
-        # counts. So reserve the three spots in display order now, and fill
-        # them below in the order the logic needs.
-        sec_hdr("target", "Today At A Glance")
-        glance_slot = st.container()
-        until_slot = st.container()
-        picker_slot = st.container()
-
-        with picker_slot:
-            vc1, vc2, vc3 = st.columns(3)
-            with vc1:
-                sel_date = st.selectbox("Viewing date", avail_dates, index=0)
-            day_df = df_araw[df_araw["date"] == sel_date].copy()
-            day_df["hour_int"] = pd.to_numeric(day_df["hour"], errors="coerce")
-            day_df["supervisor"] = day_df["installer_id"].apply(supervisor_of)
-            # Site = the Section on each uploaded record, so a technician helping
-            # another site is counted where the work was actually done.
-            day_df["site"] = (day_df["location"].astype(str).str.strip().replace("", "Unspecified")
-                              if "location" in day_df.columns else "Unspecified")
-            day_df["phase"] = (day_df["meter_type"].apply(classify_meter_type)
-                               if "meter_type" in day_df.columns else "")
-
-            # Unscoped copy for the Installs push, taken BEFORE any filter: the
-            # site and supervisor filters are VIEW choices and must never decide
-            # which installs get recorded.
-            day_df_all = day_df.copy()
-
-            # Site first, then the supervisors who worked at that site, so a
-            # supervisor with no installs there can't be picked.
-            sites_today = sorted(day_df["site"].unique())
-            with vc2:
-                sel_site = st.selectbox("Site", ["All sites"] + sites_today, key="analytics_site")
-            if sel_site != "All sites":
-                day_df = day_df[day_df["site"] == sel_site]
-
-            sups_today = sorted(day_df["supervisor"].unique())
-            with vc3:
-                # Keyed on the site: the list changes with it, and a supervisor
-                # chosen for one site may not exist in another.
-                sel_supervisor = st.selectbox("Supervisor", ["All supervisors"] + sups_today,
-                                              key=f"analytics_supervisor_{sel_site}")
-            if sel_supervisor != "All supervisors":
-                day_df = day_df[day_df["supervisor"] == sel_supervisor]
-
-            # (No empty-guard needed: sups_today is derived from day_df itself, so
-            # selecting any listed supervisor always leaves at least one record.)
-            installers = sorted(day_df["installer_id"].unique())
-            if UNASSIGNED_SUPERVISOR in sups_today and sel_supervisor == "All supervisors":
-                unassigned_ids = sorted(day_df.loc[day_df["supervisor"] == UNASSIGNED_SUPERVISOR, "installer_id"].unique())
-                st.caption(f"⚠️ Not mapped to a supervisor: {', '.join(unassigned_ids)} — set their Supervisor in Admin → Technicians.")
-
-        with until_slot:
-            day_end_choice = st.selectbox(
-                "Assume work continues until", ["17:00", "18:00", "19:00", "20:00", "21:00"],
-                index=1, key="forecast_day_end",
-                help="Used only for the forecast. If installs are still coming in past this time, the forecast extends automatically.",
+        sec_hdr("upload", "Upload Progress File")
+        up_col, go_col = st.columns([6, 1], vertical_alignment="center")
+        with up_col:
+            analytics_file = st.file_uploader(
+                "MDM export (.xlsx)", type=["xlsx"], key="analytics_uploader",
+                label_visibility="collapsed",
             )
-        forecast_total, rate_per_hour, effective_end = (
-            forecast_total_installs(day_df, installers, f"{day_end_choice}:00")
-            if installers else (None, 0.0, f"{day_end_choice}:00")
-        )
-        with glance_slot:
-            g1, g2, g3, g4 = st.columns(4)
-            with g1:
-                render_colored_metric("Total Installs", len(day_df), GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
-            g2.metric("Active Installers", len(installers))
-            g3.metric("Avg / Installer", round(len(day_df) / len(installers), 1) if installers else 0)
-            with g4:
-                if forecast_total is not None:
-                    render_colored_metric("Forecasted Total", forecast_total, GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
-                else:
-                    st.metric("Forecasted Total", "—")
-            _p = day_df["phase"] if "phase" in day_df.columns else pd.Series(dtype=str)
-            render_stat_tiles([
-                ("bolt", f"{int((_p == '1PH').sum()):,}", "1PH", "installs", "normal"),
-                ("bolt", f"{int((_p == '3PH').sum()):,}", "3PH", "installs", "normal"),
-                ("pin", f"{day_df['site'].nunique() if 'site' in day_df.columns else 0}", "Sites", "working", "normal"),
-            ])
-            if forecast_total is not None:
-                extended = effective_end[:5] != day_end_choice
-                note = f" (extended past {day_end_choice} — installs still coming in)" if extended else ""
-                st.caption(f"Projected to {effective_end[:5]} at the current team rate of {rate_per_hour:.0f} installs/hour{note}.")
-            else:
-                st.caption("Not enough data yet to project.")
+        with go_col:
+            # GO re-runs "Add & Process" on demand. New files still process
+            # automatically on upload; GO is for a retry or a forced re-run.
+            go_clicked = st.button("GO", type="primary", use_container_width=True,
+                                   key="analytics_go", disabled=analytics_file is None,
+                                   help="Add & process this file")
 
-        # -- Hourly table --------------------------------------------------
-        # One header for every Analytics image export — the same figures as the
-        # glance cards above, including the forecast — so all shared images
-        # carry an identical, self-explanatory header.
-        _scope_bits = [("All sites" if sel_site == "All sites" else f"Site: {sel_site}")]
-        if sel_supervisor != "All supervisors":
-            _scope_bits.append(f"Supervisor: {sel_supervisor}")
-        _scope_txt = "   |   ".join(_scope_bits)
-        analytics_img_meta = (
-            f"{_scope_txt}   |   Last install: {str(max(day_df['time']))[:5]}\n"
-            f"Total: {len(day_df)}   |   Active Installers: {len(installers)}   |   "
-            f"Avg/Installer: {round(len(day_df) / len(installers), 1) if installers else 0}   |   "
-            f"Forecast by {effective_end[:5]}: {forecast_total if forecast_total is not None else 'N/A'}"
-        )
+        SLOW_PROCESS_SECONDS = 5
 
-        sec_hdr("clock", "Installer-Wise Hourly Count")
-        if day_df["hour_int"].notna().any():
-            hr_min = int(day_df["hour_int"].min())
-            hr_max = int(day_df["hour_int"].max())
+        if analytics_file is not None:
+            # Hash the actual bytes rather than name+size: the MDM export keeps the
+            # same filename every day, and two different days' files can coincide
+            # on size — which would make a genuinely new upload look "already
+            # processed" and silently skip it.
+            _fp_bytes = analytics_file.getvalue()
+            file_fp = hashlib.sha256(_fp_bytes).hexdigest()[:16]
+            analytics_file.seek(0)
+
+            if st.session_state.get("analytics_last_fp") != file_fp:
+                t0 = time.time()
+                with st.spinner("📊 Processing and adding to Analytics..."):
+                    result = process_analytics_upload(analytics_file)
+                st.session_state["analytics_last_fp"] = file_fp
+                st.session_state["analytics_last_ok"] = result["ok"]
+                st.session_state["analytics_last_slow"] = (time.time() - t0) > SLOW_PROCESS_SECONDS
+                if result["wrote"]:
+                    st.rerun()
+
+            last_ok = st.session_state.get("analytics_last_ok", True)
+            last_slow = st.session_state.get("analytics_last_slow", False)
+            needs_attention = (not last_ok) or last_slow
+
+            if needs_attention:
+                st.warning(("⚠️ Automatic processing failed — tap GO to retry." if not last_ok
+                            else "⏳ Processing took a while — tap GO if the figures below don't look up to date."))
+
+            if go_clicked:
+                t0 = time.time()
+                with st.spinner("📊 Processing and adding to Analytics..."):
+                    result = process_analytics_upload(analytics_file)
+                st.session_state["analytics_last_fp"] = file_fp
+                st.session_state["analytics_last_ok"] = result["ok"]
+                st.session_state["analytics_last_slow"] = (time.time() - t0) > SLOW_PROCESS_SECONDS
+                if result["wrote"]:
+                    st.rerun()
+
+        # ── Build analytics tables from stored raw data ─────────────────────────
+        st.divider()
+        df_araw = get_data("AnalyticsRaw")
+
+        if df_araw.empty or not has_col(df_araw, "date", "time", "installer_id", "hour"):
+            st.info("No analytics data yet — upload a progress file above to get started.")
         else:
-            hr_min, hr_max = 8, 18
+            avail_dates = sorted(df_araw["date"].unique(), reverse=True)
 
-        hour_cols = list(range(hr_min, hr_max + 1))
+            # Display order is glance -> "work until" -> date/supervisor, but the
+            # logic needs the reverse: the pickers decide which installs the glance
+            # counts. So reserve the three spots in display order now, and fill
+            # them below in the order the logic needs.
+            sec_hdr("target", "Today At A Glance")
+            glance_slot = st.container()
+            until_slot = st.container()
+            picker_slot = st.container()
 
-        def _hour_row(label, sub):
-            row = {"Installer": label}
-            for h in hour_cols:
-                row[f"{h}-{h+1}"] = int((sub["hour_int"] == h).sum())
-            row["Total"] = len(sub)
-            return row
+            with picker_slot:
+                vc1, vc2, vc3 = st.columns(3)
+                with vc1:
+                    sel_date = st.selectbox("Viewing date", avail_dates, index=0)
+                day_df = df_araw[df_araw["date"] == sel_date].copy()
+                day_df["hour_int"] = pd.to_numeric(day_df["hour"], errors="coerce")
+                day_df["supervisor"] = day_df["installer_id"].apply(supervisor_of)
+                # Site = the Section on each uploaded record, so a technician helping
+                # another site is counted where the work was actually done.
+                day_df["site"] = (day_df["location"].astype(str).str.strip().replace("", "Unspecified")
+                                  if "location" in day_df.columns else "Unspecified")
+                day_df["phase"] = (meter_phases(day_df["meter_type"])
+                                   if "meter_type" in day_df.columns else "")
 
-        hour_col_labels = [f"{h}-{h+1}" for h in hour_cols]
-        last_install_time = max(day_df["time"]) if not day_df.empty else "—"
+                # Unscoped copy for the Installs push, taken BEFORE any filter: the
+                # site and supervisor filters are VIEW choices and must never decide
+                # which installs get recorded.
+                day_df_all = day_df.copy()
 
-        def _build_hourly_df(scope_df):
-            """Per-installer rows for a scope, plus its own TOTAL row."""
-            rows = [
-                _hour_row(inst, scope_df[scope_df["installer_id"] == inst])
-                for inst in scope_df.groupby("installer_id").size().sort_values(ascending=False).index
-            ]
-            hdf = pd.DataFrame(rows)
-            tot = {"Installer": "TOTAL"}
-            for h in hour_cols:
-                tot[f"{h}-{h+1}"] = int(hdf[f"{h}-{h+1}"].sum())
-            tot["Total"] = int(hdf["Total"].sum())
-            return pd.concat([hdf, pd.DataFrame([tot])], ignore_index=True)
+                # Site first, then the supervisors who worked at that site, so a
+                # supervisor with no installs there can't be picked.
+                sites_today = sorted(day_df["site"].unique())
+                with vc2:
+                    sel_site = st.selectbox("Site", ["All sites"] + sites_today, key="analytics_site")
+                if sel_site != "All sites":
+                    day_df = day_df[day_df["site"] == sel_site]
 
-        hourly_view_mode = st.radio(
-            "Hourly table view", ["📋 Table", "🔲 Heatmap (no horizontal scroll)"],
-            horizontal=True, key="hourly_view_mode", label_visibility="collapsed",
-        )
+                sups_today = sorted(day_df["supervisor"].unique())
+                with vc3:
+                    # Keyed on the site: the list changes with it, and a supervisor
+                    # chosen for one site may not exist in another.
+                    sel_supervisor = st.selectbox("Supervisor", ["All supervisors"] + sups_today,
+                                                  key=f"analytics_supervisor_{sel_site}")
+                if sel_supervisor != "All supervisors":
+                    day_df = day_df[day_df["supervisor"] == sel_supervisor]
 
-        def _render_hourly_block(scope_df, scope_label, key_suffix):
-            """One heading + table + download button for a given scope. Each
+                # (No empty-guard needed: sups_today is derived from day_df itself, so
+                # selecting any listed supervisor always leaves at least one record.)
+                installers = sorted(day_df["installer_id"].unique())
+                if UNASSIGNED_SUPERVISOR in sups_today and sel_supervisor == "All supervisors":
+                    unassigned_ids = sorted(day_df.loc[day_df["supervisor"] == UNASSIGNED_SUPERVISOR, "installer_id"].unique())
+                    st.caption(f"⚠️ Not mapped to a supervisor: {', '.join(unassigned_ids)} — set their Supervisor in Admin → Technicians.")
+
+            with until_slot:
+                day_end_choice = st.selectbox(
+                    "Assume work continues until", ["17:00", "18:00", "19:00", "20:00", "21:00"],
+                    index=1, key="forecast_day_end",
+                    help="Used only for the forecast. If installs are still coming in past this time, the forecast extends automatically.",
+                )
+            forecast_total, rate_per_hour, effective_end = (
+                forecast_total_installs(day_df, installers, f"{day_end_choice}:00")
+                if installers else (None, 0.0, f"{day_end_choice}:00")
+            )
+            with glance_slot:
+                g1, g2, g3, g4 = st.columns(4)
+                with g1:
+                    render_colored_metric("Total Installs", len(day_df), GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
+                g2.metric("Active Installers", len(installers))
+                g3.metric("Avg / Installer", round(len(day_df) / len(installers), 1) if installers else 0)
+                with g4:
+                    if forecast_total is not None:
+                        render_colored_metric("Forecasted Total", forecast_total, GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
+                    else:
+                        st.metric("Forecasted Total", "—")
+                _p = day_df["phase"] if "phase" in day_df.columns else pd.Series(dtype=str)
+                render_stat_tiles([
+                    ("bolt", f"{int((_p == '1PH').sum()):,}", "1PH", "installs", "normal"),
+                    ("bolt", f"{int((_p == '3PH').sum()):,}", "3PH", "installs", "normal"),
+                    ("pin", f"{day_df['site'].nunique() if 'site' in day_df.columns else 0}", "Sites", "working", "normal"),
+                ])
+                if forecast_total is not None:
+                    extended = effective_end[:5] != day_end_choice
+                    note = f" (extended past {day_end_choice} — installs still coming in)" if extended else ""
+                    st.caption(f"Projected to {effective_end[:5]} at the current team rate of {rate_per_hour:.0f} installs/hour{note}.")
+                else:
+                    st.caption("Not enough data yet to project.")
+
+            # -- Hourly table --------------------------------------------------
+            # One header for every Analytics image export — the same figures as the
+            # glance cards above, including the forecast — so all shared images
+            # carry an identical, self-explanatory header.
+            _scope_bits = [("All sites" if sel_site == "All sites" else f"Site: {sel_site}")]
+            if sel_supervisor != "All supervisors":
+                _scope_bits.append(f"Supervisor: {sel_supervisor}")
+            _scope_txt = "   |   ".join(_scope_bits)
+            analytics_img_meta = (
+                f"{_scope_txt}   |   Last install: {str(max(day_df['time']))[:5]}\n"
+                f"Total: {len(day_df)}   |   Active Installers: {len(installers)}   |   "
+                f"Avg/Installer: {round(len(day_df) / len(installers), 1) if installers else 0}   |   "
+                f"Forecast by {effective_end[:5]}: {forecast_total if forecast_total is not None else 'N/A'}"
+            )
+
+            sec_hdr("clock", "Installer-Wise Hourly Count")
+            if day_df["hour_int"].notna().any():
+                hr_min = int(day_df["hour_int"].min())
+                hr_max = int(day_df["hour_int"].max())
+            else:
+                hr_min, hr_max = 8, 18
+
+            hour_cols = list(range(hr_min, hr_max + 1))
+
+            def _hour_row(label, sub):
+                row = {"Installer": label}
+                for h in hour_cols:
+                    row[f"{h}-{h+1}"] = int((sub["hour_int"] == h).sum())
+                row["Total"] = len(sub)
+                return row
+
+            hour_col_labels = [f"{h}-{h+1}" for h in hour_cols]
+            last_install_time = max(day_df["time"]) if not day_df.empty else "—"
+
+            def _build_hourly_df(scope_df):
+                """Per-installer rows for a scope, plus its own TOTAL row."""
+                rows = [
+                    _hour_row(inst, scope_df[scope_df["installer_id"] == inst])
+                    for inst in scope_df.groupby("installer_id").size().sort_values(ascending=False).index
+                ]
+                hdf = pd.DataFrame(rows)
+                tot = {"Installer": "TOTAL"}
+                for h in hour_cols:
+                    tot[f"{h}-{h+1}"] = int(hdf[f"{h}-{h+1}"].sum())
+                tot["Total"] = int(hdf["Total"].sum())
+                return pd.concat([hdf, pd.DataFrame([tot])], ignore_index=True)
+
+            hourly_view_mode = st.radio(
+                "Hourly table view", ["📋 Table", "🔲 Heatmap (no horizontal scroll)"],
+                horizontal=True, key="hourly_view_mode", label_visibility="collapsed",
+            )
+
+            def _render_hourly_block(scope_df, scope_label, key_suffix):
+                """One heading + table + download button for a given scope. Each
             supervisor gets their own self-contained block so the image can be
             shared with just that team, without other teams' numbers in it."""
-            hdf = _build_hourly_df(scope_df)
-            grid = build_hourly_color_grid(hdf, hour_col_labels)
-            if hourly_view_mode.startswith("📋"):
-                st.dataframe(style_hourly_table(hdf, hour_col_labels), use_container_width=True,
-                             hide_index=True, height=dataframe_height(len(hdf)))
+                hdf = _build_hourly_df(scope_df)
+                grid = build_hourly_color_grid(hdf, hour_col_labels)
+                if hourly_view_mode.startswith("📋"):
+                    st.dataframe(style_hourly_table(hdf, hour_col_labels), use_container_width=True,
+                                 hide_index=True, height=dataframe_height(len(hdf)))
+                else:
+                    render_hourly_heatmap(hdf, hour_col_labels, grid)
+
+                n_inst = scope_df["installer_id"].nunique()
+                # Same glance figures as the on-screen header, including the
+                # forecast, computed for THIS scope (a supervisor's own team when
+                # split) so each shared image is self-contained.
+                scope_fc, _, scope_end = forecast_total_installs(
+                    scope_df, sorted(scope_df["installer_id"].unique()), f"{day_end_choice}:00")
+                glance = (
+                    f"Total: {len(scope_df)}   |   Active Installers: {n_inst}   |   "
+                    f"Avg/Installer: {round(len(scope_df) / n_inst, 1) if n_inst else 0}   |   "
+                    f"Forecast by {scope_end[:5]}: {scope_fc if scope_fc is not None else 'N/A'}"
+                )
+                scope_line = f"{scope_label}   |   " if scope_label else ""
+                title = (f"Installer-Wise Hourly Count — {sel_date}\n"
+                         f"{scope_line}Last install: {str(max(scope_df['time']))[:5]}\n{glance}")
+                safe_label = (scope_label or "All").replace(" ", "_").replace(":", "")
+                download_image_button(
+                    hdf, f"Hourly_Count_{sel_date}_{safe_label}.png", key=f"dl_img_hourly_{key_suffix}",
+                    color_grid=grid, title=title,
+                )
+
+            if sel_site == "All sites" and sel_supervisor == "All supervisors" and day_df["site"].nunique() > 1:
+                # Each site is its own team: combined first, then a table per site,
+                # each shareable as its own image.
+                sub_hdr("chart", "All Sites Combined")
+                _render_hourly_block(day_df, "All sites", "all")
+                for i, site in enumerate(day_df.groupby("site").size().sort_values(ascending=False).index):
+                    site_df = day_df[day_df["site"] == site]
+                    sub_hdr("pin", f"{site} — {len(site_df)} installs")
+                    _render_hourly_block(site_df, f"Site: {site}", f"site{i}")
+            elif sel_supervisor == "All supervisors" and len(sups_today) > 1:
+                # One site, several supervisors: split by supervisor within it.
+                sub_hdr("chart", f"{sel_site} — All Teams")
+                _render_hourly_block(day_df, f"Site: {sel_site}", "all")
+                for i, sup in enumerate(day_df.groupby("supervisor").size().sort_values(ascending=False).index):
+                    sup_df = day_df[day_df["supervisor"] == sup]
+                    sub_hdr("users", f"{sup} — {len(sup_df)} installs")
+                    _render_hourly_block(sup_df, f"Site: {sel_site}   |   Supervisor: {sup}", f"sup{i}")
             else:
-                render_hourly_heatmap(hdf, hour_col_labels, grid)
+                _render_hourly_block(day_df, _scope_txt, "single")
 
-            n_inst = scope_df["installer_id"].nunique()
-            # Same glance figures as the on-screen header, including the
-            # forecast, computed for THIS scope (a supervisor's own team when
-            # split) so each shared image is self-contained.
-            scope_fc, _, scope_end = forecast_total_installs(
-                scope_df, sorted(scope_df["installer_id"].unique()), f"{day_end_choice}:00")
-            glance = (
-                f"Total: {len(scope_df)}   |   Active Installers: {n_inst}   |   "
-                f"Avg/Installer: {round(len(scope_df) / n_inst, 1) if n_inst else 0}   |   "
-                f"Forecast by {scope_end[:5]}: {scope_fc if scope_fc is not None else 'N/A'}"
+
+            # -- Section-wise summary (combines every section's uploaded file for this date) --
+            sec_hdr("pin", "Section-Wise Summary")
+            if has_col(day_df, "location"):
+                section_df = day_df.copy()
+                section_df["location"] = section_df["location"].replace("", "Unspecified").fillna("Unspecified")
+                section_df["_1"] = (section_df["phase"] == "1PH").astype(int)
+                section_df["_3"] = (section_df["phase"] == "3PH").astype(int)
+                section_summary = section_df.groupby("location").agg(
+                    **{"1PH": ("_1", "sum"), "3PH": ("_3", "sum"), "Total": ("_1", "size")}).reset_index()
+                section_summary = section_summary.rename(columns={"location": "Section"}).sort_values("Total", ascending=False)
+                render_count_cards(
+                    [(r["Section"], int(r["Total"])) for _, r in section_summary.iterrows()],
+                    columns=4, total_label="Total",
+                )
+                st.dataframe(section_summary, use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(section_summary)))
+            else:
+                st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
+
+            # -- Daily calendar for the month of the date being viewed -----------
+            _cal_month = str(sel_date)[:7]
+            sec_hdr("calendar", f"Daily Installs — {month_label(_cal_month)}")
+            render_daily_calendar(_cal_month)
+
+            # -- Half-day split --------------------------------------------------
+            sec_hdr("half", "Half-Day Split")
+            half_rows = []
+            for inst in installers:
+                sub = day_df[day_df["installer_id"] == inst]
+                h1 = int((sub["time"] <= HALF_DAY_CUTOFF).sum())
+                h2 = int((sub["time"] > HALF_DAY_CUTOFF).sum())
+                half_rows.append({"Installer": inst, "H1 (Morning)": h1, "H2 (Afternoon)": h2, "Total": h1 + h2})
+            half_df = pd.DataFrame(half_rows).sort_values("Total", ascending=False)
+
+            half_total_row = {
+                "Installer": "TOTAL",
+                "H1 (Morning)": int(half_df["H1 (Morning)"].sum()) if not half_df.empty else 0,
+                "H2 (Afternoon)": int(half_df["H2 (Afternoon)"].sum()) if not half_df.empty else 0,
+                "Total": int(half_df["Total"].sum()) if not half_df.empty else 0,
+            }
+            half_display_df = pd.concat([half_df, pd.DataFrame([half_total_row])], ignore_index=True)
+            st.dataframe(half_display_df, use_container_width=True, hide_index=True, height=dataframe_height(len(half_display_df)))
+            download_image_button(half_display_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half",
+                                  title=f"Half-Day Split — {sel_date}\n{analytics_img_meta}")
+
+            # -- Average install time -------------------------------------------
+            sec_hdr("gauge", "Active Pace / Installer")
+            avg_rows = []
+            for inst in installers:
+                sub = day_df[day_df["installer_id"] == inst].sort_values("time")
+                first_t, last_t = sub["time"].iloc[0], sub["time"].iloc[-1]
+                n = len(sub)
+                active_pace, _break_min, _gaps = compute_active_pace(sub["time"].tolist())
+                avg_rows.append({
+                    "Installer": inst, "First Install": first_t, "Last Install": last_t,
+                    "Total Installs": n,
+                    # "—" rather than 0.0: a lone install has no measurable rhythm,
+                    # and 0.0 would read as "instant" and colour as fastest.
+                    "Avg Time/Install (min)": round(active_pace, 1) if active_pace is not None else "—",
+                })
+            avg_df = pd.DataFrame(avg_rows).sort_values("Total Installs", ascending=False)
+            st.dataframe(
+                _style_map(avg_df.style, avg_time_style, subset=["Avg Time/Install (min)"]),
+                use_container_width=True, hide_index=True, height=dataframe_height(len(avg_df)),
             )
-            scope_line = f"{scope_label}   |   " if scope_label else ""
-            title = (f"Installer-Wise Hourly Count — {sel_date}\n"
-                     f"{scope_line}Last install: {str(max(scope_df['time']))[:5]}\n{glance}")
-            safe_label = (scope_label or "All").replace(" ", "_").replace(":", "")
             download_image_button(
-                hdf, f"Hourly_Count_{sel_date}_{safe_label}.png", key=f"dl_img_hourly_{key_suffix}",
-                color_grid=grid, title=title,
+                avg_df, f"Avg_Install_Time_{sel_date}.png", key="dl_img_avg",
+                color_grid=build_single_col_color_grid(avg_df, "Avg Time/Install (min)", avg_time_colors),
+                title=f"Active Pace / Installer — {sel_date}\n{analytics_img_meta}",
             )
 
-        if sel_site == "All sites" and sel_supervisor == "All supervisors" and day_df["site"].nunique() > 1:
-            # Each site is its own team: combined first, then a table per site,
-            # each shareable as its own image.
-            sub_hdr("chart", "All Sites Combined")
-            _render_hourly_block(day_df, "All sites", "all")
-            for i, site in enumerate(day_df.groupby("site").size().sort_values(ascending=False).index):
-                site_df = day_df[day_df["site"] == site]
-                sub_hdr("pin", f"{site} — {len(site_df)} installs")
-                _render_hourly_block(site_df, f"Site: {site}", f"site{i}")
-        elif sel_supervisor == "All supervisors" and len(sups_today) > 1:
-            # One site, several supervisors: split by supervisor within it.
-            sub_hdr("chart", f"{sel_site} — All Teams")
-            _render_hourly_block(day_df, f"Site: {sel_site}", "all")
-            for i, sup in enumerate(day_df.groupby("supervisor").size().sort_values(ascending=False).index):
-                sup_df = day_df[day_df["supervisor"] == sup]
-                sub_hdr("users", f"{sup} — {len(sup_df)} installs")
-                _render_hourly_block(sup_df, f"Site: {sel_site}   |   Supervisor: {sup}", f"sup{i}")
-        else:
-            _render_hourly_block(day_df, _scope_txt, "single")
+            # -- Locked reset --------------------------------------------------
+            st.divider()
+            with st.expander("🔒 Reset Analytics Data (start a new day)"):
+                st.markdown('<div class="danger-box">⚠️ This permanently deletes all Analytics data collected so far. Do this at the end of the day, once you\'re done reviewing.</div>', unsafe_allow_html=True)
+                reset_pin = st.text_input("Enter PIN to unlock reset", type="password", key="analytics_reset_pin")
+                if reset_pin == PIN_CODE:
+                    confirm_reset = st.checkbox("I understand this will delete all Analytics data collected so far")
+                    if st.button("🗑️ Reset Analytics Data", type="primary", disabled=not confirm_reset, use_container_width=True):
+                        empty_df = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour", "location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"])
+                        if safe_update("AnalyticsRaw", empty_df):
+                            st.success("✅ Analytics data cleared. Ready for a new day.")
+                            st.rerun()
+                elif reset_pin:
+                    st.error("❌ Incorrect PIN.")
 
-
-        # -- Section-wise summary (combines every section's uploaded file for this date) --
-        sec_hdr("pin", "Section-Wise Summary")
-        if has_col(day_df, "location"):
-            section_df = day_df.copy()
-            section_df["location"] = section_df["location"].replace("", "Unspecified").fillna("Unspecified")
-            section_df["_1"] = (section_df["phase"] == "1PH").astype(int)
-            section_df["_3"] = (section_df["phase"] == "3PH").astype(int)
-            section_summary = section_df.groupby("location").agg(
-                **{"1PH": ("_1", "sum"), "3PH": ("_3", "sum"), "Total": ("_1", "size")}).reset_index()
-            section_summary = section_summary.rename(columns={"location": "Section"}).sort_values("Total", ascending=False)
-            render_count_cards(
-                [(r["Section"], int(r["Total"])) for _, r in section_summary.iterrows()],
-                columns=4, total_label="Total",
-            )
-            st.dataframe(section_summary, use_container_width=True, hide_index=True,
-                         height=dataframe_height(len(section_summary)))
-        else:
-            st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
-
-        # -- Daily calendar for the month of the date being viewed -----------
-        _cal_month = str(sel_date)[:7]
-        sec_hdr("calendar", f"Daily Installs — {month_label(_cal_month)}")
-        render_daily_calendar(_cal_month)
-
-        # -- Half-day split --------------------------------------------------
-        sec_hdr("half", "Half-Day Split")
-        half_rows = []
-        for inst in installers:
-            sub = day_df[day_df["installer_id"] == inst]
-            h1 = int((sub["time"] <= HALF_DAY_CUTOFF).sum())
-            h2 = int((sub["time"] > HALF_DAY_CUTOFF).sum())
-            half_rows.append({"Installer": inst, "H1 (Morning)": h1, "H2 (Afternoon)": h2, "Total": h1 + h2})
-        half_df = pd.DataFrame(half_rows).sort_values("Total", ascending=False)
-
-        half_total_row = {
-            "Installer": "TOTAL",
-            "H1 (Morning)": int(half_df["H1 (Morning)"].sum()) if not half_df.empty else 0,
-            "H2 (Afternoon)": int(half_df["H2 (Afternoon)"].sum()) if not half_df.empty else 0,
-            "Total": int(half_df["Total"].sum()) if not half_df.empty else 0,
-        }
-        half_display_df = pd.concat([half_df, pd.DataFrame([half_total_row])], ignore_index=True)
-        st.dataframe(half_display_df, use_container_width=True, hide_index=True, height=dataframe_height(len(half_display_df)))
-        download_image_button(half_display_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half",
-                              title=f"Half-Day Split — {sel_date}\n{analytics_img_meta}")
-
-        # -- Average install time -------------------------------------------
-        sec_hdr("gauge", "Active Pace / Installer")
-        avg_rows = []
-        for inst in installers:
-            sub = day_df[day_df["installer_id"] == inst].sort_values("time")
-            first_t, last_t = sub["time"].iloc[0], sub["time"].iloc[-1]
-            n = len(sub)
-            active_pace, _break_min, _gaps = compute_active_pace(sub["time"].tolist())
-            avg_rows.append({
-                "Installer": inst, "First Install": first_t, "Last Install": last_t,
-                "Total Installs": n,
-                # "—" rather than 0.0: a lone install has no measurable rhythm,
-                # and 0.0 would read as "instant" and colour as fastest.
-                "Avg Time/Install (min)": round(active_pace, 1) if active_pace is not None else "—",
-            })
-        avg_df = pd.DataFrame(avg_rows).sort_values("Total Installs", ascending=False)
-        st.dataframe(
-            _style_map(avg_df.style, avg_time_style, subset=["Avg Time/Install (min)"]),
-            use_container_width=True, hide_index=True, height=dataframe_height(len(avg_df)),
-        )
-        download_image_button(
-            avg_df, f"Avg_Install_Time_{sel_date}.png", key="dl_img_avg",
-            color_grid=build_single_col_color_grid(avg_df, "Avg Time/Install (min)", avg_time_colors),
-            title=f"Active Pace / Installer — {sel_date}\n{analytics_img_meta}",
-        )
-
-        # -- Locked reset --------------------------------------------------
-        st.divider()
-        with st.expander("🔒 Reset Analytics Data (start a new day)"):
-            st.markdown('<div class="danger-box">⚠️ This permanently deletes all Analytics data collected so far. Do this at the end of the day, once you\'re done reviewing.</div>', unsafe_allow_html=True)
-            reset_pin = st.text_input("Enter PIN to unlock reset", type="password", key="analytics_reset_pin")
-            if reset_pin == PIN_CODE:
-                confirm_reset = st.checkbox("I understand this will delete all Analytics data collected so far")
-                if st.button("🗑️ Reset Analytics Data", type="primary", disabled=not confirm_reset, use_container_width=True):
-                    empty_df = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour", "location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"])
-                    if safe_update("AnalyticsRaw", empty_df):
-                        st.success("✅ Analytics data cleared. Ready for a new day.")
-                        st.rerun()
-            elif reset_pin:
-                st.error("❌ Incorrect PIN.")
-
-        # -- Push this date's Analytics data into Installations ---------------
-        sec_hdr("download", "Update Installs From Analytics")
-        st.markdown("""
+            # -- Push this date's Analytics data into Installations ---------------
+            sec_hdr("download", "Update Installs From Analytics")
+            st.markdown("""
         <div class="info-box">
         Pushes this date's records into Installations. Never double-counts. Unmapped login IDs are flagged.
         </div>
         """, unsafe_allow_html=True)
 
-        if not has_col(day_df, "location") or not has_col(day_df, "meter_type") or (day_df["location"].eq("").all() and day_df["meter_type"].eq("").all()):
-            st.caption("No Location/Meter Type on these records — will push as 'Unspecified', not counted in 1PH/3PH.")
+            if not has_col(day_df, "location") or not has_col(day_df, "meter_type") or (day_df["location"].eq("").all() and day_df["meter_type"].eq("").all()):
+                st.caption("No Location/Meter Type on these records — will push as 'Unspecified', not counted in 1PH/3PH.")
 
-        # Triggered either from this button or the Update Installs action in the
-        # tab's top bar, which sets the flag before this block runs.
-        _push_now = st.button(f"Update Installs For {sel_date}", type="primary", use_container_width=True)
-        if st.session_state.pop("trigger_analytics_push", False):
-            _push_now = True
-        if _push_now:
-            push_records = []
-            for _, r in day_df_all.iterrows():
-                rec = {"date": r["date"], "time": r["time"], "installer_id": r["installer_id"]}
-                for col in ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]:
-                    rec[col] = r[col] if col in day_df_all.columns else ""
-                push_records.append(rec)
-            push_parsed_records_to_installations(push_records, source_label="install(s) from Analytics")
+            # Triggered either from this button or the Update Installs action in the
+            # tab's top bar, which sets the flag before this block runs.
+            _push_now = st.button(f"Update Installs For {sel_date}", type="primary", use_container_width=True)
+            if st.session_state.pop("trigger_analytics_push", False):
+                _push_now = True
+            if _push_now:
+                push_records = []
+                for _, r in day_df_all.iterrows():
+                    rec = {"date": r["date"], "time": r["time"], "installer_id": r["installer_id"]}
+                    for col in ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]:
+                        rec[col] = r[col] if col in day_df_all.columns else ""
+                    push_records.append(rec)
+                push_parsed_records_to_installations(push_records, source_label="install(s) from Analytics")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -6600,17 +6733,18 @@ with tab_analytics:
 #  Installations/UploadedInstallLog.)
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_map:
-    tab_action_bar("map")
-    st.markdown("""
+    if tab_map.open:   # only the open tab runs (tabs are created with on_change="rerun")
+        tab_action_bar("map")
+        st.markdown("""
     <div class="info-box">
     🗺️ Installs data mirrors here automatically. The Map-only upload below never affects Installations.
     </div>
     """, unsafe_allow_html=True)
 
-    df_map_raw = get_data("MapRecords")
+        df_map_raw = get_data("MapRecords")
 
-    if df_map_raw.empty:
-        st.info("""
+        if df_map_raw.empty:
+            st.info("""
         No records on the Map yet. This is expected if you haven't uploaded anything via the
         Installs tab, Analytics, or the Legacy Data uploader below yet.
 
@@ -6620,953 +6754,1005 @@ with tab_map:
         named exactly `MapRecords` (see the app file's setup notes for its columns), then
         re-upload the same file to backfill it.
         """)
-    elif not has_col(df_map_raw, "date", "lat", "long"):
-        st.warning("⚠️ The 'MapRecords' worksheet is missing expected columns (date/lat/long). Check its header row matches the app's setup notes.")
-    else:
-        df_map = df_map_raw.copy()
-        df_map["_date"] = pd.to_datetime(df_map["date"], errors="coerce").dt.date
-        df_map["_lat"] = pd.to_numeric(df_map["lat"], errors="coerce")
-        df_map["_long"] = pd.to_numeric(df_map["long"], errors="coerce")
-
-        loc_options = sorted([l for l in df_map["location"].unique() if str(l).strip()]) if "location" in df_map.columns else []
-        valid_dates = df_map["_date"].dropna()
-        data_min_d, data_max_d = (valid_dates.min(), valid_dates.max()) if not valid_dates.empty else (today_ist(), today_ist())
-
-        # Always today. Before the day's file is uploaded this simply shows
-        # zero pins — the quick-pick buttons below jump to other ranges.
-        today = today_ist()
-        default_range = [today, today]
-
-        # Give the picker a wide min/max so previous/next month navigation works.
-        picker_min = min(data_min_d, today) - timedelta(days=365)
-        picker_max = max(data_max_d, today) + timedelta(days=365)
-
-        # Quick presets — the calendar's month arrows can sit off-screen on a
-        # narrow phone viewport, so these cover the common jumps without it.
-        qp1, qp2, qp3, qp4 = st.columns(4)
-        if qp1.button("Today", use_container_width=True, key="map_qp_today"):
-            st.session_state["map_date_range"] = (today, today)
-            st.rerun()
-        if qp2.button("Last 7d", use_container_width=True, key="map_qp_7d"):
-            st.session_state["map_date_range"] = (today - timedelta(days=6), today)
-            st.rerun()
-        if qp3.button("This month", use_container_width=True, key="map_qp_month"):
-            st.session_state["map_date_range"] = (today.replace(day=1), today)
-            st.rerun()
-        if qp4.button("All data", use_container_width=True, key="map_qp_all"):
-            st.session_state["map_date_range"] = (data_min_d, data_max_d)
-            st.rerun()
-
-        mf1, mf2 = st.columns(2)
-        with mf1:
-            map_loc_filter = st.multiselect("Section", loc_options, default=loc_options)
-        with mf2:
-            map_date_range = st.date_input("Date Range", default_range, min_value=picker_min, max_value=picker_max, key="map_date_range")
-
-        if isinstance(map_date_range, (list, tuple)) and len(map_date_range) == 2:
-            md_start, md_end = map_date_range[0], map_date_range[1]
-        elif isinstance(map_date_range, (list, tuple)) and len(map_date_range) == 1:
-            md_start = md_end = map_date_range[0]
-        elif isinstance(map_date_range, (list, tuple)):  # empty — nothing picked yet
-            md_start = md_end = None
+        elif not has_col(df_map_raw, "date", "lat", "long"):
+            st.warning("⚠️ The 'MapRecords' worksheet is missing expected columns (date/lat/long). Check its header row matches the app's setup notes.")
         else:
-            md_start = md_end = map_date_range
+            df_map = df_map_raw.copy()
+            df_map["_date"] = pd.to_datetime(df_map["date"], errors="coerce").dt.date
+            df_map["_lat"] = pd.to_numeric(df_map["lat"], errors="coerce")
+            df_map["_long"] = pd.to_numeric(df_map["long"], errors="coerce")
 
-        if md_start is None:
-            # Only reachable if the picker is cleared mid-session; show nothing
-            # rather than a message.
-            filtered_map = df_map.iloc[0:0]
-        else:
-            filtered_map = df_map[(df_map["_date"] >= md_start) & (df_map["_date"] <= md_end)]
-        if map_loc_filter:
-            filtered_map = filtered_map[filtered_map["location"].isin(map_loc_filter)]
+            loc_options = sorted([l for l in df_map["location"].unique() if str(l).strip()]) if "location" in df_map.columns else []
+            valid_dates = df_map["_date"].dropna()
+            data_min_d, data_max_d = (valid_dates.min(), valid_dates.max()) if not valid_dates.empty else (today_ist(), today_ist())
 
-        total_in_range = len(filtered_map)
-        pinned = filtered_map.dropna(subset=["_lat", "_long"])
-        pinned = pinned[(pinned["_lat"] != 0) & (pinned["_long"] != 0)]
+            # Always today. Before the day's file is uploaded this simply shows
+            # zero pins — the quick-pick buttons below jump to other ranges.
+            today = today_ist()
+            default_range = [today, today]
 
-        mm1, mm2 = st.columns(2)
-        mm1.metric("Records In Filter", total_in_range)
-        mm2.metric("With Location Data", len(pinned))
+            # Give the picker a wide min/max so previous/next month navigation works.
+            picker_min = min(data_min_d, today) - timedelta(days=365)
+            picker_max = max(data_max_d, today) + timedelta(days=365)
 
-        if pinned.empty and total_in_range > 0:
-            # Only when records exist but carry no coordinates. Previously this
-            # also fired when nothing was selected at all, which is not a
-            # missing-coordinates problem.
-            st.warning(f"⚠️ None of the {total_in_range} record(s) in this filter have latitude/longitude on file.")
-        else:
-            # Centre on the pins in view. With none — e.g. today before the
-            # day's file is uploaded — the average of no points is NaN, which
-            # is not valid map data and showed as a blank white map. Fall back
-            # to all recorded install locations, else Vijayawada.
-            _centre_src = pinned
-            if _centre_src.empty:
-                _centre_src = df_map.dropna(subset=["_lat", "_long"])
-                _centre_src = _centre_src[(_centre_src["_lat"] != 0) & (_centre_src["_long"] != 0)]
-            if _centre_src.empty:
-                center_lat, center_lon = 16.5062, 80.6480        # Vijayawada
+            # Quick presets — the calendar's month arrows can sit off-screen on a
+            # narrow phone viewport, so these cover the common jumps without it.
+            qp1, qp2, qp3, qp4 = st.columns(4)
+            if qp1.button("Today", use_container_width=True, key="map_qp_today"):
+                st.session_state["map_date_range"] = (today, today)
+                st.rerun()
+            if qp2.button("Last 7d", use_container_width=True, key="map_qp_7d"):
+                st.session_state["map_date_range"] = (today - timedelta(days=6), today)
+                st.rerun()
+            if qp3.button("This month", use_container_width=True, key="map_qp_month"):
+                st.session_state["map_date_range"] = (today.replace(day=1), today)
+                st.rerun()
+            if qp4.button("All data", use_container_width=True, key="map_qp_all"):
+                st.session_state["map_date_range"] = (data_min_d, data_max_d)
+                st.rerun()
+
+            mf1, mf2 = st.columns(2)
+            with mf1:
+                map_loc_filter = st.multiselect("Section", loc_options, default=loc_options)
+            with mf2:
+                map_date_range = st.date_input("Date Range", default_range, min_value=picker_min, max_value=picker_max, key="map_date_range")
+
+            if isinstance(map_date_range, (list, tuple)) and len(map_date_range) == 2:
+                md_start, md_end = map_date_range[0], map_date_range[1]
+            elif isinstance(map_date_range, (list, tuple)) and len(map_date_range) == 1:
+                md_start = md_end = map_date_range[0]
+            elif isinstance(map_date_range, (list, tuple)):  # empty — nothing picked yet
+                md_start = md_end = None
             else:
-                center_lat, center_lon = float(_centre_src["_lat"].mean()), float(_centre_src["_long"].mean())
-            # Only what the map draws and the tooltip shows. Sending every
-            # column made the map's data several times larger on each refresh.
-            _tip_cols = ["sno", "old_meter_no", "new_meter_no", "tech_name", "location", "date"]
-            # Built column by column rather than by renaming: the records
-            # already carry their own text "lat"/"long" columns, so renaming
-            # the cleaned coordinates to "lat" created two columns of that name.
-            tooltip_df = pd.DataFrame({"lat": pinned["_lat"].astype(float).to_numpy(),
-                                       "lon": pinned["_long"].astype(float).to_numpy()})
-            for col in _tip_cols:
-                tooltip_df[col] = (pinned[col].fillna("").astype(str).to_numpy()
-                                   if col in pinned.columns else "")
-            for col in ["sno", "old_meter_no", "new_meter_no"]:
-                tooltip_df[col] = tooltip_df[col].apply(clean_id_value)
+                md_start = md_end = map_date_range
 
-            layer = pdk.Layer(
-                "ScatterplotLayer",
-                data=tooltip_df,
-                get_position=["lon", "lat"],
-                get_fill_color=[0, 180, 192, 200],
-                get_radius=25,
-                radius_min_pixels=4,
-                radius_max_pixels=9,
-                pickable=True,
-                stroked=True,
-                get_line_color=[255, 255, 255],
-                line_width_min_pixels=1,
-            )
-            view_state = pdk.ViewState(latitude=center_lat, longitude=center_lon,
-                                       zoom=13 if not pinned.empty else 12, pitch=0)
-            deck = pdk.Deck(
-                layers=[layer],
-                initial_view_state=view_state,
-                map_style="road",
-                tooltip={
-                    "html": "<b>SNO:</b> {sno}<br/><b>Section:</b> {location}<br/><b>Date:</b> {date}<br/>"
-                            "<b>Installer:</b> {tech_name}<br/><b>Old Meter:</b> {old_meter_no}<br/><b>New Meter:</b> {new_meter_no}",
-                    "style": {"backgroundColor": "#14181F", "color": "white", "fontSize": "12px"},
-                },
-            )
-            st.pydeck_chart(deck, use_container_width=True)
+            if md_start is None:
+                # Only reachable if the picker is cleared mid-session; show nothing
+                # rather than a message.
+                filtered_map = df_map.iloc[0:0]
+            else:
+                filtered_map = df_map[(df_map["_date"] >= md_start) & (df_map["_date"] <= md_end)]
+            if map_loc_filter:
+                filtered_map = filtered_map[filtered_map["location"].isin(map_loc_filter)]
 
-            # Nothing to pick or export until there are pins in view.
-            if not pinned.empty:
-                # -- Select a pin: see lat/long as copyable text -----------------
-                sub_hdr("pin", "Select A Pin")
-                pin_labels = {}
-                for idx, r in pinned.reset_index(drop=True).iterrows():
-                    label = f"{r.get('sno') or r.get('tech_name') or 'Install'} — {r.get('date','')} {r.get('time','')} ({r.get('location','')})"
-                    pin_labels[label] = idx
-                pinned_reset = pinned.reset_index(drop=True)
-                sel_pin_label = st.selectbox("Pick a record", ["-- Select --"] + list(pin_labels.keys()), key="map_pin_picker")
-                if sel_pin_label != "-- Select --":
-                    pin_row = pinned_reset.iloc[pin_labels[sel_pin_label]]
-                    pin_lat, pin_lon = pin_row["_lat"], pin_row["_long"]
-                    pc1, pc2 = st.columns([2, 1])
-                    with pc1:
-                        st.code(f"{pin_lat}, {pin_lon}", language=None)
-                    with pc2:
-                        st.markdown(
-                            f'<a href="https://www.google.com/maps?q={pin_lat},{pin_lon}" target="_blank" class="wa-btn" style="background:var(--accent);">📍 Open In Maps</a>',
-                            unsafe_allow_html=True,
+            total_in_range = len(filtered_map)
+            pinned = filtered_map.dropna(subset=["_lat", "_long"])
+            pinned = pinned[(pinned["_lat"] != 0) & (pinned["_long"] != 0)]
+
+            mm1, mm2 = st.columns(2)
+            mm1.metric("Records In Filter", total_in_range)
+            mm2.metric("With Location Data", len(pinned))
+
+            if pinned.empty and total_in_range > 0:
+                # Only when records exist but carry no coordinates. Previously this
+                # also fired when nothing was selected at all, which is not a
+                # missing-coordinates problem.
+                st.warning(f"⚠️ None of the {total_in_range} record(s) in this filter have latitude/longitude on file.")
+            else:
+                # Centre on the pins in view. With none — e.g. today before the
+                # day's file is uploaded — the average of no points is NaN, which
+                # is not valid map data and showed as a blank white map. Fall back
+                # to all recorded install locations, else Vijayawada.
+                _centre_src = pinned
+                if _centre_src.empty:
+                    _centre_src = df_map.dropna(subset=["_lat", "_long"])
+                    _centre_src = _centre_src[(_centre_src["_lat"] != 0) & (_centre_src["_long"] != 0)]
+                if _centre_src.empty:
+                    center_lat, center_lon = 16.5062, 80.6480        # Vijayawada
+                else:
+                    center_lat, center_lon = float(_centre_src["_lat"].mean()), float(_centre_src["_long"].mean())
+                # Only what the map draws and the tooltip shows. Sending every
+                # column made the map's data several times larger on each refresh.
+                _tip_cols = ["sno", "old_meter_no", "new_meter_no", "tech_name", "location", "date"]
+                # Built column by column rather than by renaming: the records
+                # already carry their own text "lat"/"long" columns, so renaming
+                # the cleaned coordinates to "lat" created two columns of that name.
+                tooltip_df = pd.DataFrame({"lat": pinned["_lat"].astype(float).to_numpy(),
+                                           "lon": pinned["_long"].astype(float).to_numpy()})
+                for col in _tip_cols:
+                    tooltip_df[col] = (pinned[col].fillna("").astype(str).to_numpy()
+                                       if col in pinned.columns else "")
+                for col in ["sno", "old_meter_no", "new_meter_no"]:
+                    tooltip_df[col] = tooltip_df[col].apply(clean_id_value)
+
+                # Beyond a few thousand pins every dot costs data on each
+                # refresh (about 10 MB for five months) yet adds nothing you can
+                # see. Show where the work is instead: installs grouped into
+                # ~250 m cells, each circle sized by its count.
+                _density = len(tooltip_df) > MAP_PIN_LIMIT
+                if _density:
+                    _cells = (tooltip_df.assign(lat=(tooltip_df["lat"] * 400).round() / 400,
+                                                lon=(tooltip_df["lon"] * 400).round() / 400)
+                              .groupby(["lat", "lon"]).size().reset_index(name="count"))
+                    _cells["radius"] = (_cells["count"] ** 0.5 * 22).clip(upper=180)
+                    layer = pdk.Layer(
+                        "ScatterplotLayer", data=_cells, get_position=["lon", "lat"],
+                        get_fill_color=[14, 165, 168, 150], get_radius="radius",
+                        radius_min_pixels=3, pickable=True, stroked=True,
+                        get_line_color=[255, 255, 255], line_width_min_pixels=1,
+                    )
+                else:
+                    layer = pdk.Layer(
+                        "ScatterplotLayer",
+                        data=tooltip_df,
+                        get_position=["lon", "lat"],
+                        get_fill_color=[0, 180, 192, 200],
+                        get_radius=25,
+                        radius_min_pixels=4,
+                        radius_max_pixels=9,
+                        pickable=True,
+                        stroked=True,
+                        get_line_color=[255, 255, 255],
+                        line_width_min_pixels=1,
+                    )
+                view_state = pdk.ViewState(latitude=center_lat, longitude=center_lon,
+                                           zoom=13 if not pinned.empty else 12, pitch=0)
+                deck = pdk.Deck(
+                    layers=[layer],
+                    initial_view_state=view_state,
+                    map_style="road",
+                    tooltip={"html": "<b>{count}</b> installs around here", "style": {"backgroundColor": "#14181F", "color": "white", "fontSize": "12px"}} if _density else {
+                        "html": "<b>SNO:</b> {sno}<br/><b>Section:</b> {location}<br/><b>Date:</b> {date}<br/>"
+                                "<b>Installer:</b> {tech_name}<br/><b>Old Meter:</b> {old_meter_no}<br/><b>New Meter:</b> {new_meter_no}",
+                        "style": {"backgroundColor": "#14181F", "color": "white", "fontSize": "12px"},
+                    },
+                )
+                st.pydeck_chart(deck, use_container_width=True)
+                if _density:
+                    st.markdown(f'<div class="info-box">{len(tooltip_df):,} installs in view, shown as density — larger circles '
+                                f'mean more installs. Narrow the dates or sections to below {MAP_PIN_LIMIT:,} to see '
+                                f'individual pins.</div>', unsafe_allow_html=True)
+
+                # Nothing to pick or export until there are pins in view.
+                if not pinned.empty:
+                    # -- Select a pin: see lat/long as copyable text -----------------
+                    sub_hdr("pin", "Select A Pin")
+                    # A search, not a list of every pin: with months of data the
+                    # list ran to 20,000+ options, rebuilt on every click.
+                    pinned_reset = pinned.reset_index(drop=True)
+                    _pq = st.text_input("Find a pin by SNO, meter number or installer", key="map_pin_find",
+                                        placeholder="Type part of an SNO, meter number or installer name").strip().lower()
+                    if _pq:
+                        _hit = pd.Series(False, index=pinned_reset.index)
+                        for _c in ("sno", "old_meter_no", "new_meter_no", "tech_name", "installer_id"):
+                            if _c in pinned_reset.columns:
+                                _hit |= pinned_reset[_c].astype(str).str.lower().str.contains(_pq, regex=False)
+                        _cands = pinned_reset[_hit]
+                    else:
+                        _order = [c for c in ("date", "time") if c in pinned_reset.columns]
+                        _cands = pinned_reset.sort_values(_order, ascending=False) if _order else pinned_reset
+                    _n_match = len(_cands)
+                    _cands = _cands.head(MAP_PICKER_LIMIT)
+                    st.caption((f"{_n_match:,} match(es)" if _pq else "Latest installs") +
+                               (f"; showing the first {MAP_PICKER_LIMIT}." if _n_match > MAP_PICKER_LIMIT else "."))
+                    pin_labels = {}
+                    for idx, r in _cands.iterrows():
+                        label = f"{r.get('sno') or r.get('tech_name') or 'Install'} — {r.get('date','')} {r.get('time','')} ({r.get('location','')})"
+                        pin_labels[label] = idx
+                    sel_pin_label = st.selectbox("Pick a record", ["-- Select --"] + list(pin_labels.keys()), key="map_pin_picker")
+                    if sel_pin_label != "-- Select --":
+                        pin_row = pinned_reset.iloc[pin_labels[sel_pin_label]]
+                        pin_lat, pin_lon = pin_row["_lat"], pin_row["_long"]
+                        pc1, pc2 = st.columns([2, 1])
+                        with pc1:
+                            st.code(f"{pin_lat}, {pin_lon}", language=None)
+                        with pc2:
+                            st.markdown(
+                                f'<a href="https://www.google.com/maps?q={pin_lat},{pin_lon}" target="_blank" class="wa-btn" style="background:var(--accent);">📍 Open In Maps</a>',
+                                unsafe_allow_html=True,
+                            )
+                        detail_bits = [f"**SNO:** {clean_id_value(pin_row.get('sno')) or '—'}", f"**Installer:** {pin_row.get('tech_name','—') or '—'}",
+                                       f"**Old Meter:** {clean_id_value(pin_row.get('old_meter_no')) or '—'}", f"**New Meter:** {clean_id_value(pin_row.get('new_meter_no')) or '—'}"]
+                        st.caption(" · ".join(detail_bits))
+
+                    # -- Save view + share (one click, built only when clicked) --------
+                    sub_hdr("download", "Export This View")
+                    filter_desc = f"{', '.join(map_loc_filter) if map_loc_filter and len(map_loc_filter) < len(loc_options) else 'All Sections'} · {md_start} to {md_end}"
+                    ec1, ec2 = st.columns(2)
+                    _pins_snap = pinned.copy()
+                    with ec1:
+                        lazy_download_button(
+                            "📷 Save Map View As PNG",
+                            lambda: build_map_export_png(_pins_snap, "Install Locations", [filter_desc]),
+                            f"Map_{filter_desc.split(' · ')[0].replace(', ', '_').replace(' ', '_')}.png",
+                            "image/png", "map_png_export",
                         )
-                    detail_bits = [f"**SNO:** {clean_id_value(pin_row.get('sno')) or '—'}", f"**Installer:** {pin_row.get('tech_name','—') or '—'}",
-                                   f"**Old Meter:** {clean_id_value(pin_row.get('old_meter_no')) or '—'}", f"**New Meter:** {clean_id_value(pin_row.get('new_meter_no')) or '—'}"]
-                    st.caption(" · ".join(detail_bits))
+                    with ec2:
+                        lazy_download_button(
+                            "🗺️ Share As KML File",
+                            lambda: build_kml(_pins_snap, doc_name=f"Installed Meters — {filter_desc}"),
+                            "installed_meters.kml", "application/vnd.google-earth.kml+xml", "map_kml_export",
+                        )
 
-                # -- Save view + share (one click, built only when clicked) --------
-                sub_hdr("download", "Export This View")
-                filter_desc = f"{', '.join(map_loc_filter) if map_loc_filter and len(map_loc_filter) < len(loc_options) else 'All Sections'} · {md_start} to {md_end}"
-                ec1, ec2 = st.columns(2)
-                _pins_snap = pinned.copy()
-                with ec1:
-                    lazy_download_button(
-                        "📷 Save Map View As PNG",
-                        lambda: build_map_export_png(_pins_snap, "Install Locations", [filter_desc]),
-                        f"Map_{filter_desc.split(' · ')[0].replace(', ', '_').replace(' ', '_')}.png",
-                        "image/png", "map_png_export",
-                    )
-                with ec2:
-                    lazy_download_button(
-                        "🗺️ Share As KML File",
-                        lambda: build_kml(_pins_snap, doc_name=f"Installed Meters — {filter_desc}"),
-                        "installed_meters.kml", "application/vnd.google-earth.kml+xml", "map_kml_export",
-                    )
+                    with st.expander(f"📋 View {len(pinned)} record(s) as a table"):
+                        map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
+                        map_table_cols = [c for c in map_table_cols if c in pinned.columns]
+                        map_table = pinned[map_table_cols].copy()
+                        for _idc in ["sno", "old_meter_no", "new_meter_no"]:
+                            if _idc in map_table.columns:
+                                map_table[_idc] = map_table[_idc].apply(clean_id_value)
+                        # The table's data is sent even while this is closed, so
+                        # it shows the latest rows; the full list is a download.
+                        _sort = [c for c in ("date", "time") if c in map_table.columns]
+                        if _sort:
+                            map_table = map_table.sort_values(_sort, ascending=False)
+                        if len(map_table) > MAP_TABLE_LIMIT:
+                            st.caption(f"Latest {MAP_TABLE_LIMIT:,} of {len(map_table):,}; download for the full list.")
+                        st.dataframe(map_table.head(MAP_TABLE_LIMIT), use_container_width=True, hide_index=True,
+                                     height=dataframe_height(min(len(map_table), MAP_TABLE_LIMIT), max_px=500))
+                        _full = map_table
+                        lazy_download_button(f"📥 Download all {len(map_table):,} as CSV",
+                                             lambda: _full.to_csv(index=False).encode("utf-8"),
+                                             "map_records.csv", "text/csv", "map_table_csv")
 
-                with st.expander(f"📋 View {len(pinned)} record(s) as a table"):
-                    map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
-                    map_table_cols = [c for c in map_table_cols if c in pinned.columns]
-                    map_table = pinned[map_table_cols].copy()
-                    for _idc in ["sno", "old_meter_no", "new_meter_no"]:
-                        if _idc in map_table.columns:
-                            map_table[_idc] = map_table[_idc].apply(clean_id_value)
-                    st.dataframe(map_table, use_container_width=True, hide_index=True,
-                                 height=dataframe_height(len(pinned), max_px=500))
+        st.divider()
+        with st.expander("📤 Upload Legacy/Historical Data (Map Only — does not affect Installations)"):
+            render_map_legacy_upload_widget()
 
-    st.divider()
-    with st.expander("📤 Upload Legacy/Historical Data (Map Only — does not affect Installations)"):
-        render_map_legacy_upload_widget()
-
-    st.divider()
-    sec_hdr("broom", "Map Data Maintenance")
-    with st.expander("🔎 Check & Remove Duplicate Map Records"):
-        if st.button("🔎 Scan For Duplicates", use_container_width=True, key="scan_map_dups_btn"):
-            st.session_state["map_dups_scanned"] = True
-        if st.session_state.get("map_dups_scanned"):
-            map_dups = find_map_duplicates()
-            if map_dups.empty:
-                st.success("✅ No same-SNO-same-date duplicates found in Map data.")
-            else:
-                st.warning(f"⚠️ Found {len(map_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
-                edited_map_dups = st.data_editor(map_dups, use_container_width=True, hide_index=True, key="map_dups_editor", disabled=[c for c in map_dups.columns if c != "Keep?"])
-                to_remove = edited_map_dups[~edited_map_dups["Keep?"]]["Key"].tolist()
-                if st.button(f"🗑️ Remove {len(to_remove)} Unchecked Record(s)", type="primary", use_container_width=True, disabled=not to_remove, key="remove_map_dups_btn"):
-                    removed = remove_map_records(to_remove)
-                    st.success(f"✅ Removed {removed} duplicate record(s) from the Map.")
-                    st.rerun()
+        st.divider()
+        sec_hdr("broom", "Map Data Maintenance")
+        with st.expander("🔎 Check & Remove Duplicate Map Records"):
+            if st.button("🔎 Scan For Duplicates", use_container_width=True, key="scan_map_dups_btn"):
+                st.session_state["map_dups_scanned"] = True
+            if st.session_state.get("map_dups_scanned"):
+                map_dups = find_map_duplicates()
+                if map_dups.empty:
+                    st.success("✅ No same-SNO-same-date duplicates found in Map data.")
+                else:
+                    st.warning(f"⚠️ Found {len(map_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
+                    edited_map_dups = st.data_editor(map_dups, use_container_width=True, hide_index=True, key="map_dups_editor", disabled=[c for c in map_dups.columns if c != "Keep?"])
+                    to_remove = edited_map_dups[~edited_map_dups["Keep?"]]["Key"].tolist()
+                    if st.button(f"🗑️ Remove {len(to_remove)} Unchecked Record(s)", type="primary", use_container_width=True, disabled=not to_remove, key="remove_map_dups_btn"):
+                        removed = remove_map_records(to_remove)
+                        st.success(f"✅ Removed {removed} duplicate record(s) from the Map.")
+                        st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  EXPENSES  — fixed and variable costs per calendar month, and cost per install
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_exp:
-    tab_action_bar("exp")
-    df_exp_all = load_expenses()
-    df_veh = load_vehicles()
-    active_regs = sorted(r for r, a in zip(df_veh["reg_no"].astype(str), df_veh["is_active"]) if r.strip() and _truthy(a))
+    if tab_exp.open:   # only the open tab runs (tabs are created with on_change="rerun")
+        tab_action_bar("exp")
+        df_exp_all = load_expenses()
+        df_veh = load_vehicles()
+        active_regs = sorted(r for r, a in zip(df_veh["reg_no"].astype(str), df_veh["is_active"]) if r.strip() and _truthy(a))
 
-    # -- Month --------------------------------------------------------------
-    _today = today_ist()
-    _months = {month_key(_today)}
-    _y, _m = _today.year, _today.month
-    for _ in range(11):                          # the last 12 months, always offered
-        _m -= 1
-        if _m == 0:
-            _y, _m = _y - 1, 12
-        _months.add(f"{_y:04d}-{_m:02d}")
-    _months |= {str(x) for x in df_exp_all["month"].unique() if str(x).strip()}
-    month_opts = sorted(_months, reverse=True)
-    sel_month = st.selectbox("Month", month_opts, index=month_opts.index(month_key(_today)),
-                             format_func=month_label, key="exp_month")
+        # -- Month --------------------------------------------------------------
+        _today = today_ist()
+        _months = {month_key(_today)}
+        _y, _m = _today.year, _today.month
+        for _ in range(11):                          # the last 12 months, always offered
+            _m -= 1
+            if _m == 0:
+                _y, _m = _y - 1, 12
+            _months.add(f"{_y:04d}-{_m:02d}")
+        _months |= {str(x) for x in df_exp_all["month"].unique() if str(x).strip()}
+        month_opts = sorted(_months, reverse=True)
+        sel_month = st.selectbox("Month", month_opts, index=month_opts.index(month_key(_today)),
+                                 format_func=month_label, key="exp_month")
 
-    n1, n3 = month_installs(df_installations_master, sel_month)
-    summ = expense_summary(df_exp_all, sel_month, n1, n3)
+        n1, n3 = month_installs(df_installations_master, sel_month)
+        summ = expense_summary(df_exp_all, sel_month, n1, n3)
 
-    sec_hdr("wallet", f"Cost Per Install — {month_label(sel_month)}")
-    render_stat_tiles([
-        ("bolt", f"{summ['installs']:,}", "Installs", f"{n1:,} 1PH · {n3:,} 3PH", "normal"),
-        ("wallet", fmt_rs(summ["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
-        ("gauge", fmt_rs(summ["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
-        ("target", fmt_rs(summ["total_per_install"], 1), "Total", "Rs./install", "normal"),
-    ])
-    render_stat_tiles([
-        ("wallet", fmt_rs(summ["fixed_total"]), "Fixed", "Rs. month", "normal"),
-        ("gauge", fmt_rs(summ["variable_total"]), "Variable", "Rs. month", "normal"),
-        ("target", fmt_rs(summ["total_cost"]), "Total cost", "Rs. month", "normal"),
-    ])
-    if summ["installs"] == 0 and summ["has_entries"]:
-        st.info("No installs recorded for this month yet, so there is no per-install cost to show.")
-
-    if summ["has_entries"]:
-        # -- If the monthly target is met --------------------------------
-        _month_target = target_for_month(sel_month)
-        at_target = cost_at_installs(summ["fixed_total"], summ["variable_rate"], _month_target)
-        sub_hdr("target", f"If The Monthly Target Of {_month_target:,} Is Met")
-        now_pi = summ["total_per_install"]
-        drop = (now_pi - at_target["total_per_install"]) if (now_pi and at_target["total_per_install"]) else None
+        sec_hdr("wallet", f"Cost Per Install — {month_label(sel_month)}")
         render_stat_tiles([
-            ("wallet", fmt_rs(at_target["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
-            ("gauge", fmt_rs(at_target["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
-            ("target", fmt_rs(at_target["total_per_install"], 1), "Total", "Rs./install", "normal"),
-            ("chart", ("—" if drop is None else f"{'-' if drop >= 0 else '+'}{abs(drop):,.1f}"),
-             "vs now", "Rs./install", "normal"),
+            ("bolt", f"{summ['installs']:,}", "Installs", f"{n1:,} 1PH · {n3:,} 3PH", "normal"),
+            ("wallet", fmt_rs(summ["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
+            ("gauge", fmt_rs(summ["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
+            ("target", fmt_rs(summ["total_per_install"], 1), "Total", "Rs./install", "normal"),
         ])
-        st.markdown(
-            f'<div class="info-box">Assumes this month\'s fixed costs of Rs. {summ["fixed_total"]:,.0f} '
-            f'are the full month, and each extra install adds Rs. {summ["variable_rate"]:,.0f} of variable cost. '
-            f'Month cost at target: Rs. {at_target["total_cost"]:,.0f}.</div>',
-            unsafe_allow_html=True)
-
-        render_cost_slider(summ["fixed_total"], summ["variable_rate"], summ["installs"], sel_month)
-
-    # -- By site, and per meter type -----------------------------------------
-    site_cb = site_cost_breakdown(df_exp_all, sel_month)
-    if site_cb["sites"]:
         render_stat_tiles([
-            ("bolt", fmt_rs(site_cb["cpi1"], 1), "Per 1PH", "Rs./install", "normal"),
-            ("bolt", fmt_rs(site_cb["cpi3"], 1), "Per 3PH", "Rs./install", "normal"),
-            ("users", f"{len(site_cb['active_sites'])}", "Active", "sites", "normal"),
-            ("wallet", fmt_rs(site_cb["shared_each"]), "Shared", "Rs./site", "normal"),
+            ("wallet", fmt_rs(summ["fixed_total"]), "Fixed", "Rs. month", "normal"),
+            ("gauge", fmt_rs(summ["variable_total"]), "Variable", "Rs. month", "normal"),
+            ("target", fmt_rs(summ["total_cost"]), "Total cost", "Rs. month", "normal"),
         ])
-        sub_hdr("pin", "By Site")
-        site_tbl = pd.DataFrame([{
-            "Site": x["site"], "1PH": x["n1"], "3PH": x["n3"],
-            "Own Fixed": round(x["own_fixed"]), "Shared": round(x["shared_fixed"]),
-            "1PH Billing %": f"{x['pct1'] * 100:.1f}%" if (x["n1"] + x["n3"]) else "—",
-            "Cost / 1PH": fmt_rs(x["cpi1"], 2), "Cost / 3PH": fmt_rs(x["cpi3"], 2),
-            "Cost / Install": fmt_rs(x["cpi"], 2), "Site Cost": round(x["cost"]),
-        } for x in site_cb["sites"]])
-        st.dataframe(site_tbl, use_container_width=True, hide_index=True,
-                     height=dataframe_height(len(site_tbl)))
-        if site_cb["stranded"]:
-            st.markdown(f'<div class="warn-box">Rs. {site_cb["stranded"]:,.0f} of costs belong to site(s) '
-                        f'with no installs this month. They are counted in the month\'s total but have no '
-                        f'installs to fall on.</div>', unsafe_allow_html=True)
-        if site_cb["unallocated_shared"]:
-            st.markdown(f'<div class="warn-box">Shared costs of Rs. {site_cb["unallocated_shared"]:,.0f} '
-                        f'are waiting — no site has installs this month yet.</div>', unsafe_allow_html=True)
+        if summ["installs"] == 0 and summ["has_entries"]:
+            st.info("No installs recorded for this month yet, so there is no per-install cost to show.")
 
-    if summ["by_category"]:
-        sub_hdr("chart", "By Category")
-        cat_df = pd.DataFrame(summ["by_category"], columns=["Type", "Category", "Month (Rs.)"])
-        cat_df["Per install (Rs.)"] = cat_df["Month (Rs.)"].apply(
-            lambda v: round(v / summ["installs"], 2) if summ["installs"] else None)
-        cat_df["Month (Rs.)"] = cat_df["Month (Rs.)"].round(0).astype(int)
-        cat_df["Share"] = cat_df["Month (Rs.)"].apply(
-            lambda v: f"{v / summ['total_cost'] * 100:.0f}%" if summ["total_cost"] else "—")
-        st.dataframe(cat_df, use_container_width=True, hide_index=True, height=dataframe_height(len(cat_df)))
+        if summ["has_entries"]:
+            # -- If the monthly target is met --------------------------------
+            _month_target = target_for_month(sel_month)
+            at_target = cost_at_installs(summ["fixed_total"], summ["variable_rate"], _month_target)
+            sub_hdr("target", f"If The Monthly Target Of {_month_target:,} Is Met")
+            now_pi = summ["total_per_install"]
+            drop = (now_pi - at_target["total_per_install"]) if (now_pi and at_target["total_per_install"]) else None
+            render_stat_tiles([
+                ("wallet", fmt_rs(at_target["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
+                ("gauge", fmt_rs(at_target["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
+                ("target", fmt_rs(at_target["total_per_install"], 1), "Total", "Rs./install", "normal"),
+                ("chart", ("—" if drop is None else f"{'-' if drop >= 0 else '+'}{abs(drop):,.1f}"),
+                 "vs now", "Rs./install", "normal"),
+            ])
+            st.markdown(
+                f'<div class="info-box">Assumes this month\'s fixed costs of Rs. {summ["fixed_total"]:,.0f} '
+                f'are the full month, and each extra install adds Rs. {summ["variable_rate"]:,.0f} of variable cost. '
+                f'Month cost at target: Rs. {at_target["total_cost"]:,.0f}.</div>',
+                unsafe_allow_html=True)
 
-        veh_rows = df_exp_all[(df_exp_all["month"].astype(str) == sel_month)
-                              & (df_exp_all["category"].isin(EXPENSE_VEHICLE_CATEGORIES))
-                              & (df_exp_all["vehicle_reg"].astype(str).str.strip() != "")]
-        if not veh_rows.empty:
-            sub_hdr("truck", "By Vehicle")
-            vt = veh_rows.pivot_table(index="vehicle_reg", columns="category", values="amount",
-                                      aggfunc="sum", fill_value=0)
-            vt = vt.reindex(columns=[c for c in EXPENSE_FIXED_CATEGORIES if c in EXPENSE_VEHICLE_CATEGORIES],
-                            fill_value=0)
-            vt["Total"] = vt.sum(axis=1)
-            vt = vt.round(0).astype(int).sort_values("Total", ascending=False).reset_index()
-            vt = vt.rename(columns={"vehicle_reg": "Vehicle"})
-            st.dataframe(vt, use_container_width=True, hide_index=True, height=dataframe_height(len(vt)))
+            render_cost_slider(summ["fixed_total"], summ["variable_rate"], summ["installs"], sel_month)
 
-    # -- Add an expense ----------------------------------------------------
-    st.divider()
-    sec_hdr("plus", f"Add To {month_label(sel_month)}")
-    if "exp_form_version" not in st.session_state:
-        st.session_state["exp_form_version"] = 0
-    ev = st.session_state["exp_form_version"]
+        # -- By site, and per meter type -----------------------------------------
+        site_cb = site_cost_breakdown(df_exp_all, sel_month)
+        if site_cb["sites"]:
+            render_stat_tiles([
+                ("bolt", fmt_rs(site_cb["cpi1"], 1), "Per 1PH", "Rs./install", "normal"),
+                ("bolt", fmt_rs(site_cb["cpi3"], 1), "Per 3PH", "Rs./install", "normal"),
+                ("users", f"{len(site_cb['active_sites'])}", "Active", "sites", "normal"),
+                ("wallet", fmt_rs(site_cb["shared_each"]), "Shared", "Rs./site", "normal"),
+            ])
+            sub_hdr("pin", "By Site")
+            site_tbl = pd.DataFrame([{
+                "Site": x["site"], "1PH": x["n1"], "3PH": x["n3"],
+                "Own Fixed": round(x["own_fixed"]), "Shared": round(x["shared_fixed"]),
+                "1PH Billing %": f"{x['pct1'] * 100:.1f}%" if (x["n1"] + x["n3"]) else "—",
+                "Cost / 1PH": fmt_rs(x["cpi1"], 2), "Cost / 3PH": fmt_rs(x["cpi3"], 2),
+                "Cost / Install": fmt_rs(x["cpi"], 2), "Site Cost": round(x["cost"]),
+            } for x in site_cb["sites"]])
+            st.dataframe(site_tbl, use_container_width=True, hide_index=True,
+                         height=dataframe_height(len(site_tbl)))
+            if site_cb["stranded"]:
+                st.markdown(f'<div class="warn-box">Rs. {site_cb["stranded"]:,.0f} of costs belong to site(s) '
+                            f'with no installs this month. They are counted in the month\'s total but have no '
+                            f'installs to fall on.</div>', unsafe_allow_html=True)
+            if site_cb["unallocated_shared"]:
+                st.markdown(f'<div class="warn-box">Shared costs of Rs. {site_cb["unallocated_shared"]:,.0f} '
+                            f'are waiting — no site has installs this month yet.</div>', unsafe_allow_html=True)
 
-    exp_type = st.radio("Cost type", ["Fixed", "Variable"], horizontal=True, key=f"exp_type_{ev}",
-                        help="Fixed: an amount for the month. Variable: a rate per install.")
-    if exp_type == "Fixed":
-        ec1, ec2 = st.columns(2)
-        with ec1:
-            exp_cat = st.selectbox("Category", EXPENSE_FIXED_CATEGORIES, key=f"exp_cat_f_{ev}")
-        exp_reg = ""
-        with ec2:
-            if exp_cat in EXPENSE_VEHICLE_CATEGORIES:
-                exp_reg = st.selectbox("Vehicle", ["-- Select --"] + active_regs, key=f"exp_reg_{ev}")
-            else:
-                st.write("")
-        # Every fixed cost belongs to one site, or is shared equally across
-        # the sites with installs that month.
-        _site_opts = list(active_locs) + [SHARED_SITE]
-        exp_site = st.selectbox("Site", _site_opts, index=len(_site_opts) - 1, key=f"exp_site_{ev}",
-                                help="Shared costs are split equally across the sites with installs that month.")
-        exp_item = st.text_input("Description", key=f"exp_item_{ev}", placeholder=EXPENSE_ITEM_HINT.get(exp_cat, ""))
-        ec3, ec4 = st.columns([2, 1], vertical_alignment="bottom")
-        with ec3:
-            exp_amt = st.number_input("Amount (Rs.)", min_value=0.0, step=100.0, value=0.0, key=f"exp_amt_{ev}")
-        with ec4:
-            # Keyed on the category so the default re-applies when it changes.
-            exp_rec = st.checkbox("Repeats monthly", value=exp_cat in EXPENSE_RECURRING_DEFAULT,
-                                  key=f"exp_rec_{ev}_{exp_cat}")
-        if exp_cat in EXPENSE_VEHICLE_CATEGORIES and not active_regs:
-            st.warning("⚠️ Add a vehicle under Vehicles below first.")
-        if st.button("➕ Add Expense", type="primary", use_container_width=True, key="exp_add_fixed"):
-            if exp_amt <= 0:
-                st.error("❌ Enter an amount.")
-            elif exp_cat in EXPENSE_VEHICLE_CATEGORIES and exp_reg in ("", "-- Select --"):
-                st.error("❌ Pick the vehicle this cost belongs to.")
-            else:
-                new_row = {"expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Fixed",
-                           "category": exp_cat, "item": exp_item.strip(),
-                           "vehicle_reg": exp_reg if exp_cat in EXPENSE_VEHICLE_CATEGORIES else "",
-                           "amount": exp_amt, "rate_1ph": 0, "rate_3ph": 0, "recurring": "1" if exp_rec else "0",
-                           "site": exp_site}
-                if safe_update("Expenses", pd.concat([df_exp_all[EXPENSE_COLS], pd.DataFrame([new_row])], ignore_index=True)):
-                    st.session_state["exp_form_version"] += 1
-                    st.success(f"✅ Added {exp_cat}: Rs. {exp_amt:,.0f} to {month_label(sel_month)}.")
+        if summ["by_category"]:
+            sub_hdr("chart", "By Category")
+            cat_df = pd.DataFrame(summ["by_category"], columns=["Type", "Category", "Month (Rs.)"])
+            cat_df["Per install (Rs.)"] = cat_df["Month (Rs.)"].apply(
+                lambda v: round(v / summ["installs"], 2) if summ["installs"] else None)
+            cat_df["Month (Rs.)"] = cat_df["Month (Rs.)"].round(0).astype(int)
+            cat_df["Share"] = cat_df["Month (Rs.)"].apply(
+                lambda v: f"{v / summ['total_cost'] * 100:.0f}%" if summ["total_cost"] else "—")
+            st.dataframe(cat_df, use_container_width=True, hide_index=True, height=dataframe_height(len(cat_df)))
+
+            veh_rows = df_exp_all[(df_exp_all["month"].astype(str) == sel_month)
+                                  & (df_exp_all["category"].isin(EXPENSE_VEHICLE_CATEGORIES))
+                                  & (df_exp_all["vehicle_reg"].astype(str).str.strip() != "")]
+            if not veh_rows.empty:
+                sub_hdr("truck", "By Vehicle")
+                vt = veh_rows.pivot_table(index="vehicle_reg", columns="category", values="amount",
+                                          aggfunc="sum", fill_value=0)
+                vt = vt.reindex(columns=[c for c in EXPENSE_FIXED_CATEGORIES if c in EXPENSE_VEHICLE_CATEGORIES],
+                                fill_value=0)
+                vt["Total"] = vt.sum(axis=1)
+                vt = vt.round(0).astype(int).sort_values("Total", ascending=False).reset_index()
+                vt = vt.rename(columns={"vehicle_reg": "Vehicle"})
+                st.dataframe(vt, use_container_width=True, hide_index=True, height=dataframe_height(len(vt)))
+
+        # -- Add an expense ----------------------------------------------------
+        st.divider()
+        sec_hdr("plus", f"Add To {month_label(sel_month)}")
+        if "exp_form_version" not in st.session_state:
+            st.session_state["exp_form_version"] = 0
+        ev = st.session_state["exp_form_version"]
+
+        exp_type = st.radio("Cost type", ["Fixed", "Variable"], horizontal=True, key=f"exp_type_{ev}",
+                            help="Fixed: an amount for the month. Variable: a rate per install.")
+        if exp_type == "Fixed":
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                exp_cat = st.selectbox("Category", EXPENSE_FIXED_CATEGORIES, key=f"exp_cat_f_{ev}")
+            exp_reg = ""
+            with ec2:
+                if exp_cat in EXPENSE_VEHICLE_CATEGORIES:
+                    exp_reg = st.selectbox("Vehicle", ["-- Select --"] + active_regs, key=f"exp_reg_{ev}")
+                else:
+                    st.write("")
+            # Every fixed cost belongs to one site, or is shared equally across
+            # the sites with installs that month.
+            _site_opts = list(active_locs) + [SHARED_SITE]
+            exp_site = st.selectbox("Site", _site_opts, index=len(_site_opts) - 1, key=f"exp_site_{ev}",
+                                    help="Shared costs are split equally across the sites with installs that month.")
+            exp_item = st.text_input("Description", key=f"exp_item_{ev}", placeholder=EXPENSE_ITEM_HINT.get(exp_cat, ""))
+            ec3, ec4 = st.columns([2, 1], vertical_alignment="bottom")
+            with ec3:
+                exp_amt = st.number_input("Amount (Rs.)", min_value=0.0, step=100.0, value=0.0, key=f"exp_amt_{ev}")
+            with ec4:
+                # Keyed on the category so the default re-applies when it changes.
+                exp_rec = st.checkbox("Repeats monthly", value=exp_cat in EXPENSE_RECURRING_DEFAULT,
+                                      key=f"exp_rec_{ev}_{exp_cat}")
+            if exp_cat in EXPENSE_VEHICLE_CATEGORIES and not active_regs:
+                st.warning("⚠️ Add a vehicle under Vehicles below first.")
+            if st.button("➕ Add Expense", type="primary", use_container_width=True, key="exp_add_fixed"):
+                if exp_amt <= 0:
+                    st.error("❌ Enter an amount.")
+                elif exp_cat in EXPENSE_VEHICLE_CATEGORIES and exp_reg in ("", "-- Select --"):
+                    st.error("❌ Pick the vehicle this cost belongs to.")
+                else:
+                    new_row = {"expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Fixed",
+                               "category": exp_cat, "item": exp_item.strip(),
+                               "vehicle_reg": exp_reg if exp_cat in EXPENSE_VEHICLE_CATEGORIES else "",
+                               "amount": exp_amt, "rate_1ph": 0, "rate_3ph": 0, "recurring": "1" if exp_rec else "0",
+                               "site": exp_site}
+                    if safe_update("Expenses", pd.concat([df_exp_all[EXPENSE_COLS], pd.DataFrame([new_row])], ignore_index=True)):
+                        st.session_state["exp_form_version"] += 1
+                        st.success(f"✅ Added {exp_cat}: Rs. {exp_amt:,.0f} to {month_label(sel_month)}.")
+                        st.rerun()
+        else:
+            exp_vcat = st.selectbox("Category", EXPENSE_VARIABLE_CATEGORIES, key=f"exp_cat_v_{ev}")
+            cur = df_exp_all[(df_exp_all["month"].astype(str) == sel_month) & (df_exp_all["cost_type"] == "Variable")
+                             & (df_exp_all["category"] == exp_vcat)]
+            vc1, vc2 = st.columns(2)
+            with vc1:
+                r1 = st.number_input("Rate per 1PH install (Rs.)", min_value=0.0, step=5.0,
+                                     value=float(cur["rate_1ph"].iloc[0]) if not cur.empty else 0.0,
+                                     key=f"exp_r1_{ev}_{exp_vcat}_{sel_month}")
+            with vc2:
+                r3 = st.number_input("Rate per 3PH install (Rs.)", min_value=0.0, step=5.0,
+                                     value=float(cur["rate_3ph"].iloc[0]) if not cur.empty else 0.0,
+                                     key=f"exp_r3_{ev}_{exp_vcat}_{sel_month}")
+            if n1 or n3:
+                st.markdown(f'<div class="info-box">At these rates: Rs. {r1 * n1 + r3 * n3:,.0f} for '
+                            f'{month_label(sel_month)} ({n1:,} × {r1:,.0f} + {n3:,} × {r3:,.0f}).</div>',
+                            unsafe_allow_html=True)
+            if st.button("💾 Save Rate", type="primary", use_container_width=True, key="exp_add_var"):
+                if r1 <= 0 and r3 <= 0:
+                    st.error("❌ Enter at least one rate.")
+                else:
+                    # One rate per variable category per month: saving again
+                    # UPDATES it. Two rows would silently add the rates together.
+                    df_new = df_exp_all[EXPENSE_COLS].copy()
+                    df_new = df_new[~((df_new["month"].astype(str) == sel_month) & (df_new["cost_type"] == "Variable")
+                                      & (df_new["category"] == exp_vcat))]
+                    df_new = pd.concat([df_new, pd.DataFrame([{
+                        "expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Variable",
+                        "category": exp_vcat, "item": "", "vehicle_reg": "", "amount": 0,
+                        "rate_1ph": r1, "rate_3ph": r3, "recurring": "1", "site": SHARED_SITE}])], ignore_index=True)
+                    if safe_update("Expenses", df_new):
+                        st.session_state["exp_form_version"] += 1
+                        st.success(f"✅ {exp_vcat} rate saved for {month_label(sel_month)}.")
+                        st.rerun()
+
+        # -- Carry repeating costs forward --------------------------------------
+        _y, _m = int(sel_month[:4]), int(sel_month[5:])
+        prev_month = f"{_y - 1:04d}-12" if _m == 1 else f"{_y:04d}-{_m - 1:02d}"
+        prev_rec = df_exp_all[(df_exp_all["month"].astype(str) == prev_month) & df_exp_all["recurring"].apply(_truthy)]
+        if not prev_rec.empty:
+            this_rows = df_exp_all[df_exp_all["month"].astype(str) == sel_month]
+            have = set(zip(this_rows["cost_type"], this_rows["category"], this_rows["item"].astype(str),
+                           this_rows["vehicle_reg"].astype(str)))
+            have_var = set(this_rows.loc[this_rows["cost_type"] == "Variable", "category"])
+            to_copy = prev_rec[[
+                (r["category"] not in have_var) if r["cost_type"] == "Variable"
+                else ((r["cost_type"], r["category"], str(r["item"]), str(r["vehicle_reg"])) not in have)
+                for _, r in prev_rec.iterrows()]]
+            if not to_copy.empty:
+                if st.button(f"📋 Copy {len(to_copy)} repeating cost(s) from {month_label(prev_month)}",
+                             use_container_width=True, key="exp_copy_prev"):
+                    copied = to_copy[EXPENSE_COLS].copy()
+                    copied["month"] = sel_month
+                    base = int(time.time() * 1000)
+                    copied["expense_id"] = [f"E{base + i}" for i in range(len(copied))]
+                    if safe_update("Expenses", pd.concat([df_exp_all[EXPENSE_COLS], copied], ignore_index=True)):
+                        st.success(f"✅ Copied {len(copied)} cost(s) into {month_label(sel_month)} — adjust any that changed below.")
+                        st.rerun()
+
+        # -- This month's entries: edit / delete ---------------------------------
+        sec_hdr("list", f"Expenses — {month_label(sel_month)}")
+        month_rows = df_exp_all[df_exp_all["month"].astype(str) == sel_month]
+        if month_rows.empty:
+            st.info("No expenses added for this month yet.")
+        else:
+            ed = month_rows.copy()
+            ed["Repeats"] = ed["recurring"].apply(_truthy)
+            ed.insert(0, "Delete", False)
+            ed = ed.sort_values(["cost_type", "category"])
+            ed["site"] = ed["site"].astype(str).str.strip().replace({"": SHARED_SITE, "nan": SHARED_SITE})
+            view = ed[["Delete", "cost_type", "site", "category", "item", "vehicle_reg", "amount", "rate_1ph", "rate_3ph",
+                       "Repeats", "expense_id"]].rename(columns={
+                "cost_type": "Type", "site": "Site", "category": "Category", "item": "Description", "vehicle_reg": "Vehicle",
+                "amount": "Amount (Rs.)", "rate_1ph": "Rate 1PH", "rate_3ph": "Rate 3PH"})
+            edited = st.data_editor(
+                view, use_container_width=True, hide_index=True, # Keyed on the sheet's version: after a save the editor starts fresh,
+                # so a leftover "Delete" tick can't shift onto a different row.
+                key=f"exp_editor_{sel_month}_{_sheet_version('Expenses')}",
+                disabled=["Type", "Category", "Vehicle", "expense_id"],
+                column_config={"expense_id": None,
+                               "Site": st.column_config.SelectboxColumn(options=list(active_locs) + [SHARED_SITE]),
+                               "Amount (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=100.0, format="%.0f"),
+                               "Rate 1PH": st.column_config.NumberColumn(min_value=0.0, step=5.0, format="%.2f"),
+                               "Rate 3PH": st.column_config.NumberColumn(min_value=0.0, step=5.0, format="%.2f")},
+                height=dataframe_height(len(view)),
+            )
+            n_del = int(edited["Delete"].sum())
+            if st.button(f"💾 Save Changes{f' (deleting {n_del})' if n_del else ''}", type="primary",
+                         use_container_width=True, key="exp_save_edits"):
+                if safe_update("Expenses", apply_expense_edits(df_exp_all, edited)):
+                    st.success("✅ Expenses updated.")
                     st.rerun()
-    else:
-        exp_vcat = st.selectbox("Category", EXPENSE_VARIABLE_CATEGORIES, key=f"exp_cat_v_{ev}")
-        cur = df_exp_all[(df_exp_all["month"].astype(str) == sel_month) & (df_exp_all["cost_type"] == "Variable")
-                         & (df_exp_all["category"] == exp_vcat)]
-        vc1, vc2 = st.columns(2)
+
+        # -- 1PH incentive & profit sharing -------------------------------------
+        st.divider()
+        sec_hdr("receipt", "Incentive & Profit Sharing")
+        _n1ph = month_installs_1ph(sel_month)
+        _n3ph = month_installs_3ph(sel_month)
+        _cpi = summ["total_per_install"]
+        if (_n1ph + _n3ph) == 0:
+            st.info(f"No installs recorded for {month_label(sel_month)} yet.")
+        else:
+            if _cpi is None:
+                st.markdown('<div class="warn-box">No expenses entered for this month, so the '
+                            'expense per install is 0 and the profit figures will be overstated. '
+                            'Add this month\'s costs above first.</div>', unsafe_allow_html=True)
+            ic1, ic2, ic3, ic4 = st.columns(4)
+            with ic1:
+                _old_rate = st.number_input("Old unit rate (Rs.)", min_value=0.0, step=5.0,
+                                            value=float(INCENTIVE_OLD_UNIT_RATE_1PH), key="inc_old_rate")
+            with ic2:
+                _ret = st.number_input("Retention %", min_value=0.0, max_value=100.0, step=1.0,
+                                       value=RETENTION_PCT * 100, key="inc_retention") / 100
+            with ic3:
+                _gst = st.number_input("GST %", min_value=0.0, max_value=100.0, step=1.0,
+                                       value=GST_PCT * 100, key="inc_gst") / 100
+            with ic4:
+                _split = st.number_input(f"{PARTNERS[0]}'s share %", min_value=0.0, max_value=100.0, step=5.0,
+                                         value=PRIMARY_SPLIT * 100, key="inc_split",
+                                         help=f"Of the {PARTNERS[0]} + {PARTNERS[1]} pool; {PARTNERS[1]} gets the rest.") / 100
+
+            # 3PH is now part of the workbook's revenue, so the month's full cost is
+            # spread over ALL installs: expense/install x (1PH + 3PH) = the month's
+            # total cost. (The earlier "charge it all to 1PH" choice existed only
+            # because 3PH wasn't in the workbook.)
+            _all = _n1ph + _n3ph
+            _cpi = (summ["total_cost"] / _all) if (summ["has_entries"] and _all) else None
+            st.markdown(
+                f'<div class="info-box">Expense per install: <b>Rs. {fmt_rs(_cpi, 2)}</b> '
+                f'x {_all:,} installs ({_n1ph:,} 1PH + {_n3ph:,} 3PH) = <b>Rs. {fmt_rs((_cpi or 0) * _all)}</b>'
+                f' (month total cost Rs. {fmt_rs(summ["total_cost"])}).</div>', unsafe_allow_html=True)
+
+            bill = calculate_1ph_incentive_billing(_n1ph)
+            bill3 = calculate_3ph_billing(_n3ph)
+            ps = profit_sharing_summary(_n1ph, _cpi or 0.0, _old_rate, INCENTIVE_UNIT_RATE_1PH,
+                                        INCENTIVE_FLAT_ADDON_1PH, _ret, _gst, _split, installs_3ph=_n3ph)
+            render_stat_tiles([
+                ("bolt", f"{_n1ph:,} / {_n3ph:,}", "1PH / 3PH", "installs", "normal"),
+                ("wallet", fmt_rs(_cpi, 1), "Expense", "Rs./install", "normal"),
+                ("rupee", fmt_rs(bill["total_cost"] + bill3["total_cost"]), "Billing", "Rs.", "normal"),
+                ("target", fmt_rs(ps["base_profit"] + ps["additional"]), "Profit", "Rs. pool", "normal"),
+            ])
+
+            sub_hdr("chart", "Pool")
+            pool = pd.DataFrame([
+                ("Old pricing base revenue", ps["old_base_revenue"]),
+                (f"Total expense ({fmt_rs(_cpi, 2)} x {_n1ph + _n3ph:,})", ps["expense_total"]),
+                ("Base profit (old pricing)", ps["base_profit"]),
+                (f"Retention held ({_ret * 100:.0f}%, 90 days)", ps["retention"]),
+                (f"GST on old base ({_gst * 100:.0f}%)", ps["gst_old"]),
+                ("Price hike amount", ps["price_hike"]),
+                ("Tiered slab incentive", ps["tier_incentive"]),
+                ("Additional amount (new pricing)", ps["additional"]),
+                ("GST on additional", ps["gst_additional"]),
+            ], columns=["Component", "Amount (Rs.)"])
+            pool["Amount (Rs.)"] = pool["Amount (Rs.)"].round(0).astype(int)
+            st.dataframe(pool, use_container_width=True, hide_index=True, height=dataframe_height(len(pool)))
+
+            sub_hdr("users", "Partner-Wise")
+            pw = ps["partners"].copy()
+            for c in pw.columns[1:]:
+                pw[c] = pw[c].round(0).astype(int)
+            total_row = {"Partner": "TOTAL", **{c: int(pw[c].sum()) for c in pw.columns[1:]}}
+            pw_disp = pd.concat([pw, pd.DataFrame([total_row])], ignore_index=True)
+            st.dataframe(pw_disp, use_container_width=True, hide_index=True, height=dataframe_height(len(pw_disp)))
+
+            lazy_download_button(
+                "📥 Download Excel (Incentive + Profit Sharing)",
+                lambda: build_incentive_workbook(sel_month, _n1ph, _cpi or 0.0, _old_rate, _ret, _gst, _split,
+                                                 installs_3ph=_n3ph),
+                f"1Ph_Incentive_Profit_{sel_month}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "inc_xlsx")
+
+        # -- Vehicles -----------------------------------------------------------
+        st.divider()
+        sec_hdr("truck", "Vehicles")
+        vc1, vc2, vc3 = st.columns([1.2, 2, 1], vertical_alignment="bottom")
         with vc1:
-            r1 = st.number_input("Rate per 1PH install (Rs.)", min_value=0.0, step=5.0,
-                                 value=float(cur["rate_1ph"].iloc[0]) if not cur.empty else 0.0,
-                                 key=f"exp_r1_{ev}_{exp_vcat}_{sel_month}")
+            new_reg = st.text_input("Registration No.", key=f"veh_reg_{ev}", placeholder="AP16AB1234")
         with vc2:
-            r3 = st.number_input("Rate per 3PH install (Rs.)", min_value=0.0, step=5.0,
-                                 value=float(cur["rate_3ph"].iloc[0]) if not cur.empty else 0.0,
-                                 key=f"exp_r3_{ev}_{exp_vcat}_{sel_month}")
-        if n1 or n3:
-            st.markdown(f'<div class="info-box">At these rates: Rs. {r1 * n1 + r3 * n3:,.0f} for '
-                        f'{month_label(sel_month)} ({n1:,} × {r1:,.0f} + {n3:,} × {r3:,.0f}).</div>',
-                        unsafe_allow_html=True)
-        if st.button("💾 Save Rate", type="primary", use_container_width=True, key="exp_add_var"):
-            if r1 <= 0 and r3 <= 0:
-                st.error("❌ Enter at least one rate.")
-            else:
-                # One rate per variable category per month: saving again
-                # UPDATES it. Two rows would silently add the rates together.
-                df_new = df_exp_all[EXPENSE_COLS].copy()
-                df_new = df_new[~((df_new["month"].astype(str) == sel_month) & (df_new["cost_type"] == "Variable")
-                                  & (df_new["category"] == exp_vcat))]
-                df_new = pd.concat([df_new, pd.DataFrame([{
-                    "expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Variable",
-                    "category": exp_vcat, "item": "", "vehicle_reg": "", "amount": 0,
-                    "rate_1ph": r1, "rate_3ph": r3, "recurring": "1", "site": SHARED_SITE}])], ignore_index=True)
-                if safe_update("Expenses", df_new):
-                    st.session_state["exp_form_version"] += 1
-                    st.success(f"✅ {exp_vcat} rate saved for {month_label(sel_month)}.")
+            new_desc = st.text_input("Description", key=f"veh_desc_{ev}", placeholder="e.g. Bolero – Chittinagar team")
+        with vc3:
+            if st.button("➕ Add Vehicle", use_container_width=True, key="veh_add"):
+                reg = normalize_reg_no(new_reg)
+                if len(reg) < 6:
+                    st.error("❌ Enter a valid registration number.")
+                elif reg in set(df_veh["reg_no"].astype(str).map(normalize_reg_no)):
+                    st.error(f"❌ {reg} is already in the list.")
+                else:
+                    if safe_update("Vehicles", pd.concat([df_veh[VEHICLE_COLS], pd.DataFrame([{
+                            "reg_no": reg, "description": new_desc.strip(), "is_active": "1"}])], ignore_index=True)):
+                        st.session_state["exp_form_version"] += 1
+                        st.success(f"✅ Added {reg}.")
+                        st.rerun()
+
+        if df_veh.empty or df_veh["reg_no"].astype(str).str.strip().eq("").all():
+            st.info("No vehicles added yet.")
+        else:
+            used_regs = set(df_exp_all["vehicle_reg"].astype(str))
+            vview = df_veh[VEHICLE_COLS].copy()
+            vview["Active"] = vview["is_active"].apply(_truthy)
+            vview.insert(0, "Delete", False)
+            vview = vview[["Delete", "reg_no", "description", "Active"]].rename(
+                columns={"reg_no": "Registration No.", "description": "Description"})
+            vedit = st.data_editor(vview, use_container_width=True, hide_index=True, key=f"veh_editor_{_sheet_version('Vehicles')}",
+                                   disabled=["Registration No."], height=dataframe_height(len(vview)))
+            if st.button("💾 Save Vehicle Changes", use_container_width=True, key="veh_save"):
+                new_veh, blocked = apply_vehicle_edits(vedit, used_regs)
+                if safe_update("Vehicles", new_veh):
+                    if blocked:
+                        st.warning(f"⚠️ {', '.join(blocked)} has costs on record, so it was marked inactive instead of deleted.")
+                    st.success("✅ Vehicles updated.")
                     st.rerun()
-
-    # -- Carry repeating costs forward --------------------------------------
-    _y, _m = int(sel_month[:4]), int(sel_month[5:])
-    prev_month = f"{_y - 1:04d}-12" if _m == 1 else f"{_y:04d}-{_m - 1:02d}"
-    prev_rec = df_exp_all[(df_exp_all["month"].astype(str) == prev_month) & df_exp_all["recurring"].apply(_truthy)]
-    if not prev_rec.empty:
-        this_rows = df_exp_all[df_exp_all["month"].astype(str) == sel_month]
-        have = set(zip(this_rows["cost_type"], this_rows["category"], this_rows["item"].astype(str),
-                       this_rows["vehicle_reg"].astype(str)))
-        have_var = set(this_rows.loc[this_rows["cost_type"] == "Variable", "category"])
-        to_copy = prev_rec[[
-            (r["category"] not in have_var) if r["cost_type"] == "Variable"
-            else ((r["cost_type"], r["category"], str(r["item"]), str(r["vehicle_reg"])) not in have)
-            for _, r in prev_rec.iterrows()]]
-        if not to_copy.empty:
-            if st.button(f"📋 Copy {len(to_copy)} repeating cost(s) from {month_label(prev_month)}",
-                         use_container_width=True, key="exp_copy_prev"):
-                copied = to_copy[EXPENSE_COLS].copy()
-                copied["month"] = sel_month
-                base = int(time.time() * 1000)
-                copied["expense_id"] = [f"E{base + i}" for i in range(len(copied))]
-                if safe_update("Expenses", pd.concat([df_exp_all[EXPENSE_COLS], copied], ignore_index=True)):
-                    st.success(f"✅ Copied {len(copied)} cost(s) into {month_label(sel_month)} — adjust any that changed below.")
-                    st.rerun()
-
-    # -- This month's entries: edit / delete ---------------------------------
-    sec_hdr("list", f"Expenses — {month_label(sel_month)}")
-    month_rows = df_exp_all[df_exp_all["month"].astype(str) == sel_month]
-    if month_rows.empty:
-        st.info("No expenses added for this month yet.")
-    else:
-        ed = month_rows.copy()
-        ed["Repeats"] = ed["recurring"].apply(_truthy)
-        ed.insert(0, "Delete", False)
-        ed = ed.sort_values(["cost_type", "category"])
-        ed["site"] = ed["site"].astype(str).str.strip().replace({"": SHARED_SITE, "nan": SHARED_SITE})
-        view = ed[["Delete", "cost_type", "site", "category", "item", "vehicle_reg", "amount", "rate_1ph", "rate_3ph",
-                   "Repeats", "expense_id"]].rename(columns={
-            "cost_type": "Type", "site": "Site", "category": "Category", "item": "Description", "vehicle_reg": "Vehicle",
-            "amount": "Amount (Rs.)", "rate_1ph": "Rate 1PH", "rate_3ph": "Rate 3PH"})
-        edited = st.data_editor(
-            view, use_container_width=True, hide_index=True, # Keyed on the sheet's version: after a save the editor starts fresh,
-            # so a leftover "Delete" tick can't shift onto a different row.
-            key=f"exp_editor_{sel_month}_{_sheet_version('Expenses')}",
-            disabled=["Type", "Category", "Vehicle", "expense_id"],
-            column_config={"expense_id": None,
-                           "Site": st.column_config.SelectboxColumn(options=list(active_locs) + [SHARED_SITE]),
-                           "Amount (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=100.0, format="%.0f"),
-                           "Rate 1PH": st.column_config.NumberColumn(min_value=0.0, step=5.0, format="%.2f"),
-                           "Rate 3PH": st.column_config.NumberColumn(min_value=0.0, step=5.0, format="%.2f")},
-            height=dataframe_height(len(view)),
-        )
-        n_del = int(edited["Delete"].sum())
-        if st.button(f"💾 Save Changes{f' (deleting {n_del})' if n_del else ''}", type="primary",
-                     use_container_width=True, key="exp_save_edits"):
-            if safe_update("Expenses", apply_expense_edits(df_exp_all, edited)):
-                st.success("✅ Expenses updated.")
-                st.rerun()
-
-    # -- 1PH incentive & profit sharing -------------------------------------
-    st.divider()
-    sec_hdr("receipt", "Incentive & Profit Sharing")
-    _n1ph = month_installs_1ph(sel_month)
-    _n3ph = month_installs_3ph(sel_month)
-    _cpi = summ["total_per_install"]
-    if (_n1ph + _n3ph) == 0:
-        st.info(f"No installs recorded for {month_label(sel_month)} yet.")
-    else:
-        if _cpi is None:
-            st.markdown('<div class="warn-box">No expenses entered for this month, so the '
-                        'expense per install is 0 and the profit figures will be overstated. '
-                        'Add this month\'s costs above first.</div>', unsafe_allow_html=True)
-        ic1, ic2, ic3, ic4 = st.columns(4)
-        with ic1:
-            _old_rate = st.number_input("Old unit rate (Rs.)", min_value=0.0, step=5.0,
-                                        value=float(INCENTIVE_OLD_UNIT_RATE_1PH), key="inc_old_rate")
-        with ic2:
-            _ret = st.number_input("Retention %", min_value=0.0, max_value=100.0, step=1.0,
-                                   value=RETENTION_PCT * 100, key="inc_retention") / 100
-        with ic3:
-            _gst = st.number_input("GST %", min_value=0.0, max_value=100.0, step=1.0,
-                                   value=GST_PCT * 100, key="inc_gst") / 100
-        with ic4:
-            _split = st.number_input(f"{PARTNERS[0]}'s share %", min_value=0.0, max_value=100.0, step=5.0,
-                                     value=PRIMARY_SPLIT * 100, key="inc_split",
-                                     help=f"Of the {PARTNERS[0]} + {PARTNERS[1]} pool; {PARTNERS[1]} gets the rest.") / 100
-
-        # 3PH is now part of the workbook's revenue, so the month's full cost is
-        # spread over ALL installs: expense/install x (1PH + 3PH) = the month's
-        # total cost. (The earlier "charge it all to 1PH" choice existed only
-        # because 3PH wasn't in the workbook.)
-        _all = _n1ph + _n3ph
-        _cpi = (summ["total_cost"] / _all) if (summ["has_entries"] and _all) else None
-        st.markdown(
-            f'<div class="info-box">Expense per install: <b>Rs. {fmt_rs(_cpi, 2)}</b> '
-            f'x {_all:,} installs ({_n1ph:,} 1PH + {_n3ph:,} 3PH) = <b>Rs. {fmt_rs((_cpi or 0) * _all)}</b>'
-            f' (month total cost Rs. {fmt_rs(summ["total_cost"])}).</div>', unsafe_allow_html=True)
-
-        bill = calculate_1ph_incentive_billing(_n1ph)
-        bill3 = calculate_3ph_billing(_n3ph)
-        ps = profit_sharing_summary(_n1ph, _cpi or 0.0, _old_rate, INCENTIVE_UNIT_RATE_1PH,
-                                    INCENTIVE_FLAT_ADDON_1PH, _ret, _gst, _split, installs_3ph=_n3ph)
-        render_stat_tiles([
-            ("bolt", f"{_n1ph:,} / {_n3ph:,}", "1PH / 3PH", "installs", "normal"),
-            ("wallet", fmt_rs(_cpi, 1), "Expense", "Rs./install", "normal"),
-            ("rupee", fmt_rs(bill["total_cost"] + bill3["total_cost"]), "Billing", "Rs.", "normal"),
-            ("target", fmt_rs(ps["base_profit"] + ps["additional"]), "Profit", "Rs. pool", "normal"),
-        ])
-
-        sub_hdr("chart", "Pool")
-        pool = pd.DataFrame([
-            ("Old pricing base revenue", ps["old_base_revenue"]),
-            (f"Total expense ({fmt_rs(_cpi, 2)} x {_n1ph + _n3ph:,})", ps["expense_total"]),
-            ("Base profit (old pricing)", ps["base_profit"]),
-            (f"Retention held ({_ret * 100:.0f}%, 90 days)", ps["retention"]),
-            (f"GST on old base ({_gst * 100:.0f}%)", ps["gst_old"]),
-            ("Price hike amount", ps["price_hike"]),
-            ("Tiered slab incentive", ps["tier_incentive"]),
-            ("Additional amount (new pricing)", ps["additional"]),
-            ("GST on additional", ps["gst_additional"]),
-        ], columns=["Component", "Amount (Rs.)"])
-        pool["Amount (Rs.)"] = pool["Amount (Rs.)"].round(0).astype(int)
-        st.dataframe(pool, use_container_width=True, hide_index=True, height=dataframe_height(len(pool)))
-
-        sub_hdr("users", "Partner-Wise")
-        pw = ps["partners"].copy()
-        for c in pw.columns[1:]:
-            pw[c] = pw[c].round(0).astype(int)
-        total_row = {"Partner": "TOTAL", **{c: int(pw[c].sum()) for c in pw.columns[1:]}}
-        pw_disp = pd.concat([pw, pd.DataFrame([total_row])], ignore_index=True)
-        st.dataframe(pw_disp, use_container_width=True, hide_index=True, height=dataframe_height(len(pw_disp)))
-
-        lazy_download_button(
-            "📥 Download Excel (Incentive + Profit Sharing)",
-            lambda: build_incentive_workbook(sel_month, _n1ph, _cpi or 0.0, _old_rate, _ret, _gst, _split,
-                                             installs_3ph=_n3ph),
-            f"1Ph_Incentive_Profit_{sel_month}.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "inc_xlsx")
-
-    # -- Vehicles -----------------------------------------------------------
-    st.divider()
-    sec_hdr("truck", "Vehicles")
-    vc1, vc2, vc3 = st.columns([1.2, 2, 1], vertical_alignment="bottom")
-    with vc1:
-        new_reg = st.text_input("Registration No.", key=f"veh_reg_{ev}", placeholder="AP16AB1234")
-    with vc2:
-        new_desc = st.text_input("Description", key=f"veh_desc_{ev}", placeholder="e.g. Bolero – Chittinagar team")
-    with vc3:
-        if st.button("➕ Add Vehicle", use_container_width=True, key="veh_add"):
-            reg = normalize_reg_no(new_reg)
-            if len(reg) < 6:
-                st.error("❌ Enter a valid registration number.")
-            elif reg in set(df_veh["reg_no"].astype(str).map(normalize_reg_no)):
-                st.error(f"❌ {reg} is already in the list.")
-            else:
-                if safe_update("Vehicles", pd.concat([df_veh[VEHICLE_COLS], pd.DataFrame([{
-                        "reg_no": reg, "description": new_desc.strip(), "is_active": "1"}])], ignore_index=True)):
-                    st.session_state["exp_form_version"] += 1
-                    st.success(f"✅ Added {reg}.")
-                    st.rerun()
-
-    if df_veh.empty or df_veh["reg_no"].astype(str).str.strip().eq("").all():
-        st.info("No vehicles added yet.")
-    else:
-        used_regs = set(df_exp_all["vehicle_reg"].astype(str))
-        vview = df_veh[VEHICLE_COLS].copy()
-        vview["Active"] = vview["is_active"].apply(_truthy)
-        vview.insert(0, "Delete", False)
-        vview = vview[["Delete", "reg_no", "description", "Active"]].rename(
-            columns={"reg_no": "Registration No.", "description": "Description"})
-        vedit = st.data_editor(vview, use_container_width=True, hide_index=True, key=f"veh_editor_{_sheet_version('Vehicles')}",
-                               disabled=["Registration No."], height=dataframe_height(len(vview)))
-        if st.button("💾 Save Vehicle Changes", use_container_width=True, key="veh_save"):
-            new_veh, blocked = apply_vehicle_edits(vedit, used_regs)
-            if safe_update("Vehicles", new_veh):
-                if blocked:
-                    st.warning(f"⚠️ {', '.join(blocked)} has costs on record, so it was marked inactive instead of deleted.")
-                st.success("✅ Vehicles updated.")
-                st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  LIAISONING — installs by section code, mapped to linemen, and what's payable
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_liaison:
-    tab_action_bar("liaison")
-    _today_l = today_ist()
-    _lmonths = {month_key(_today_l)}
-    _ly, _lm = _today_l.year, _today_l.month
-    for _ in range(11):
-        _lm -= 1
-        if _lm == 0:
-            _ly, _lm = _ly - 1, 12
-        _lmonths.add(f"{_ly:04d}-{_lm:02d}")
-    l_month_opts = sorted(_lmonths, reverse=True)
-    l_month = st.selectbox("Month", l_month_opts, index=l_month_opts.index(month_key(_today_l)),
-                           format_func=month_label, key="liaison_month")
+    if tab_liaison.open:   # only the open tab runs (tabs are created with on_change="rerun")
+        tab_action_bar("liaison")
+        _today_l = today_ist()
+        _lmonths = {month_key(_today_l)}
+        _ly, _lm = _today_l.year, _today_l.month
+        for _ in range(11):
+            _lm -= 1
+            if _lm == 0:
+                _ly, _lm = _ly - 1, 12
+            _lmonths.add(f"{_ly:04d}-{_lm:02d}")
+        l_month_opts = sorted(_lmonths, reverse=True)
+        l_month = st.selectbox("Month", l_month_opts, index=l_month_opts.index(month_key(_today_l)),
+                               format_func=month_label, key="liaison_month")
 
-    lt = liaisoning_table(l_month)
-    df_map_l = load_liaisoning()
+        lt = liaisoning_table(l_month)
+        df_map_l = load_liaisoning()
 
-    sec_hdr("rupee", f"Liaisoning — {month_label(l_month)}")
-    if lt.empty:
-        st.info("No installs with a Consumer No recorded for this month yet.")
-    else:
-        mapped = lt[lt["lineman"] != ""]
-        unmapped = lt[lt["lineman"] == ""]
-        worked_unmapped = unmapped[unmapped["installs"] > 0]
-        render_stat_tiles([
-            ("bolt", f"{int(lt['installs'].sum()):,}", "Installs", "in month", "normal"),
-            ("pin", f"{int((mapped['installs'] > 0).sum()):,}", "Codes", "worked", "normal"),
-            ("users", f"{mapped['lineman'].nunique():,}", "Linemen", "mapped", "normal"),
-            ("rupee", f"{lt['payable'].sum():,.0f}", "Payable", "Rs.", "normal"),
-        ])
-        if not worked_unmapped.empty:
-            st.markdown(
-                f'<div class="warn-box">{len(worked_unmapped)} section code(s) with '
-                f'{int(worked_unmapped["installs"].sum()):,} install(s) have no lineman yet — '
-                f'they are listed below and are not counted in the payable.</div>',
-                unsafe_allow_html=True)
-
-        # -- Payable per lineman ------------------------------------------
-        if not mapped.empty:
-            sub_hdr("users", "Payable By Lineman")
-            # Includes linemen with no installs this month — a zero is itself
-            # information when you are checking who to pay.
-            per_lineman = mapped.groupby("lineman").agg(
-                Sections=("location", lambda x: ", ".join(sorted(set(x)))),
-                Codes=("section_code", lambda x: ", ".join(sorted(set(x)))),
-                Installs=("installs", "sum"), Payable=("payable", "sum")).reset_index()
-            per_lineman = per_lineman.rename(columns={"lineman": "Lineman"})
-            per_lineman["Installs"] = per_lineman["Installs"].astype(int)
-            per_lineman["Payable"] = per_lineman["Payable"].round(0).astype(int)
-            per_lineman = per_lineman.sort_values("Payable", ascending=False)
-            total_row = pd.DataFrame([{"Lineman": "TOTAL", "Sections": "", "Codes": "",
-                                       "Installs": int(per_lineman["Installs"].sum()),
-                                       "Payable": int(per_lineman["Payable"].sum())}])
-            per_lineman_disp = pd.concat([per_lineman, total_row], ignore_index=True)
-            st.dataframe(per_lineman_disp, use_container_width=True, hide_index=True,
-                         height=dataframe_height(len(per_lineman_disp)))
-            download_image_button(
-                per_lineman_disp, f"Liaisoning_{l_month}.png", key="dl_img_liaison",
-                title=f"Liaisoning Payable — {month_label(l_month)}\n"
-                      f"{int(mapped['installs'].sum()):,} install(s) across {mapped['section_code'].nunique()} section code(s)")
-
-        # -- Section code detail -------------------------------------------
-        sub_hdr("pin", "By Section & Section Code")
-        st.markdown('<div class="info-box">Every mapped section code is listed, including ones '
-                    'with no installs this month.</div>', unsafe_allow_html=True)
-        detail = lt.rename(columns={"location": "Section", "section_code": "Section Code",
-                                    "installs": "Installs", "lineman": "Lineman",
-                                    "rate": "Rate (Rs.)", "payable": "Payable (Rs.)"})
-        detail["Lineman"] = detail["Lineman"].replace("", "— not mapped —")
-        detail["Installs"] = detail["Installs"].astype(int)
-        detail["Payable (Rs.)"] = detail["Payable (Rs.)"].round(0).astype(int)
-        st.dataframe(detail, use_container_width=True, hide_index=True,
-                     height=dataframe_height(len(detail), max_px=520))
-        st.download_button("📥 Download CSV", data=detail.to_csv(index=False).encode("utf-8"),
-                           file_name=f"liaisoning_{l_month}.csv", mime="text/csv",
-                           use_container_width=True, key="liaison_csv", on_click="ignore")
-
-    # -- Mappings that matched nothing ---------------------------------------
-    # A mapping with no installs is normal early in the month, but a section
-    # name that appears NOWHERE in the install data is a spelling problem —
-    # worth saying so rather than leaving a lineman silently unpaid.
-    _map_all = load_liaisoning()
-    if not _map_all.empty:
-        _counts_all = month_section_counts(l_month)
-        _data_keys = {section_key(x) for x in _counts_all["location"]} if not _counts_all.empty else set()
-        _worked = {(section_key(r["location"]), r["section_code"]) for _, r in _counts_all.iterrows()} if not _counts_all.empty else set()
-        rows = []
-        for _, r in _map_all.iterrows():
-            k = section_key(r["location"])
-            if (k, r["section_code"]) in _worked:
-                continue
-            rows.append({"Section": r["location"], "Section Code": r["section_code"], "Lineman": r["lineman"],
-                         "Why": ("Section name not found in install data — check the spelling against: "
-                                 + ", ".join(sorted({x for x in _counts_all['location']})) if k not in _data_keys
-                                 else "No installs in this section code this month")})
-        if rows:
-            unmatched = pd.DataFrame(rows)
-            bad_name = unmatched["Why"].str.startswith("Section name").sum()
-            with st.expander(f"⚠️ {len(unmatched)} mapping(s) matched no installs"
-                             + (f" — {bad_name} with a section name that isn't in the data" if bad_name else "")):
-                st.dataframe(unmatched, use_container_width=True, hide_index=True,
-                             height=dataframe_height(len(unmatched), max_px=320))
-
-    # -- Map a section code to a lineman -------------------------------------
-    st.divider()
-    sec_hdr("plus", "Map Section Codes To Linemen")
-    if "liaison_form_version" not in st.session_state:
-        st.session_state["liaison_form_version"] = 0
-    lv = st.session_state["liaison_form_version"]
-
-    seen = month_section_counts(l_month)
-    known_locs = sorted(set(active_locs) | set(seen["location"]) | set(df_map_l["location"]))
-    lc1, lc2 = st.columns(2)
-    with lc1:
-        m_loc = st.selectbox("Section", known_locs or ["Unspecified"], key=f"liaison_loc_{lv}")
-    already = set(df_map_l.loc[df_map_l["location"] == m_loc, "section_code"])
-    with lc2:
-        # Typed, not picked from a list: codes are mapped up front, before any
-        # installs exist in them.
-        m_codes_raw = st.text_input("Section codes", key=f"liaison_codes_{lv}_{m_loc}",
-                                    placeholder="07, 12, 26  or  07-12",
-                                    help="Two digits each. Separate with commas or spaces, or give a range like 07-12.")
-    m_codes = parse_section_codes(m_codes_raw)
-    if m_codes:
-        dupes = [c for c in m_codes if c in already]
-        st.markdown(
-            f'<div class="info-box">{len(m_codes)} code(s): {", ".join(m_codes)}'
-            + (f' — {", ".join(dupes)} already mapped in {m_loc} and will be reassigned.' if dupes else '')
-            + '</div>', unsafe_allow_html=True)
-    codes_here = sorted(set(seen.loc[seen["location"] == m_loc, "section_code"]))
-    unmapped_here = [c for c in codes_here if c not in already]
-    if unmapped_here:
-        st.markdown(
-            f'<div class="warn-box">Seen in {m_loc}\'s installs but not mapped yet: '
-            f'<b>{", ".join(unmapped_here)}</b></div>', unsafe_allow_html=True)
-    known_linemen = sorted({x for x in df_map_l["lineman"] if x})
-    lc3, lc4 = st.columns(2)
-    with lc3:
-        pick = st.selectbox("Lineman", ["— new —"] + known_linemen, key=f"liaison_man_pick_{lv}")
-        m_lineman = st.text_input("New lineman name", key=f"liaison_man_{lv}") if pick == "— new —" else pick
-    with lc4:
-        _default_rate = float(df_map_l.loc[df_map_l["lineman"] == pick, "rate"].iloc[0]) if (
-            pick != "— new —" and not df_map_l[df_map_l["lineman"] == pick].empty) else 0.0
-        m_rate = st.number_input("Rate per install (Rs.)", min_value=0.0, step=1.0,
-                                 value=_default_rate, key=f"liaison_rate_{lv}_{pick}")
-    if st.button("➕ Save Mapping", type="primary", use_container_width=True, key="liaison_add"):
-        if not str(m_lineman).strip():
-            st.error("❌ Enter the lineman's name.")
-        elif not m_codes:
-            st.error("❌ Enter at least one section code, e.g. 07, 12 or 07-12.")
-        elif m_rate <= 0:
-            st.error("❌ Enter the rate per install.")
+        sec_hdr("rupee", f"Liaisoning — {month_label(l_month)}")
+        if lt.empty:
+            st.info("No installs with a Consumer No recorded for this month yet.")
         else:
-            df_new = df_map_l[LIAISONING_COLS].copy()
-            # Re-mapping a code replaces its row rather than adding a second.
-            df_new = df_new[~((df_new["location"] == m_loc) & (df_new["section_code"].isin(m_codes)))]
-            df_new = pd.concat([df_new, pd.DataFrame([
-                {"location": m_loc, "section_code": c, "lineman": str(m_lineman).strip(), "rate": m_rate}
-                for c in m_codes])], ignore_index=True)
-            if safe_update("Liaisoning", df_new):
-                st.session_state["liaison_form_version"] += 1
-                st.success(f"✅ {len(m_codes)} section code(s) mapped to {str(m_lineman).strip()} at Rs. {m_rate:,.0f}/install.")
-                st.rerun()
+            mapped = lt[lt["lineman"] != ""]
+            unmapped = lt[lt["lineman"] == ""]
+            worked_unmapped = unmapped[unmapped["installs"] > 0]
+            render_stat_tiles([
+                ("bolt", f"{int(lt['installs'].sum()):,}", "Installs", "in month", "normal"),
+                ("pin", f"{int((mapped['installs'] > 0).sum()):,}", "Codes", "worked", "normal"),
+                ("users", f"{mapped['lineman'].nunique():,}", "Linemen", "mapped", "normal"),
+                ("rupee", f"{lt['payable'].sum():,.0f}", "Payable", "Rs.", "normal"),
+            ])
+            if not worked_unmapped.empty:
+                st.markdown(
+                    f'<div class="warn-box">{len(worked_unmapped)} section code(s) with '
+                    f'{int(worked_unmapped["installs"].sum()):,} install(s) have no lineman yet — '
+                    f'they are listed below and are not counted in the payable.</div>',
+                    unsafe_allow_html=True)
 
-    # -- Existing mappings ----------------------------------------------------
-    sec_hdr("list", "Current Mappings")
-    if df_map_l.empty or df_map_l["section_code"].eq("").all():
-        st.info("No section codes mapped yet.")
-    else:
-        mv = df_map_l[LIAISONING_COLS].copy()
-        mv.insert(0, "Delete", False)
-        mv = mv.rename(columns={"location": "Section", "section_code": "Section Code",
-                                "lineman": "Lineman", "rate": "Rate (Rs.)"}).sort_values(["Section", "Section Code"])
-        med = st.data_editor(
-            mv, use_container_width=True, hide_index=True,
-            key=f"liaison_editor_{_sheet_version('Liaisoning')}",
-            disabled=["Section", "Section Code"],
-            column_config={"Rate (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="%.2f")},
-            height=dataframe_height(len(mv)))
-        n_del_l = int(med["Delete"].sum())
-        if st.button(f"💾 Save Changes{f' (deleting {n_del_l})' if n_del_l else ''}", type="primary",
-                     use_container_width=True, key="liaison_save"):
-            keep = med[~med["Delete"]]
-            out = pd.DataFrame({
-                "location": keep["Section"],
-                "section_code": keep["Section Code"].apply(normalize_section_code),
-                "lineman": keep["Lineman"].astype(str).str.strip(),
-                "rate": pd.to_numeric(keep["Rate (Rs.)"], errors="coerce").fillna(0.0),
-            }, columns=LIAISONING_COLS)
-            if safe_update("Liaisoning", out):
-                st.success("✅ Mappings updated.")
-                st.rerun()
+            # -- Payable per lineman ------------------------------------------
+            if not mapped.empty:
+                sub_hdr("users", "Payable By Lineman")
+                # Includes linemen with no installs this month — a zero is itself
+                # information when you are checking who to pay.
+                per_lineman = mapped.groupby("lineman").agg(
+                    Sections=("location", lambda x: ", ".join(sorted(set(x)))),
+                    Codes=("section_code", lambda x: ", ".join(sorted(set(x)))),
+                    Installs=("installs", "sum"), Payable=("payable", "sum")).reset_index()
+                per_lineman = per_lineman.rename(columns={"lineman": "Lineman"})
+                per_lineman["Installs"] = per_lineman["Installs"].astype(int)
+                per_lineman["Payable"] = per_lineman["Payable"].round(0).astype(int)
+                per_lineman = per_lineman.sort_values("Payable", ascending=False)
+                total_row = pd.DataFrame([{"Lineman": "TOTAL", "Sections": "", "Codes": "",
+                                           "Installs": int(per_lineman["Installs"].sum()),
+                                           "Payable": int(per_lineman["Payable"].sum())}])
+                per_lineman_disp = pd.concat([per_lineman, total_row], ignore_index=True)
+                st.dataframe(per_lineman_disp, use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(per_lineman_disp)))
+                download_image_button(
+                    per_lineman_disp, f"Liaisoning_{l_month}.png", key="dl_img_liaison",
+                    title=f"Liaisoning Payable — {month_label(l_month)}\n"
+                          f"{int(mapped['installs'].sum()):,} install(s) across {mapped['section_code'].nunique()} section code(s)")
+
+            # -- Section code detail -------------------------------------------
+            sub_hdr("pin", "By Section & Section Code")
+            st.markdown('<div class="info-box">Every mapped section code is listed, including ones '
+                        'with no installs this month.</div>', unsafe_allow_html=True)
+            detail = lt.rename(columns={"location": "Section", "section_code": "Section Code",
+                                        "installs": "Installs", "lineman": "Lineman",
+                                        "rate": "Rate (Rs.)", "payable": "Payable (Rs.)"})
+            detail["Lineman"] = detail["Lineman"].replace("", "— not mapped —")
+            detail["Installs"] = detail["Installs"].astype(int)
+            detail["Payable (Rs.)"] = detail["Payable (Rs.)"].round(0).astype(int)
+            st.dataframe(detail, use_container_width=True, hide_index=True,
+                         height=dataframe_height(len(detail), max_px=520))
+            st.download_button("📥 Download CSV", data=detail.to_csv(index=False).encode("utf-8"),
+                               file_name=f"liaisoning_{l_month}.csv", mime="text/csv",
+                               use_container_width=True, key="liaison_csv", on_click="ignore")
+
+        # -- Mappings that matched nothing ---------------------------------------
+        # A mapping with no installs is normal early in the month, but a section
+        # name that appears NOWHERE in the install data is a spelling problem —
+        # worth saying so rather than leaving a lineman silently unpaid.
+        _map_all = load_liaisoning()
+        if not _map_all.empty:
+            _counts_all = month_section_counts(l_month)
+            _data_keys = {section_key(x) for x in _counts_all["location"]} if not _counts_all.empty else set()
+            _worked = {(section_key(r["location"]), r["section_code"]) for _, r in _counts_all.iterrows()} if not _counts_all.empty else set()
+            rows = []
+            for _, r in _map_all.iterrows():
+                k = section_key(r["location"])
+                if (k, r["section_code"]) in _worked:
+                    continue
+                rows.append({"Section": r["location"], "Section Code": r["section_code"], "Lineman": r["lineman"],
+                             "Why": ("Section name not found in install data — check the spelling against: "
+                                     + ", ".join(sorted({x for x in _counts_all['location']})) if k not in _data_keys
+                                     else "No installs in this section code this month")})
+            if rows:
+                unmatched = pd.DataFrame(rows)
+                bad_name = unmatched["Why"].str.startswith("Section name").sum()
+                with st.expander(f"⚠️ {len(unmatched)} mapping(s) matched no installs"
+                                 + (f" — {bad_name} with a section name that isn't in the data" if bad_name else "")):
+                    st.dataframe(unmatched, use_container_width=True, hide_index=True,
+                                 height=dataframe_height(len(unmatched), max_px=320))
+
+        # -- Map a section code to a lineman -------------------------------------
+        st.divider()
+        sec_hdr("plus", "Map Section Codes To Linemen")
+        if "liaison_form_version" not in st.session_state:
+            st.session_state["liaison_form_version"] = 0
+        lv = st.session_state["liaison_form_version"]
+
+        seen = month_section_counts(l_month)
+        known_locs = sorted(set(active_locs) | set(seen["location"]) | set(df_map_l["location"]))
+        lc1, lc2 = st.columns(2)
+        with lc1:
+            m_loc = st.selectbox("Section", known_locs or ["Unspecified"], key=f"liaison_loc_{lv}")
+        already = set(df_map_l.loc[df_map_l["location"] == m_loc, "section_code"])
+        with lc2:
+            # Typed, not picked from a list: codes are mapped up front, before any
+            # installs exist in them.
+            m_codes_raw = st.text_input("Section codes", key=f"liaison_codes_{lv}_{m_loc}",
+                                        placeholder="07, 12, 26  or  07-12",
+                                        help="Two digits each. Separate with commas or spaces, or give a range like 07-12.")
+        m_codes = parse_section_codes(m_codes_raw)
+        if m_codes:
+            dupes = [c for c in m_codes if c in already]
+            st.markdown(
+                f'<div class="info-box">{len(m_codes)} code(s): {", ".join(m_codes)}'
+                + (f' — {", ".join(dupes)} already mapped in {m_loc} and will be reassigned.' if dupes else '')
+                + '</div>', unsafe_allow_html=True)
+        codes_here = sorted(set(seen.loc[seen["location"] == m_loc, "section_code"]))
+        unmapped_here = [c for c in codes_here if c not in already]
+        if unmapped_here:
+            st.markdown(
+                f'<div class="warn-box">Seen in {m_loc}\'s installs but not mapped yet: '
+                f'<b>{", ".join(unmapped_here)}</b></div>', unsafe_allow_html=True)
+        known_linemen = sorted({x for x in df_map_l["lineman"] if x})
+        lc3, lc4 = st.columns(2)
+        with lc3:
+            pick = st.selectbox("Lineman", ["— new —"] + known_linemen, key=f"liaison_man_pick_{lv}")
+            m_lineman = st.text_input("New lineman name", key=f"liaison_man_{lv}") if pick == "— new —" else pick
+        with lc4:
+            _default_rate = float(df_map_l.loc[df_map_l["lineman"] == pick, "rate"].iloc[0]) if (
+                pick != "— new —" and not df_map_l[df_map_l["lineman"] == pick].empty) else 0.0
+            m_rate = st.number_input("Rate per install (Rs.)", min_value=0.0, step=1.0,
+                                     value=_default_rate, key=f"liaison_rate_{lv}_{pick}")
+        if st.button("➕ Save Mapping", type="primary", use_container_width=True, key="liaison_add"):
+            if not str(m_lineman).strip():
+                st.error("❌ Enter the lineman's name.")
+            elif not m_codes:
+                st.error("❌ Enter at least one section code, e.g. 07, 12 or 07-12.")
+            elif m_rate <= 0:
+                st.error("❌ Enter the rate per install.")
+            else:
+                df_new = df_map_l[LIAISONING_COLS].copy()
+                # Re-mapping a code replaces its row rather than adding a second.
+                df_new = df_new[~((df_new["location"] == m_loc) & (df_new["section_code"].isin(m_codes)))]
+                df_new = pd.concat([df_new, pd.DataFrame([
+                    {"location": m_loc, "section_code": c, "lineman": str(m_lineman).strip(), "rate": m_rate}
+                    for c in m_codes])], ignore_index=True)
+                if safe_update("Liaisoning", df_new):
+                    st.session_state["liaison_form_version"] += 1
+                    st.success(f"✅ {len(m_codes)} section code(s) mapped to {str(m_lineman).strip()} at Rs. {m_rate:,.0f}/install.")
+                    st.rerun()
+
+        # -- Existing mappings ----------------------------------------------------
+        sec_hdr("list", "Current Mappings")
+        if df_map_l.empty or df_map_l["section_code"].eq("").all():
+            st.info("No section codes mapped yet.")
+        else:
+            mv = df_map_l[LIAISONING_COLS].copy()
+            mv.insert(0, "Delete", False)
+            mv = mv.rename(columns={"location": "Section", "section_code": "Section Code",
+                                    "lineman": "Lineman", "rate": "Rate (Rs.)"}).sort_values(["Section", "Section Code"])
+            med = st.data_editor(
+                mv, use_container_width=True, hide_index=True,
+                key=f"liaison_editor_{_sheet_version('Liaisoning')}",
+                disabled=["Section", "Section Code"],
+                column_config={"Rate (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="%.2f")},
+                height=dataframe_height(len(mv)))
+            n_del_l = int(med["Delete"].sum())
+            if st.button(f"💾 Save Changes{f' (deleting {n_del_l})' if n_del_l else ''}", type="primary",
+                         use_container_width=True, key="liaison_save"):
+                keep = med[~med["Delete"]]
+                out = pd.DataFrame({
+                    "location": keep["Section"],
+                    "section_code": keep["Section Code"].apply(normalize_section_code),
+                    "lineman": keep["Lineman"].astype(str).str.strip(),
+                    "rate": pd.to_numeric(keep["Rate (Rs.)"], errors="coerce").fillna(0.0),
+                }, columns=LIAISONING_COLS)
+                if safe_update("Liaisoning", out):
+                    st.success("✅ Mappings updated.")
+                    st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  INSTALLS
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inst:
-    tab_action_bar("inst")
-    # ── Bulk Upload from MDM Excel export ────────────────────────────────────
-    sec_hdr("upload", "Bulk Upload From Excel")
-    st.markdown("""
+    if tab_inst.open:   # only the open tab runs (tabs are created with on_change="rerun")
+        tab_action_bar("inst")
+        # ── Bulk Upload from MDM Excel export ────────────────────────────────────
+        sec_hdr("upload", "Bulk Upload From Excel")
+        st.markdown("""
     <div class="info-box">
     Upload the daily export instead of entering counts manually. Re-uploads won't double-count.
     </div>
     """, unsafe_allow_html=True)
 
-    bulk_file = st.file_uploader("Upload Installation Excel (.xlsx)", type=["xlsx"], key="bulk_install_uploader")
+        bulk_file = st.file_uploader("Upload Installation Excel (.xlsx)", type=["xlsx"], key="bulk_install_uploader")
 
-    if bulk_file is not None:
-        if st.button("📥 Process & Save Installs", type="primary", use_container_width=True):
-            try:
-                ws = load_first_data_sheet(bulk_file)
-            except Exception as e:
-                st.error(f"❌ Could not open the file: {e}")
-                ws = None
+        if bulk_file is not None:
+            if st.button("📥 Process & Save Installs", type="primary", use_container_width=True):
+                try:
+                    ws = load_first_data_sheet(bulk_file)
+                except Exception as e:
+                    st.error(f"❌ Could not open the file: {e}")
+                    ws = None
 
-            if ws is not None:
-                header_row, col_map = find_header_row(ws, INSTALL_BULK_REQUIRED_HEADERS)
-                if header_row is None:
-                    st.error("❌ Could not find 'Installation Date', 'Installation Time', 'Installer LoginID', 'Section' and 'New Meter Type' columns in this file.")
-                else:
-                    detail_optional_map = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
-                    parsed = []
-                    skipped_non_tl = 0
-                    for r in range(header_row + 1, ws.max_row + 1):
-                        raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
-                        if raw_installer is None or str(raw_installer).strip() == "":
-                            continue
-                        if not is_valid_installer_id(raw_installer):
-                            skipped_non_tl += 1
-                            continue
-                        d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
-                        t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
-                        if d is None or t is None:
-                            continue
-                        section = ws.cell(row=r, column=col_map["Section"]).value
-                        mtype = ws.cell(row=r, column=col_map["New Meter Type"]).value
-                        rec = {
-                            "date": d, "time": t,
-                            "installer_id": str(raw_installer).strip(),
-                            "location": str(section).strip() if section else "Unspecified",
-                            "meter_type": str(mtype).strip() if mtype else "",
-                        }
-                        rec.update(extract_detail_fields(ws, r, detail_optional_map))
-                        parsed.append(rec)
-
-                    if not parsed:
-                        st.warning(f"⚠️ No valid {INSTALLER_ID_PREFIX} installer rows with a date and time were found in this file.")
+                if ws is not None:
+                    header_row, col_map = find_header_row(ws, INSTALL_BULK_REQUIRED_HEADERS)
+                    if header_row is None:
+                        st.error("❌ Could not find 'Installation Date', 'Installation Time', 'Installer LoginID', 'Section' and 'New Meter Type' columns in this file.")
                     else:
-                        if skipped_non_tl:
-                            st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
-                        push_parsed_records_to_installations(parsed, source_label="install(s)")
+                        detail_optional_map = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
+                        parsed = []
+                        skipped_non_tl = 0
+                        for r in range(header_row + 1, ws.max_row + 1):
+                            raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
+                            if raw_installer is None or str(raw_installer).strip() == "":
+                                continue
+                            if not is_valid_installer_id(raw_installer):
+                                skipped_non_tl += 1
+                                continue
+                            d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
+                            t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
+                            if d is None or t is None:
+                                continue
+                            section = ws.cell(row=r, column=col_map["Section"]).value
+                            mtype = ws.cell(row=r, column=col_map["New Meter Type"]).value
+                            rec = {
+                                "date": d, "time": t,
+                                "installer_id": str(raw_installer).strip(),
+                                "location": str(section).strip() if section else "Unspecified",
+                                "meter_type": str(mtype).strip() if mtype else "",
+                            }
+                            rec.update(extract_detail_fields(ws, r, detail_optional_map))
+                            parsed.append(rec)
 
-    st.divider()
-    render_meter_search("inst")
+                        if not parsed:
+                            st.warning(f"⚠️ No valid {INSTALLER_ID_PREFIX} installer rows with a date and time were found in this file.")
+                        else:
+                            if skipped_non_tl:
+                                st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
+                            push_parsed_records_to_installations(parsed, source_label="install(s)")
 
-    with st.expander("📤 Upload Legacy/Historical Data"):
-        render_legacy_upload_widget(key_prefix="installs")
+        st.divider()
+        render_meter_search("inst")
 
-    st.divider()
-    sec_hdr("plus", "Daily Entry")
+        with st.expander("📤 Upload Legacy/Historical Data"):
+            render_legacy_upload_widget(key_prefix="installs")
 
-    if not active_techs or not active_locs:
-        st.warning("⚠️ Please add active Technicians and Locations in the **Admin** tab first.")
-    else:
-        if "installs_batch" not in st.session_state:
-            st.session_state["installs_batch"] = []
-        if "qm_version" not in st.session_state:
-            st.session_state["qm_version"] = 0
-        v = st.session_state["qm_version"]
+        st.divider()
+        sec_hdr("plus", "Daily Entry")
 
-        # ── Quick Add: same day, same location, multiple technicians ────────
-        sub_hdr("bolt", "Quick Add — Same Day &amp; Location, Multiple Technicians")
-        qc1, qc2 = st.columns(2)
-        with qc1:
-            qm_date = st.date_input("Date", value=None, key="qm_date")
-        with qc2:
-            qm_loc = st.selectbox("Location", ["-- Select --"] + active_locs, key="qm_loc")
-
-        qm_techs = st.multiselect("Technicians who worked today", active_techs, key=f"qm_techs_{v}")
-
-        qty_map = {}
-        if qm_techs:
-            for t in qm_techs:
-                cc1, cc2, cc3 = st.columns([2, 1, 1])
-                with cc1:
-                    st.markdown(f"**{t}**")
-                with cc2:
-                    q1 = st.number_input("1PH", min_value=0, step=1, value=0, key=f"qm_q1_{v}_{t}", label_visibility="collapsed")
-                with cc3:
-                    q3 = st.number_input("3PH", min_value=0, step=1, value=0, key=f"qm_q3_{v}_{t}", label_visibility="collapsed")
-                qty_map[t] = (q1, q3)
-
-        if st.button("➕ Add These To Batch", type="primary", use_container_width=True, disabled=not qm_techs):
-            if qm_date is None:
-                st.error("❌ Pick a date first.")
-            elif qm_loc == "-- Select --":
-                st.error("❌ Pick a location first.")
-            else:
-                added = 0
-                unmapped_batch = []
-                for t, (q1, q3) in qty_map.items():
-                    if q1 > 0 or q3 > 0:
-                        login_id = name_to_login_id.get(t, "")
-                        if not login_id:
-                            unmapped_batch.append(t)
-                        st.session_state["installs_batch"].append({
-                            "date": str(qm_date), "tech_name": t, "installer_id": login_id, "location": qm_loc,
-                            "qty_1ph": int(q1), "qty_3ph": int(q3),
-                        })
-                        added += 1
-                if added:
-                    st.session_state["qm_version"] += 1
-                    st.success(f"✅ Added {added} entr{'y' if added == 1 else 'ies'} to the batch below.")
-                    if unmapped_batch:
-                        st.warning(f"⚠️ No Login ID on file for: {', '.join(sorted(set(unmapped_batch)))} — add one in Admin so future duplicate checks can match uploads to this technician.")
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Enter at least one quantity for a selected technician.")
-
-        # ── Single one-off entry (different date/location than the above) ───
-        with st.expander("➕ Add a single one-off entry (different date or location)"):
-            sc1, sc2 = st.columns(2)
-            with sc1:
-                single_date = st.date_input("Date", value=None, key=f"single_date_{v}")
-            with sc2:
-                single_tech = st.selectbox("Technician", ["-- Select --"] + active_techs, key=f"single_tech_{v}")
-            single_loc = st.selectbox("Location", ["-- Select --"] + active_locs, key=f"single_loc_{v}")
-            sc3, sc4 = st.columns(2)
-            with sc3:
-                single_q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=0, key=f"single_q1_{v}")
-            with sc4:
-                single_q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=0, key=f"single_q3_{v}")
-            if st.button("➕ Add This Entry To Batch", use_container_width=True):
-                if single_date is None or single_tech == "-- Select --" or single_loc == "-- Select --":
-                    st.error("❌ Fill date, technician and location.")
-                elif single_q1 == 0 and single_q3 == 0:
-                    st.error("❌ Enter at least one quantity.")
-                else:
-                    single_login_id = name_to_login_id.get(single_tech, "")
-                    st.session_state["installs_batch"].append({
-                        "date": str(single_date), "tech_name": single_tech, "installer_id": single_login_id, "location": single_loc,
-                        "qty_1ph": int(single_q1), "qty_3ph": int(single_q3),
-                    })
-                    st.session_state["qm_version"] += 1
-                    st.success("✅ Added to batch below.")
-                    if not single_login_id:
-                        st.warning(f"⚠️ No Login ID on file for {single_tech} — add one in Admin so future duplicate checks can match uploads to this technician.")
-                    st.rerun()
-
-        # ── Batch preview cards + Save All ───────────────────────────────────
-        sub_hdr("receipt", "Batch Ready To Save")
-        batch = st.session_state["installs_batch"]
-        if not batch:
-            st.info("No entries yet — add some above.")
+        if not active_techs or not active_locs:
+            st.warning("⚠️ Please add active Technicians and Locations in the **Admin** tab first.")
         else:
-            for i, entry in enumerate(batch):
-                card_col, del_col = st.columns([5, 1])
-                with card_col:
-                    st.markdown(f"""
+            if "installs_batch" not in st.session_state:
+                st.session_state["installs_batch"] = []
+            if "qm_version" not in st.session_state:
+                st.session_state["qm_version"] = 0
+            v = st.session_state["qm_version"]
+
+            # ── Quick Add: same day, same location, multiple technicians ────────
+            sub_hdr("bolt", "Quick Add — Same Day &amp; Location, Multiple Technicians")
+            qc1, qc2 = st.columns(2)
+            with qc1:
+                qm_date = st.date_input("Date", value=None, key="qm_date")
+            with qc2:
+                qm_loc = st.selectbox("Location", ["-- Select --"] + active_locs, key="qm_loc")
+
+            qm_techs = st.multiselect("Technicians who worked today", active_techs, key=f"qm_techs_{v}")
+
+            qty_map = {}
+            if qm_techs:
+                for t in qm_techs:
+                    cc1, cc2, cc3 = st.columns([2, 1, 1])
+                    with cc1:
+                        st.markdown(f"**{t}**")
+                    with cc2:
+                        q1 = st.number_input("1PH", min_value=0, step=1, value=0, key=f"qm_q1_{v}_{t}", label_visibility="collapsed")
+                    with cc3:
+                        q3 = st.number_input("3PH", min_value=0, step=1, value=0, key=f"qm_q3_{v}_{t}", label_visibility="collapsed")
+                    qty_map[t] = (q1, q3)
+
+            if st.button("➕ Add These To Batch", type="primary", use_container_width=True, disabled=not qm_techs):
+                if qm_date is None:
+                    st.error("❌ Pick a date first.")
+                elif qm_loc == "-- Select --":
+                    st.error("❌ Pick a location first.")
+                else:
+                    added = 0
+                    unmapped_batch = []
+                    for t, (q1, q3) in qty_map.items():
+                        if q1 > 0 or q3 > 0:
+                            login_id = name_to_login_id.get(t, "")
+                            if not login_id:
+                                unmapped_batch.append(t)
+                            st.session_state["installs_batch"].append({
+                                "date": str(qm_date), "tech_name": t, "installer_id": login_id, "location": qm_loc,
+                                "qty_1ph": int(q1), "qty_3ph": int(q3),
+                            })
+                            added += 1
+                    if added:
+                        st.session_state["qm_version"] += 1
+                        st.success(f"✅ Added {added} entr{'y' if added == 1 else 'ies'} to the batch below.")
+                        if unmapped_batch:
+                            st.warning(f"⚠️ No Login ID on file for: {', '.join(sorted(set(unmapped_batch)))} — add one in Admin so future duplicate checks can match uploads to this technician.")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Enter at least one quantity for a selected technician.")
+
+            # ── Single one-off entry (different date/location than the above) ───
+            with st.expander("➕ Add a single one-off entry (different date or location)"):
+                sc1, sc2 = st.columns(2)
+                with sc1:
+                    single_date = st.date_input("Date", value=None, key=f"single_date_{v}")
+                with sc2:
+                    single_tech = st.selectbox("Technician", ["-- Select --"] + active_techs, key=f"single_tech_{v}")
+                single_loc = st.selectbox("Location", ["-- Select --"] + active_locs, key=f"single_loc_{v}")
+                sc3, sc4 = st.columns(2)
+                with sc3:
+                    single_q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=0, key=f"single_q1_{v}")
+                with sc4:
+                    single_q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=0, key=f"single_q3_{v}")
+                if st.button("➕ Add This Entry To Batch", use_container_width=True):
+                    if single_date is None or single_tech == "-- Select --" or single_loc == "-- Select --":
+                        st.error("❌ Fill date, technician and location.")
+                    elif single_q1 == 0 and single_q3 == 0:
+                        st.error("❌ Enter at least one quantity.")
+                    else:
+                        single_login_id = name_to_login_id.get(single_tech, "")
+                        st.session_state["installs_batch"].append({
+                            "date": str(single_date), "tech_name": single_tech, "installer_id": single_login_id, "location": single_loc,
+                            "qty_1ph": int(single_q1), "qty_3ph": int(single_q3),
+                        })
+                        st.session_state["qm_version"] += 1
+                        st.success("✅ Added to batch below.")
+                        if not single_login_id:
+                            st.warning(f"⚠️ No Login ID on file for {single_tech} — add one in Admin so future duplicate checks can match uploads to this technician.")
+                        st.rerun()
+
+            # ── Batch preview cards + Save All ───────────────────────────────────
+            sub_hdr("receipt", "Batch Ready To Save")
+            batch = st.session_state["installs_batch"]
+            if not batch:
+                st.info("No entries yet — add some above.")
+            else:
+                for i, entry in enumerate(batch):
+                    card_col, del_col = st.columns([5, 1])
+                    with card_col:
+                        st.markdown(f"""
                     <div class="item-card">
                         <b>{entry['tech_name']}</b> — {entry['location']}<br/>
                         <span style="color:var(--ink-600);font-size:.85rem;">
@@ -7574,323 +7760,336 @@ with tab_inst:
                         </span>
                     </div>
                     """, unsafe_allow_html=True)
-                with del_col:
-                    if st.button("🗑️", key=f"del_installs_batch_{i}"):
-                        st.session_state["installs_batch"].pop(i)
-                        st.rerun()
+                    with del_col:
+                        if st.button("🗑️", key=f"del_installs_batch_{i}"):
+                            st.session_state["installs_batch"].pop(i)
+                            st.rerun()
 
-            bcol1, bcol2 = st.columns(2)
-            with bcol1:
-                clear_batch = st.button("🗑️ Clear Batch", use_container_width=True)
-            with bcol2:
-                save_all = st.button(f"💾 Save All ({len(batch)}) To Sheet", type="primary", use_container_width=True)
+                bcol1, bcol2 = st.columns(2)
+                with bcol1:
+                    clear_batch = st.button("🗑️ Clear Batch", use_container_width=True)
+                with bcol2:
+                    save_all = st.button(f"💾 Save All ({len(batch)}) To Sheet", type="primary", use_container_width=True)
 
-            if clear_batch:
-                st.session_state["installs_batch"] = []
-                st.rerun()
-
-            if save_all:
-                df_existing = get_data("Installations")
-                df_log_check = get_data("UploadedInstallLog")
-                log_has_cols = not df_log_check.empty and has_col(df_log_check, "date", "tech_name", "location")
-                new_rows, skipped, upload_overlap_warnings = [], [], []
-                for entry in batch:
-                    dup = False
-                    if not df_existing.empty and has_col(df_existing, "date", "tech_name"):
-                        dup = not df_existing[(df_existing["date"] == entry["date"]) & (df_existing["tech_name"] == entry["tech_name"])].empty
-                    if dup:
-                        skipped.append(f"{entry['tech_name']} ({entry['date']})")
-                    else:
-                        new_rows.append({
-                            "date": entry["date"], "tech_name": entry["tech_name"],
-                            "installer_id": entry.get("installer_id", ""), "location": entry["location"],
-                            "qty_1ph": str(entry["qty_1ph"]), "qty_3ph": str(entry["qty_3ph"]),
-                        })
-                        # Reverse of the upload-side check: warn if this exact
-                        # date/tech/location already has upload history, since
-                        # this manual entry might be re-logging the same installs.
-                        if log_has_cols:
-                            overlap_mask = (
-                                (df_log_check["date"] == entry["date"]) &
-                                (df_log_check["tech_name"] == entry["tech_name"]) &
-                                (df_log_check["location"] == entry["location"])
-                            )
-                            if overlap_mask.any():
-                                upload_overlap_warnings.append(f"{entry['tech_name']} on {entry['date']} at {entry['location']} ({int(overlap_mask.sum())} upload record(s) already exist)")
-
-                if new_rows:
-                    updated = pd.concat([df_existing, pd.DataFrame(new_rows)], ignore_index=True) if not df_existing.empty else pd.DataFrame(new_rows)
-                    if safe_update("Installations", updated):
-                        st.success(f"✅ Saved {len(new_rows)} entr{'y' if len(new_rows) == 1 else 'ies'}.")
-                        if skipped:
-                            st.warning(f"⚠️ Skipped (already exists for that tech/date): {', '.join(skipped)}")
-                        if upload_overlap_warnings:
-                            st.warning("⚠️ Possible double-count: these already have upload-recorded installs for the same date/tech/location — verify this manual entry isn't re-logging them: " + "; ".join(upload_overlap_warnings))
-                        st.session_state["installs_batch"] = []
-                        st.rerun()
-                else:
-                    st.error(f"❌ All entries were duplicates (already exist for that tech/date): {', '.join(skipped)}")
-
-    sec_hdr("list", "Installation Log")
-    log_data = get_data("Installations")
-
-    if log_data.empty:
-        st.info("No installation entries yet.")
-    else:
-        log_sorted = log_data.iloc[::-1].reset_index(drop=True)
-        ITEMS = 10
-        total_pages = max(1, math.ceil(len(log_sorted) / ITEMS))
-        page = st.number_input(f"Page (1 – {total_pages})", min_value=1, max_value=total_pages, step=1, value=1)
-        s, e = (page - 1) * ITEMS, page * ITEMS
-        disp_log = log_sorted.iloc[s:e].copy()
-        if has_col(disp_log, "qty_1ph", "qty_3ph"):
-            disp_log["qty_1ph"] = disp_log["qty_1ph"].apply(lambda x: safe_int(x))
-            disp_log["qty_3ph"] = disp_log["qty_3ph"].apply(lambda x: safe_int(x))
-            disp_log["Total"] = disp_log["qty_1ph"] + disp_log["qty_3ph"]
-        st.dataframe(disp_log, use_container_width=True, hide_index=True)
-
-        log_options_map = {}
-        for idx, row in log_sorted.iterrows():
-            label = f"#{idx+1}  {row['date']} | {row['tech_name']}"
-            log_options_map[label] = idx
-
-        target_label = st.selectbox("Select Record", ["-- Select --"] + list(log_options_map.keys()), key="inst_sel")
-
-        if target_label != "-- Select --":
-            sel_idx = log_options_map[target_label]
-            curr_row = log_sorted.iloc[sel_idx]
-            curr_q1 = safe_int(curr_row.get("qty_1ph", 0))
-            curr_q3 = safe_int(curr_row.get("qty_3ph", 0))
-            curr_loc = curr_row.get("location", "")
-            loc_idx = active_locs.index(curr_loc) if curr_loc in active_locs and active_locs else 0
-
-            st.markdown(f'<div class="warn-box">⚠️ Modifying: <b>{curr_row["tech_name"]}</b> on <b>{curr_row["date"]}</b></div>', unsafe_allow_html=True)
-            with st.form("edit_log_form"):
-                e_loc = st.selectbox("Location", active_locs, index=loc_idx) if active_locs else st.text_input("Location", value=curr_loc)
-                ec1, ec2 = st.columns(2)
-                with ec1:
-                    e_q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=curr_q1)
-                with ec2:
-                    e_q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=curr_q3)
-                btn_update, btn_delete = st.columns(2)
-                with btn_update:
-                    do_update = st.form_submit_button("✏️ Update", type="primary")
-                with btn_delete:
-                    do_delete = st.form_submit_button("🗑️ Delete")
-
-            if do_update:
-                if e_q1 == 0 and e_q3 == 0:
-                    st.error("❌ Both quantities cannot be 0.")
-                else:
-                    mask = ((log_data["date"] == curr_row["date"]) & (log_data["tech_name"] == curr_row["tech_name"]))
-                    log_data.loc[mask, ["location", "qty_1ph", "qty_3ph"]] = [str(e_loc), str(e_q1), str(e_q3)]
-                    if safe_update("Installations", log_data):
-                        st.success("✅ Entry updated.")
-                        st.rerun()
-
-            if do_delete:
-                st.session_state["pending_inst_del"] = curr_row["date"] + "||" + curr_row["tech_name"]
-
-        if "pending_inst_del" in st.session_state:
-            del_date, del_tech = st.session_state["pending_inst_del"].split("||", 1)
-            st.markdown(f'<div class="warn-box">⚠️ Confirm delete for <b>{del_tech}</b> on <b>{del_date}</b>?</div>', unsafe_allow_html=True)
-            cy, cn = st.columns(2)
-            with cy:
-                if st.button("✅ Yes, Delete", key="conf_del_inst"):
-                    mask = ((log_data["date"] == del_date) & (log_data["tech_name"] == del_tech))
-                    log_data = log_data[~mask]
-                    if safe_update("Installations", log_data):
-                        del st.session_state["pending_inst_del"]
-                        st.success("Deleted.")
-                        st.rerun()
-            with cn:
-                if st.button("❌ Cancel", key="cancel_del_inst"):
-                    del st.session_state["pending_inst_del"]
+                if clear_batch:
+                    st.session_state["installs_batch"] = []
                     st.rerun()
+
+                if save_all:
+                    df_existing = get_data("Installations")
+                    df_log_check = get_data("UploadedInstallLog")
+                    log_has_cols = not df_log_check.empty and has_col(df_log_check, "date", "tech_name", "location")
+                    new_rows, skipped, upload_overlap_warnings = [], [], []
+                    for entry in batch:
+                        dup = False
+                        if not df_existing.empty and has_col(df_existing, "date", "tech_name"):
+                            dup = not df_existing[(df_existing["date"] == entry["date"]) & (df_existing["tech_name"] == entry["tech_name"])].empty
+                        if dup:
+                            skipped.append(f"{entry['tech_name']} ({entry['date']})")
+                        else:
+                            new_rows.append({
+                                "date": entry["date"], "tech_name": entry["tech_name"],
+                                "installer_id": entry.get("installer_id", ""), "location": entry["location"],
+                                "qty_1ph": str(entry["qty_1ph"]), "qty_3ph": str(entry["qty_3ph"]),
+                            })
+                            # Reverse of the upload-side check: warn if this exact
+                            # date/tech/location already has upload history, since
+                            # this manual entry might be re-logging the same installs.
+                            if log_has_cols:
+                                overlap_mask = (
+                                    (df_log_check["date"] == entry["date"]) &
+                                    (df_log_check["tech_name"] == entry["tech_name"]) &
+                                    (df_log_check["location"] == entry["location"])
+                                )
+                                if overlap_mask.any():
+                                    upload_overlap_warnings.append(f"{entry['tech_name']} on {entry['date']} at {entry['location']} ({int(overlap_mask.sum())} upload record(s) already exist)")
+
+                    if new_rows:
+                        updated = pd.concat([df_existing, pd.DataFrame(new_rows)], ignore_index=True) if not df_existing.empty else pd.DataFrame(new_rows)
+                        if safe_update("Installations", updated):
+                            st.success(f"✅ Saved {len(new_rows)} entr{'y' if len(new_rows) == 1 else 'ies'}.")
+                            if skipped:
+                                st.warning(f"⚠️ Skipped (already exists for that tech/date): {', '.join(skipped)}")
+                            if upload_overlap_warnings:
+                                st.warning("⚠️ Possible double-count: these already have upload-recorded installs for the same date/tech/location — verify this manual entry isn't re-logging them: " + "; ".join(upload_overlap_warnings))
+                            st.session_state["installs_batch"] = []
+                            st.rerun()
+                    else:
+                        st.error(f"❌ All entries were duplicates (already exist for that tech/date): {', '.join(skipped)}")
+
+        sec_hdr("list", "Installation Log")
+        log_data = get_data("Installations")
+
+        if log_data.empty:
+            st.info("No installation entries yet.")
+        else:
+            log_sorted = log_data.iloc[::-1].reset_index(drop=True)
+            ITEMS = 10
+            total_pages = max(1, math.ceil(len(log_sorted) / ITEMS))
+            page = st.number_input(f"Page (1 – {total_pages})", min_value=1, max_value=total_pages, step=1, value=1)
+            s, e = (page - 1) * ITEMS, page * ITEMS
+            disp_log = log_sorted.iloc[s:e].copy()
+            if has_col(disp_log, "qty_1ph", "qty_3ph"):
+                disp_log["qty_1ph"] = disp_log["qty_1ph"].apply(lambda x: safe_int(x))
+                disp_log["qty_3ph"] = disp_log["qty_3ph"].apply(lambda x: safe_int(x))
+                disp_log["Total"] = disp_log["qty_1ph"] + disp_log["qty_3ph"]
+            st.dataframe(disp_log, use_container_width=True, hide_index=True)
+
+            # Search, then pick: the list used to hold every record ever
+            # entered, rebuilt on each click.
+            _lq = st.text_input("Find a record by date or technician", key="inst_find",
+                                placeholder="e.g. 2026-10-03 or a technician's name").strip().lower()
+            _lc = log_sorted
+            if _lq:
+                _lc = log_sorted[log_sorted["date"].astype(str).str.lower().str.contains(_lq, regex=False)
+                                 | log_sorted["tech_name"].astype(str).str.lower().str.contains(_lq, regex=False)]
+            if len(_lc) > LOG_PICKER_LIMIT:
+                st.caption(f"{len(_lc):,} records{' match' if _lq else ''}; the latest {LOG_PICKER_LIMIT} are listed. "
+                           "Search to narrow.")
+            _lc = _lc.head(LOG_PICKER_LIMIT)
+            log_options_map = {}
+            for idx, row in _lc.iterrows():
+                label = f"#{idx+1}  {row['date']} | {row['tech_name']}"
+                log_options_map[label] = idx
+
+            target_label = st.selectbox("Select Record", ["-- Select --"] + list(log_options_map.keys()), key="inst_sel")
+
+            if target_label != "-- Select --":
+                sel_idx = log_options_map[target_label]
+                curr_row = log_sorted.iloc[sel_idx]
+                curr_q1 = safe_int(curr_row.get("qty_1ph", 0))
+                curr_q3 = safe_int(curr_row.get("qty_3ph", 0))
+                curr_loc = curr_row.get("location", "")
+                loc_idx = active_locs.index(curr_loc) if curr_loc in active_locs and active_locs else 0
+
+                st.markdown(f'<div class="warn-box">⚠️ Modifying: <b>{curr_row["tech_name"]}</b> on <b>{curr_row["date"]}</b></div>', unsafe_allow_html=True)
+                with st.form("edit_log_form"):
+                    e_loc = st.selectbox("Location", active_locs, index=loc_idx) if active_locs else st.text_input("Location", value=curr_loc)
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        e_q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=curr_q1)
+                    with ec2:
+                        e_q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=curr_q3)
+                    btn_update, btn_delete = st.columns(2)
+                    with btn_update:
+                        do_update = st.form_submit_button("✏️ Update", type="primary")
+                    with btn_delete:
+                        do_delete = st.form_submit_button("🗑️ Delete")
+
+                if do_update:
+                    if e_q1 == 0 and e_q3 == 0:
+                        st.error("❌ Both quantities cannot be 0.")
+                    else:
+                        mask = ((log_data["date"] == curr_row["date"]) & (log_data["tech_name"] == curr_row["tech_name"]))
+                        log_data.loc[mask, ["location", "qty_1ph", "qty_3ph"]] = [str(e_loc), str(e_q1), str(e_q3)]
+                        if safe_update("Installations", log_data):
+                            st.success("✅ Entry updated.")
+                            st.rerun()
+
+                if do_delete:
+                    st.session_state["pending_inst_del"] = curr_row["date"] + "||" + curr_row["tech_name"]
+
+            if "pending_inst_del" in st.session_state:
+                del_date, del_tech = st.session_state["pending_inst_del"].split("||", 1)
+                st.markdown(f'<div class="warn-box">⚠️ Confirm delete for <b>{del_tech}</b> on <b>{del_date}</b>?</div>', unsafe_allow_html=True)
+                cy, cn = st.columns(2)
+                with cy:
+                    if st.button("✅ Yes, Delete", key="conf_del_inst"):
+                        mask = ((log_data["date"] == del_date) & (log_data["tech_name"] == del_tech))
+                        log_data = log_data[~mask]
+                        if safe_update("Installations", log_data):
+                            del st.session_state["pending_inst_del"]
+                            st.success("Deleted.")
+                            st.rerun()
+                with cn:
+                    if st.button("❌ Cancel", key="cancel_del_inst"):
+                        del st.session_state["pending_inst_del"]
+                        st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  INVENTORY (STORE)
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_inv:
-    tab_action_bar("inv")
-    sec_hdr("download", "Inward Store Material")
-    with st.form("inv_form", clear_on_submit=True):
-        iv1, iv2 = st.columns(2)
-        with iv1:
-            idate = st.date_input("Received Date", today_ist())
-            itype = st.selectbox("Type", METER_TYPES)
-            iloc = st.selectbox("Location", (active_locs or ["Unspecified"]),
-                                help="Which location this stock is held at.")
-        with iv2:
-            iqty = st.number_input("Quantity", min_value=1, step=1, value=1)
-            imrn = st.text_input("MRN No.")
-            imake = st.selectbox("Make", ["Schneider", "Genus", "Other"])
-        iv_sub = st.form_submit_button("📥 Save Stock", type="primary")
+    if tab_inv.open:   # only the open tab runs (tabs are created with on_change="rerun")
+        tab_action_bar("inv")
+        sec_hdr("download", "Inward Store Material")
+        with st.form("inv_form", clear_on_submit=True):
+            iv1, iv2 = st.columns(2)
+            with iv1:
+                idate = st.date_input("Received Date", today_ist())
+                itype = st.selectbox("Type", METER_TYPES)
+                iloc = st.selectbox("Location", (active_locs or ["Unspecified"]),
+                                    help="Which location this stock is held at.")
+            with iv2:
+                iqty = st.number_input("Quantity", min_value=1, step=1, value=1)
+                imrn = st.text_input("MRN No.")
+                imake = st.selectbox("Make", ["Schneider", "Genus", "Other"])
+            iv_sub = st.form_submit_button("📥 Save Stock", type="primary")
 
-    if iv_sub:
-        if not imrn.strip():
-            st.error("❌ MRN No. is required.")
-        else:
-            df_inv_exist = get_data("Inventory")
-            new_inv = pd.DataFrame([{"date": str(idate), "type": str(itype), "qty": str(iqty),
-                                     "mrn": imrn.strip(), "make": str(imake), "location": str(iloc)}])
-            updated_inv = pd.concat([df_inv_exist, new_inv], ignore_index=True) if not df_inv_exist.empty else new_inv
-            if safe_update("Inventory", updated_inv):
-                st.success(f"✅ Inwarded {iqty} × {itype} ({imake}) — MRN {imrn.strip()}")
-                st.rerun()
-
-    # ── Return ageing material to store ───────────────────────────────────
-    st.divider()
-    sec_hdr("upload", "Return Material To Store")
-    st.markdown('<div class="info-box">Material lying in the field that is going back to the store. '
-                'It comes off pending stock — it is neither installed nor still held.</div>',
-                unsafe_allow_html=True)
-    with st.form("return_form", clear_on_submit=True):
-        rv1, rv2 = st.columns(2)
-        with rv1:
-            rdate = st.date_input("Return Date", today_ist(), key="ret_date")
-            rtype = st.selectbox("Type", METER_TYPES, key="ret_type")
-            # "Unspecified" returns against stock received before locations
-            # were recorded, which otherwise has no way back out.
-            rloc = st.selectbox("Returned from location", list(active_locs) + ["Unspecified"], key="ret_loc")
-        with rv2:
-            rqty = st.number_input("Quantity", min_value=1, step=1, value=1, key="ret_qty")
-            rdc = st.text_input("DC / Gate Pass No. (optional)", key="ret_dc")
-            rremarks = st.text_input("Remarks (optional)", key="ret_remarks",
-                                     placeholder="e.g. ageing stock, damaged")
-        ret_sub = st.form_submit_button("↩️ Save Return", type="primary")
-
-    if ret_sub:
-        _avail = next((int(r["Pending"]) for _, r in stock_by_location().iterrows()
-                       if r["Location"] == rloc and r["Type"] == rtype), 0)
-        if _avail > 0 and rqty > _avail:
-            st.error(f"❌ Only {_avail:,} × {rtype} pending at {rloc} — can't return {int(rqty):,}.")
-        else:
-            if _avail <= 0:
-                # Pending already at or below zero means stock was received
-                # without a location, or installs outrun receipts. That is a
-                # separate problem; don't block a genuine return over it.
-                st.warning(f"⚠️ {rloc} shows {_avail:,} × {rtype} pending — check the inward entries. Return saved anyway.")
-            df_ret_exist = load_returns()
-            new_ret = pd.DataFrame([{"date": str(rdate), "type": str(rtype), "qty": str(int(rqty)),
-                                     "location": str(rloc), "dc_no": rdc.strip(), "remarks": rremarks.strip()}])
-            if append_rows("Returns", new_ret.to_dict("records"), RETURN_COLS) or \
-               safe_update("Returns", pd.concat([df_ret_exist[RETURN_COLS], new_ret], ignore_index=True)):
-                st.success(f"✅ Returned {int(rqty):,} × {rtype} from {rloc}"
-                           + (f" — DC {rdc.strip()}." if rdc.strip() else "."))
-                st.rerun()
-
-    st.divider()
-    sec_hdr("chart", "Live Stock Summary")
-    df_inv_t = get_data("Inventory")   # used by the Inventory Log further down
-    _ss = stock_summary()
-    render_stat_tiles([
-        ("bolt", f"{_ss['1 PH']['received']:,}", "Recv", "1PH", "normal"),
-        ("bolt", f"{_ss['3 PH']['received']:,}", "Recv", "3PH", "normal"),
-        ("upload", f"{_ss['1 PH']['returned'] + _ss['3 PH']['returned']:,}", "Returned", "to store", "normal"),
-        ("box", f"{_ss['1 PH']['pending'] + _ss['3 PH']['pending']:,}", "Pending", "stock", "normal"),
-    ])
-    stock_tbl = pd.DataFrame([
-        {"Type": t, "Received": v["received"], "Installed": v["installed"],
-         "Returned": v["returned"], "Pending": v["pending"]} for t, v in _ss.items()])
-    st.dataframe(stock_tbl, use_container_width=True, hide_index=True, height=dataframe_height(len(stock_tbl)))
-
-    sub_hdr("pin", "Stock By Location")
-    by_loc = stock_by_location()
-    if by_loc.empty:
-        st.info("No stock recorded yet.")
-    else:
-        st.dataframe(by_loc, use_container_width=True, hide_index=True,
-                     height=dataframe_height(len(by_loc), max_px=420))
-        if (by_loc["Location"] == "Unspecified").any():
-            st.markdown('<div class="warn-box">Stock received before locations were recorded shows as '
-                        '<b>Unspecified</b>. New inward entries carry their location.</div>',
-                        unsafe_allow_html=True)
-
-    _ret_log = load_returns()
-    if not _ret_log.empty:
-        with st.expander(f"Returns log ({len(_ret_log)})"):
-            st.dataframe(_ret_log.rename(columns={
-                "date": "Date", "type": "Type", "qty": "Qty", "location": "Location",
-                "dc_no": "DC No.", "remarks": "Remarks"}).iloc[::-1],
-                use_container_width=True, hide_index=True, height=dataframe_height(len(_ret_log), max_px=360))
-
-    sec_hdr("list", "Inventory Log")
-    if df_inv_t.empty:
-        st.info("No inventory entries yet.")
-    else:
-        inv_sorted = df_inv_t.iloc[::-1].reset_index(drop=True)
-        inv_exp = inv_sorted.rename(columns={"date": "Date", "type": "Type", "qty": "Qty", "mrn": "MRN No", "make": "Make"})
-        st.download_button("⬇ Export Inventory CSV", inv_exp.to_csv(index=False).encode(), "inventory.csv", "text/csv", use_container_width=True, on_click="ignore")
-
-        ITEMS_INV = 10
-        total_inv_p = max(1, math.ceil(len(inv_sorted) / ITEMS_INV))
-        inv_page = st.number_input(f"Page (1–{total_inv_p})", min_value=1, max_value=total_inv_p, step=1, value=1, key="inv_page")
-        si, ei = (inv_page - 1) * ITEMS_INV, inv_page * ITEMS_INV
-        st.dataframe(inv_sorted.iloc[si:ei], use_container_width=True, hide_index=True)
-
-        inv_options_map = {}
-        for idx, row in inv_sorted.iterrows():
-            label = f"#{idx+1}  {row.get('date','')} | {row.get('type','')} | MRN:{row.get('mrn','')}"
-            inv_options_map[label] = idx
-
-        inv_target = st.selectbox("Select Inventory Record", ["-- Select --"] + list(inv_options_map.keys()), key="inv_sel")
-
-        if inv_target != "-- Select --":
-            inv_idx = inv_options_map[inv_target]
-            inv_row = inv_sorted.iloc[inv_idx]
-
-            st.markdown(f'<div class="warn-box">⚠️ Modifying: MRN <b>{inv_row.get("mrn","")}</b> — {inv_row.get("type","")} ({inv_row.get("make","")})</div>', unsafe_allow_html=True)
-            with st.form("edit_inv_form"):
-                ei1, ei2, ei3 = st.columns(3)
-                with ei1:
-                    e_qty = st.number_input("Quantity", min_value=1, step=1, value=safe_int(inv_row.get("qty", 1), 1))
-                with ei2:
-                    e_mrn = st.text_input("MRN No.", value=str(inv_row.get("mrn", "")))
-                with ei3:
-                    make_opts = ["Schneider", "Genus", "Other"]
-                    curr_make = inv_row.get("make", "Schneider")
-                    mk_idx = make_opts.index(curr_make) if curr_make in make_opts else 0
-                    e_make = st.selectbox("Make", make_opts, index=mk_idx)
-                ib1, ib2 = st.columns(2)
-                with ib1:
-                    inv_do_update = st.form_submit_button("✏️ Update", type="primary")
-                with ib2:
-                    inv_do_delete = st.form_submit_button("🗑️ Delete")
-
-            if inv_do_update:
-                if not e_mrn.strip():
-                    st.error("❌ MRN No. cannot be empty.")
-                else:
-                    orig_df = df_inv_t.copy()
-                    orig_inv_idx = len(orig_df) - 1 - inv_idx
-                    orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("qty")] = str(e_qty)
-                    orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("mrn")] = e_mrn.strip()
-                    orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("make")] = e_make
-                    if safe_update("Inventory", orig_df):
-                        st.success("✅ Inventory entry updated.")
-                        st.rerun()
-
-            if inv_do_delete:
-                st.session_state["pending_inv_del"] = inv_idx
-
-        if "pending_inv_del" in st.session_state:
-            del_inv_idx = st.session_state["pending_inv_del"]
-            st.markdown('<div class="warn-box">⚠️ Confirm delete? This will affect stock totals.</div>', unsafe_allow_html=True)
-            iy, inv_n = st.columns(2)
-            with iy:
-                if st.button("✅ Yes, Delete", key="conf_del_inv"):
-                    orig_df = df_inv_t.copy()
-                    orig_inv_ri = len(orig_df) - 1 - del_inv_idx
-                    orig_df = orig_df.drop(index=orig_inv_ri).reset_index(drop=True)
-                    if safe_update("Inventory", orig_df):
-                        del st.session_state["pending_inv_del"]
-                        st.success("Deleted.")
-                        st.rerun()
-            with inv_n:
-                if st.button("❌ Cancel", key="cancel_del_inv"):
-                    del st.session_state["pending_inv_del"]
+        if iv_sub:
+            if not imrn.strip():
+                st.error("❌ MRN No. is required.")
+            else:
+                df_inv_exist = get_data("Inventory")
+                new_inv = pd.DataFrame([{"date": str(idate), "type": str(itype), "qty": str(iqty),
+                                         "mrn": imrn.strip(), "make": str(imake), "location": str(iloc)}])
+                updated_inv = pd.concat([df_inv_exist, new_inv], ignore_index=True) if not df_inv_exist.empty else new_inv
+                if safe_update("Inventory", updated_inv):
+                    st.success(f"✅ Inwarded {iqty} × {itype} ({imake}) — MRN {imrn.strip()}")
                     st.rerun()
+
+        # ── Return ageing material to store ───────────────────────────────────
+        st.divider()
+        sec_hdr("upload", "Return Material To Store")
+        st.markdown('<div class="info-box">Material lying in the field that is going back to the store. '
+                    'It comes off pending stock — it is neither installed nor still held.</div>',
+                    unsafe_allow_html=True)
+        with st.form("return_form", clear_on_submit=True):
+            rv1, rv2 = st.columns(2)
+            with rv1:
+                rdate = st.date_input("Return Date", today_ist(), key="ret_date")
+                rtype = st.selectbox("Type", METER_TYPES, key="ret_type")
+                # "Unspecified" returns against stock received before locations
+                # were recorded, which otherwise has no way back out.
+                rloc = st.selectbox("Returned from location", list(active_locs) + ["Unspecified"], key="ret_loc")
+            with rv2:
+                rqty = st.number_input("Quantity", min_value=1, step=1, value=1, key="ret_qty")
+                rdc = st.text_input("DC / Gate Pass No. (optional)", key="ret_dc")
+                rremarks = st.text_input("Remarks (optional)", key="ret_remarks",
+                                         placeholder="e.g. ageing stock, damaged")
+            ret_sub = st.form_submit_button("↩️ Save Return", type="primary")
+
+        if ret_sub:
+            _avail = next((int(r["Pending"]) for _, r in stock_by_location().iterrows()
+                           if r["Location"] == rloc and r["Type"] == rtype), 0)
+            if _avail > 0 and rqty > _avail:
+                st.error(f"❌ Only {_avail:,} × {rtype} pending at {rloc} — can't return {int(rqty):,}.")
+            else:
+                if _avail <= 0:
+                    # Pending already at or below zero means stock was received
+                    # without a location, or installs outrun receipts. That is a
+                    # separate problem; don't block a genuine return over it.
+                    st.warning(f"⚠️ {rloc} shows {_avail:,} × {rtype} pending — check the inward entries. Return saved anyway.")
+                df_ret_exist = load_returns()
+                new_ret = pd.DataFrame([{"date": str(rdate), "type": str(rtype), "qty": str(int(rqty)),
+                                         "location": str(rloc), "dc_no": rdc.strip(), "remarks": rremarks.strip()}])
+                if append_rows("Returns", new_ret.to_dict("records"), RETURN_COLS) or \
+                   safe_update("Returns", pd.concat([df_ret_exist[RETURN_COLS], new_ret], ignore_index=True)):
+                    st.success(f"✅ Returned {int(rqty):,} × {rtype} from {rloc}"
+                               + (f" — DC {rdc.strip()}." if rdc.strip() else "."))
+                    st.rerun()
+
+        st.divider()
+        sec_hdr("chart", "Live Stock Summary")
+        df_inv_t = get_data("Inventory")   # used by the Inventory Log further down
+        _ss = stock_summary()
+        render_stat_tiles([
+            ("bolt", f"{_ss['1 PH']['received']:,}", "Recv", "1PH", "normal"),
+            ("bolt", f"{_ss['3 PH']['received']:,}", "Recv", "3PH", "normal"),
+            ("upload", f"{_ss['1 PH']['returned'] + _ss['3 PH']['returned']:,}", "Returned", "to store", "normal"),
+            ("box", f"{_ss['1 PH']['pending'] + _ss['3 PH']['pending']:,}", "Pending", "stock", "normal"),
+        ])
+        stock_tbl = pd.DataFrame([
+            {"Type": t, "Received": v["received"], "Installed": v["installed"],
+             "Returned": v["returned"], "Pending": v["pending"]} for t, v in _ss.items()])
+        st.dataframe(stock_tbl, use_container_width=True, hide_index=True, height=dataframe_height(len(stock_tbl)))
+
+        sub_hdr("pin", "Stock By Location")
+        by_loc = stock_by_location()
+        if by_loc.empty:
+            st.info("No stock recorded yet.")
+        else:
+            st.dataframe(by_loc, use_container_width=True, hide_index=True,
+                         height=dataframe_height(len(by_loc), max_px=420))
+            if (by_loc["Location"] == "Unspecified").any():
+                st.markdown('<div class="warn-box">Stock received before locations were recorded shows as '
+                            '<b>Unspecified</b>. New inward entries carry their location.</div>',
+                            unsafe_allow_html=True)
+
+        _ret_log = load_returns()
+        if not _ret_log.empty:
+            with st.expander(f"Returns log ({len(_ret_log)})"):
+                st.dataframe(_ret_log.rename(columns={
+                    "date": "Date", "type": "Type", "qty": "Qty", "location": "Location",
+                    "dc_no": "DC No.", "remarks": "Remarks"}).iloc[::-1],
+                    use_container_width=True, hide_index=True, height=dataframe_height(len(_ret_log), max_px=360))
+
+        sec_hdr("list", "Inventory Log")
+        if df_inv_t.empty:
+            st.info("No inventory entries yet.")
+        else:
+            inv_sorted = df_inv_t.iloc[::-1].reset_index(drop=True)
+            inv_exp = inv_sorted.rename(columns={"date": "Date", "type": "Type", "qty": "Qty", "mrn": "MRN No", "make": "Make"})
+            st.download_button("⬇ Export Inventory CSV", inv_exp.to_csv(index=False).encode(), "inventory.csv", "text/csv", use_container_width=True, on_click="ignore")
+
+            ITEMS_INV = 10
+            total_inv_p = max(1, math.ceil(len(inv_sorted) / ITEMS_INV))
+            inv_page = st.number_input(f"Page (1–{total_inv_p})", min_value=1, max_value=total_inv_p, step=1, value=1, key="inv_page")
+            si, ei = (inv_page - 1) * ITEMS_INV, inv_page * ITEMS_INV
+            st.dataframe(inv_sorted.iloc[si:ei], use_container_width=True, hide_index=True)
+
+            inv_options_map = {}
+            for idx, row in inv_sorted.iterrows():
+                label = f"#{idx+1}  {row.get('date','')} | {row.get('type','')} | MRN:{row.get('mrn','')}"
+                inv_options_map[label] = idx
+
+            inv_target = st.selectbox("Select Inventory Record", ["-- Select --"] + list(inv_options_map.keys()), key="inv_sel")
+
+            if inv_target != "-- Select --":
+                inv_idx = inv_options_map[inv_target]
+                inv_row = inv_sorted.iloc[inv_idx]
+
+                st.markdown(f'<div class="warn-box">⚠️ Modifying: MRN <b>{inv_row.get("mrn","")}</b> — {inv_row.get("type","")} ({inv_row.get("make","")})</div>', unsafe_allow_html=True)
+                with st.form("edit_inv_form"):
+                    ei1, ei2, ei3 = st.columns(3)
+                    with ei1:
+                        e_qty = st.number_input("Quantity", min_value=1, step=1, value=safe_int(inv_row.get("qty", 1), 1))
+                    with ei2:
+                        e_mrn = st.text_input("MRN No.", value=str(inv_row.get("mrn", "")))
+                    with ei3:
+                        make_opts = ["Schneider", "Genus", "Other"]
+                        curr_make = inv_row.get("make", "Schneider")
+                        mk_idx = make_opts.index(curr_make) if curr_make in make_opts else 0
+                        e_make = st.selectbox("Make", make_opts, index=mk_idx)
+                    ib1, ib2 = st.columns(2)
+                    with ib1:
+                        inv_do_update = st.form_submit_button("✏️ Update", type="primary")
+                    with ib2:
+                        inv_do_delete = st.form_submit_button("🗑️ Delete")
+
+                if inv_do_update:
+                    if not e_mrn.strip():
+                        st.error("❌ MRN No. cannot be empty.")
+                    else:
+                        orig_df = df_inv_t.copy()
+                        orig_inv_idx = len(orig_df) - 1 - inv_idx
+                        orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("qty")] = str(e_qty)
+                        orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("mrn")] = e_mrn.strip()
+                        orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("make")] = e_make
+                        if safe_update("Inventory", orig_df):
+                            st.success("✅ Inventory entry updated.")
+                            st.rerun()
+
+                if inv_do_delete:
+                    st.session_state["pending_inv_del"] = inv_idx
+
+            if "pending_inv_del" in st.session_state:
+                del_inv_idx = st.session_state["pending_inv_del"]
+                st.markdown('<div class="warn-box">⚠️ Confirm delete? This will affect stock totals.</div>', unsafe_allow_html=True)
+                iy, inv_n = st.columns(2)
+                with iy:
+                    if st.button("✅ Yes, Delete", key="conf_del_inv"):
+                        orig_df = df_inv_t.copy()
+                        orig_inv_ri = len(orig_df) - 1 - del_inv_idx
+                        orig_df = orig_df.drop(index=orig_inv_ri).reset_index(drop=True)
+                        if safe_update("Inventory", orig_df):
+                            del st.session_state["pending_inv_del"]
+                            st.success("Deleted.")
+                            st.rerun()
+                with inv_n:
+                    if st.button("❌ Cancel", key="cancel_del_inv"):
+                        del st.session_state["pending_inv_del"]
+                        st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ADMIN
@@ -7899,431 +8098,433 @@ with tab_inv:
 #  HR — offer letters, payslips, employee records, roles
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_hr:
-    tab_action_bar("hr")
-    import calendar as _hr_cal
-    _hr_today = today_ist()
-    _hr_emp = hr_load_employees()
-    _hr_roles = hr_load_roles()
-    _hr_emp_missing = hr_sheet_missing("Employees")
-    _hr_roles_missing = hr_sheet_missing("Roles")
-    hv = st.session_state.setdefault("hr_form_version", 0)
+    if tab_hr.open:   # only the open tab runs (tabs are created with on_change="rerun")
+        tab_action_bar("hr")
+        import calendar as _hr_cal
+        _hr_today = today_ist()
+        _hr_emp = hr_load_employees()
+        _hr_roles = hr_load_roles()
+        _hr_emp_missing = hr_sheet_missing("Employees")
+        _hr_roles_missing = hr_sheet_missing("Roles")
+        hv = st.session_state.setdefault("hr_form_version", 0)
 
-    def _hr_setup_note(sheet: str, header: str):
-        st.markdown(
-            f'<div class="warn-box">The <b>{sheet}</b> tab doesn\'t exist in the Google Sheet yet. Create a tab '
-            f'named <b>{sheet}</b> with this header row, then tap Refresh:<br/><code>{header}</code></div>',
-            unsafe_allow_html=True)
+        def _hr_setup_note(sheet: str, header: str):
+            st.markdown(
+                f'<div class="warn-box">The <b>{sheet}</b> tab doesn\'t exist in the Google Sheet yet. Create a tab '
+                f'named <b>{sheet}</b> with this header row, then tap Refresh:<br/><code>{header}</code></div>',
+                unsafe_allow_html=True)
 
-    def _hr_format_choice(key: str) -> str:
-        pick = st.radio("File format", ["PDF", "Word (.docx)"], horizontal=True, key=key)
-        return "docx" if pick.startswith("Word") else "pdf"
+        def _hr_format_choice(key: str) -> str:
+            pick = st.radio("File format", ["PDF", "Word (.docx)"], horizontal=True, key=key)
+            return "docx" if pick.startswith("Word") else "pdf"
 
-    hr_t_offer, hr_t_slip, hr_t_emp, hr_t_roles = st.tabs(["Offer Letter", "Payslip", "Employees", "Roles"])
+        hr_t_offer, hr_t_slip, hr_t_emp, hr_t_roles = st.tabs(["Offer Letter", "Payslip", "Employees", "Roles"])
 
-    # ── Offer letter ───────────────────────────────────────────────────────
-    with hr_t_offer:
-        sec_hdr("file", "Offer Letter")
-        if _hr_emp_missing:
-            _hr_setup_note("Employees", ", ".join(HR_EMP_COLS))
-        _ol_has_emps = not _hr_emp.empty
-        ol_mode = st.radio("Letter for", ["New employee", "Existing employee"], horizontal=True, key="hr_ol_mode",
-                           disabled=not _ol_has_emps,
-                           help=None if _ol_has_emps else "Add employees first to issue them a letter.")
-        _ex = None
-        if ol_mode == "Existing employee" and _ol_has_emps:
-            _ex_labels = {r["emp_id"]: f"{r['emp_id']} — {r['name']} ({r['designation']})" for _, r in _hr_emp.iterrows()}
-            _ex_id = st.selectbox("Employee", list(_ex_labels), format_func=_ex_labels.get, key="hr_ol_existing")
-            _ex = _hr_emp[_hr_emp["emp_id"] == _ex_id].iloc[0]
-            st.markdown('<div class="info-box">Filled in from their record. Changes here affect only this letter; '
-                        'to change the record itself, use the Employees tab.</div>', unsafe_allow_html=True)
-        # Widget keys carry the employee, so picking someone else refills every
-        # field from their record instead of keeping the previous person's text.
-        _tag = f"{hv}_ex_{hr_slug(_ex['emp_id'])}" if _ex is not None else f"{hv}"
-        _role_opts = list(_hr_roles) + ["Other (type below)"]
-        if _ex is not None:
-            _d_sal = _ex["salutation"] if _ex["salutation"] in ("Mr.", "Ms.", "Mrs.") else "Mr."
-            _d_role = _ex["designation"] if _ex["designation"] in _hr_roles else "Other (type below)"
-            _d_custom = "" if _ex["designation"] in _hr_roles else _ex["designation"]
-            _jd0 = pd.to_datetime(_ex["joining_date"], errors="coerce")
-            _d_join = _jd0.date() if pd.notna(_jd0) else _hr_today
-            _d_name, _d_place, _d_salary = _ex["name"], (_ex["location"] or "Vijayawada"), int(_ex["monthly_salary"])
-        else:
-            _d_sal, _d_role, _d_custom, _d_join = "Mr.", _role_opts[0], "", _hr_today
-            _d_name, _d_place, _d_salary = "", "Vijayawada", 0
-        oc1, oc2 = st.columns([1, 3])
-        with oc1:
-            ol_sal = st.selectbox("Title", ["Mr.", "Ms.", "Mrs."], index=["Mr.", "Ms.", "Mrs."].index(_d_sal),
-                                  key=f"hr_ol_sal_{_tag}")
-        with oc2:
-            ol_name = st.text_input("Employee name", value=_d_name, key=f"hr_ol_name_{_tag}", placeholder="e.g. Ravi Kumar")
-        oc3, oc4 = st.columns(2)
-        with oc3:
-            ol_role = st.selectbox("Designation", _role_opts, index=_role_opts.index(_d_role), key=f"hr_ol_role_{_tag}")
-        _is_other = ol_role.startswith("Other")
-        with oc4:
-            ol_custom = st.text_input("Custom designation", value=_d_custom, key=f"hr_ol_custom_{_tag}",
-                                      disabled=not _is_other, placeholder="Only for 'Other'")
-        ol_designation = (ol_custom if _is_other else ol_role).strip()
-        oc5, oc6 = st.columns(2)
-        with oc5:
-            ol_place = st.text_input("Place of work", value=_d_place, key=f"hr_ol_place_{_tag}")
-        with oc6:
-            ol_join = st.date_input("Date of joining", value=_d_join, key=f"hr_ol_join_{_tag}")
-        oc7, oc8 = st.columns(2)
-        with oc7:
-            ol_salary = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500, value=_d_salary,
-                                        key=f"hr_ol_salary_{_tag}")
-        with oc8:
-            ol_date = st.date_input("Letter date", value=_hr_today, key=f"hr_ol_date_{_tag}")
-        if ol_salary:
-            st.markdown(f'<div class="info-box">Rs. {hr_inr(ol_salary)} per month &nbsp;·&nbsp; '
-                        f'Rs. {hr_inr(ol_salary * 12)} per annum</div>', unsafe_allow_html=True)
-
-        _base = _hr_roles.get(ol_role, {"duties": [], "schedule": ""})
-        _duties_default, _sched_default = "\n".join(_base["duties"]), _base["schedule"]
-        # The key carries a fingerprint of the saved role, so editing a role in
-        # the Roles tab refreshes these boxes instead of showing stale text.
-        _fp = hashlib.md5((_duties_default + "|" + _sched_default).encode()).hexdigest()[:6]
-        ol_duties = st.text_area("Role and responsibilities (one per line)", value=_duties_default, height=170,
-                                 key=f"hr_ol_duties_{_tag}_{hr_slug(ol_role)}_{_fp}")
-        ol_sched = st.text_area("Working schedule", value=_sched_default, height=88,
-                                key=f"hr_ol_sched_{_tag}_{hr_slug(ol_role)}_{_fp}")
-        ol_extra = st.text_area("Additional terms (optional)", value="", height=70, key=f"hr_ol_extra_{_tag}",
-                                placeholder="e.g. accommodation, travel allowance")
-        oc9, oc10 = st.columns(2)
-        with oc9:
-            ol_project = st.text_input("Project", value=HR_DEFAULT_PROJECT, key=f"hr_ol_project_{_tag}",
-                                       help="Leave blank to leave the project out of the letter.")
-        with oc10:
-            ol_signer = st.text_input("Signed by", value=HR_SIGNATORY, key=f"hr_ol_signer_{_tag}")
-        ol_fmt = _hr_format_choice(f"hr_ol_fmt_{_tag}")
-        ol_sign = st.checkbox("Include signature and seal", value=True, key=f"hr_ol_sign_{_tag}",
-                              help="Untick to leave the space blank for a wet signature and seal.")
-        if _ex is None:
-            ol_add = st.checkbox("Add to employee records", value=not _hr_emp_missing, disabled=_hr_emp_missing,
-                                 key=f"hr_ol_add_{hv}")
-            _sug_id = hr_next_emp_id(_hr_emp["emp_id"])
-            ol_empid = st.text_input("Employee ID", value=_sug_id, key=f"hr_ol_empid_{hv}_{_sug_id}") if ol_add else ""
-        else:
-            ol_add, ol_empid = False, _ex["emp_id"]
-        # An existing employee keeps the reference already on their record, so a
-        # reissued letter carries the same number; otherwise the next one is used.
-        _ref_on_record = _ex is not None and bool(_ex["offer_ref"])
-        _ref = _ex["offer_ref"] if _ref_on_record else hr_next_offer_ref(_hr_emp["offer_ref"], ol_date)
-        st.caption(f"Reference: {_ref}" + (" (from their record)" if _ref_on_record else ""))
-
-        if st.button("Generate Offer Letter", type="primary", use_container_width=True, key="hr_ol_go"):
-            errs = []
-            if not ol_name.strip():
-                errs.append("Enter the employee's name.")
-            if not ol_designation:
-                errs.append("Enter the designation.")
-            if not ol_place.strip():
-                errs.append("Enter the place of work.")
-            if ol_salary <= 0:
-                errs.append("Enter the monthly salary.")
-            if ol_add and not ol_empid.strip():
-                errs.append("Enter an employee ID.")
-            if ol_add and ol_empid.strip().upper() in set(_hr_emp["emp_id"].str.upper()):
-                errs.append(f"{ol_empid.strip()} is already in the employee records.")
-            if ol_fmt == "docx" and not HR_DOCX_OK:
-                errs.append("Word output needs python-docx in requirements.txt. Choose PDF for now.")
-            if errs:
-                st.error("❌ " + " ".join(errs))
+        # ── Offer letter ───────────────────────────────────────────────────────
+        with hr_t_offer:
+            sec_hdr("file", "Offer Letter")
+            if _hr_emp_missing:
+                _hr_setup_note("Employees", ", ".join(HR_EMP_COLS))
+            _ol_has_emps = not _hr_emp.empty
+            ol_mode = st.radio("Letter for", ["New employee", "Existing employee"], horizontal=True, key="hr_ol_mode",
+                               disabled=not _ol_has_emps,
+                               help=None if _ol_has_emps else "Add employees first to issue them a letter.")
+            _ex = None
+            if ol_mode == "Existing employee" and _ol_has_emps:
+                _ex_labels = {r["emp_id"]: f"{r['emp_id']} — {r['name']} ({r['designation']})" for _, r in _hr_emp.iterrows()}
+                _ex_id = st.selectbox("Employee", list(_ex_labels), format_func=_ex_labels.get, key="hr_ol_existing")
+                _ex = _hr_emp[_hr_emp["emp_id"] == _ex_id].iloc[0]
+                st.markdown('<div class="info-box">Filled in from their record. Changes here affect only this letter; '
+                            'to change the record itself, use the Employees tab.</div>', unsafe_allow_html=True)
+            # Widget keys carry the employee, so picking someone else refills every
+            # field from their record instead of keeping the previous person's text.
+            _tag = f"{hv}_ex_{hr_slug(_ex['emp_id'])}" if _ex is not None else f"{hv}"
+            _role_opts = list(_hr_roles) + ["Other (type below)"]
+            if _ex is not None:
+                _d_sal = _ex["salutation"] if _ex["salutation"] in ("Mr.", "Ms.", "Mrs.") else "Mr."
+                _d_role = _ex["designation"] if _ex["designation"] in _hr_roles else "Other (type below)"
+                _d_custom = "" if _ex["designation"] in _hr_roles else _ex["designation"]
+                _jd0 = pd.to_datetime(_ex["joining_date"], errors="coerce")
+                _d_join = _jd0.date() if pd.notna(_jd0) else _hr_today
+                _d_name, _d_place, _d_salary = _ex["name"], (_ex["location"] or "Vijayawada"), int(_ex["monthly_salary"])
             else:
-                try:
-                    _bytes = hr_build_offer_letter(
-                        ol_fmt, hr_logo_bytes(), name=ol_name.strip(), designation=ol_designation,
-                        place=ol_place.strip(), joining=ol_join, monthly_salary=int(ol_salary),
-                        letter_date=ol_date, ref_no=_ref, salutation=ol_sal, duties=ol_duties.split("\n"),
-                        schedule=ol_sched, additional=ol_extra, project=ol_project.strip(),
-                        signatory=ol_signer.strip() or HR_SIGNATORY, **hr_sign_kwargs(ol_sign))
-                except Exception as e:
-                    st.error(f"❌ Couldn't build the letter ({e}).")
-                else:
-                    st.session_state["hr_offer_file"] = {
-                        "bytes": _bytes, "mime": HR_MIME[ol_fmt],
-                        "name": f"Offer_Letter_{hr_slug(ol_name)}.{ol_fmt}",
-                        "label": f"{ol_name.strip()} ({ol_fmt.upper()})"}
-                    if ol_add:
-                        _saved = hr_add_employee({
-                            "emp_id": ol_empid.strip(), "name": ol_name.strip(), "salutation": ol_sal,
-                            "designation": ol_designation, "location": ol_place.strip(),
-                            "monthly_salary": int(ol_salary), "joining_date": ol_join.isoformat(),
-                            "bank": "", "account_no": "", "pan": "", "pf_no": "", "status": "Active",
-                            "offer_ref": _ref})
-                        if _saved:
-                            st.session_state["hr_form_version"] = hv + 1
-                            st.success(f"✅ Offer letter ready. {ol_empid.strip()} added to the employee records.")
-                            st.rerun()
-                        else:
-                            st.warning("⚠️ The letter is ready below, but the employee record wasn't saved.")
-                    elif _ex is not None and not _ref_on_record:
-                        # First letter for someone already on the records:
-                        # note the reference on their record so the number is
-                        # used once and a reissue repeats it.
-                        _upd = _hr_emp.copy()
-                        _upd.loc[_upd["emp_id"] == _ex["emp_id"], "offer_ref"] = _ref
-                        if hr_save_employees(_upd):
-                            st.success(f"✅ Offer letter ready. Reference {_ref} saved to {_ex['emp_id']}'s record.")
-                            st.rerun()
-                        else:
-                            st.warning("⚠️ The letter is ready below, but the reference wasn't saved to the record.")
-                    else:
-                        st.success("✅ Offer letter ready.")
-        _f = st.session_state.get("hr_offer_file")
-        if _f:
-            st.download_button(f"📥 Download {_f['label']}", data=_f["bytes"], file_name=_f["name"],
-                               mime=_f["mime"], key="hr_dl_offer", on_click="ignore", use_container_width=True)
+                _d_sal, _d_role, _d_custom, _d_join = "Mr.", _role_opts[0], "", _hr_today
+                _d_name, _d_place, _d_salary = "", "Vijayawada", 0
+            oc1, oc2 = st.columns([1, 3])
+            with oc1:
+                ol_sal = st.selectbox("Title", ["Mr.", "Ms.", "Mrs."], index=["Mr.", "Ms.", "Mrs."].index(_d_sal),
+                                      key=f"hr_ol_sal_{_tag}")
+            with oc2:
+                ol_name = st.text_input("Employee name", value=_d_name, key=f"hr_ol_name_{_tag}", placeholder="e.g. Ravi Kumar")
+            oc3, oc4 = st.columns(2)
+            with oc3:
+                ol_role = st.selectbox("Designation", _role_opts, index=_role_opts.index(_d_role), key=f"hr_ol_role_{_tag}")
+            _is_other = ol_role.startswith("Other")
+            with oc4:
+                ol_custom = st.text_input("Custom designation", value=_d_custom, key=f"hr_ol_custom_{_tag}",
+                                          disabled=not _is_other, placeholder="Only for 'Other'")
+            ol_designation = (ol_custom if _is_other else ol_role).strip()
+            oc5, oc6 = st.columns(2)
+            with oc5:
+                ol_place = st.text_input("Place of work", value=_d_place, key=f"hr_ol_place_{_tag}")
+            with oc6:
+                ol_join = st.date_input("Date of joining", value=_d_join, key=f"hr_ol_join_{_tag}")
+            oc7, oc8 = st.columns(2)
+            with oc7:
+                ol_salary = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500, value=_d_salary,
+                                            key=f"hr_ol_salary_{_tag}")
+            with oc8:
+                ol_date = st.date_input("Letter date", value=_hr_today, key=f"hr_ol_date_{_tag}")
+            if ol_salary:
+                st.markdown(f'<div class="info-box">Rs. {hr_inr(ol_salary)} per month &nbsp;·&nbsp; '
+                            f'Rs. {hr_inr(ol_salary * 12)} per annum</div>', unsafe_allow_html=True)
 
-    # ── Payslip ────────────────────────────────────────────────────────────
-    with hr_t_slip:
-        sec_hdr("receipt", "Payslip")
-        _act = _hr_emp[_hr_emp["status"].str.lower() != "exited"]
-        if _hr_emp_missing:
-            _hr_setup_note("Employees", ", ".join(HR_EMP_COLS))
-        elif _act.empty:
-            st.info("No employees yet. Add them in the Employees tab, or tick 'Add to employee records' "
-                    "when generating an offer letter.")
-        else:
-            _labels = {r["emp_id"]: f"{r['emp_id']} — {r['name']} ({r['designation']})" for _, r in _act.iterrows()}
-            ps_emp_id = st.selectbox("Employee", list(_labels), format_func=_labels.get, key="hr_ps_emp")
-            emp = _act[_act["emp_id"] == ps_emp_id].iloc[0]
-            _months = []
-            _y, _m = _hr_today.year, _hr_today.month
-            for _ in range(12):
-                _months.append(f"{_y:04d}-{_m:02d}")
-                _m -= 1
-                if _m == 0:
-                    _y, _m = _y - 1, 12
-            ps_month = st.selectbox("Month", _months, index=1, format_func=month_label, key="hr_ps_month")
-            _py, _pm = int(ps_month[:4]), int(ps_month[5:])
-            _month_long = datetime(_py, _pm, 1).strftime("%B %Y")
-            _dim = _hr_cal.monthrange(_py, _pm)[1]
-            _jd = pd.to_datetime(emp["joining_date"], errors="coerce")
-            if pd.notna(_jd) and ps_month < _jd.strftime("%Y-%m"):
-                st.markdown(f'<div class="warn-box">{emp["name"]} joined in {_jd.strftime("%B %Y")}, after '
-                            f'{_month_long}.</div>', unsafe_allow_html=True)
-
-            ps_salary = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500,
-                                        value=int(emp["monthly_salary"]), key=f"hr_ps_sal_{ps_emp_id}")
-            pc1, pc2, pc3 = st.columns(3)
-            with pc1:
-                ps_wd = st.number_input("Working days", min_value=1, max_value=31, value=_dim, step=1,
-                                        key=f"hr_ps_wd_{ps_month}",
-                                        help="The days in the month. Pay is the full monthly amount; "
-                                             "attendance is shown on the slip, not prorated.")
-            with pc2:
-                ps_ph = st.number_input("Public holidays", min_value=0, max_value=31, value=0, step=1,
-                                        key=f"hr_ps_ph_{ps_month}")
-            with pc3:
-                ps_dp = min(st.number_input("Days present", min_value=0, max_value=31, value=_dim, step=1,
-                                            key=f"hr_ps_dp_{ps_emp_id}_{ps_month}"), ps_wd)
-            dc1, dc2, dc3 = st.columns(3)
-            with dc1:
-                ps_pt = st.number_input("Professional tax (Rs.)", min_value=0, step=50,
-                                        value=hr_professional_tax(ps_salary), key=f"hr_ps_pt_{ps_emp_id}_{ps_salary}",
-                                        help="Andhra Pradesh / Telangana slab: nil to 15,000; 150 to 20,000; 200 above.")
-            with dc2:
-                ps_tds = st.number_input("TDS (Rs.)", min_value=0, step=100, value=0, key=f"hr_ps_tds_{ps_emp_id}")
-            with dc3:
-                ps_other = st.number_input("Other deductions (Rs.)", min_value=0, step=100, value=0,
-                                           key=f"hr_ps_other_{ps_emp_id}", help="Loans, advances, loss of pay.")
-            with st.expander("Salary breakup (edit if needed)"):
-                _split = pd.DataFrame(hr_salary_split(ps_salary), columns=["Component", "Amount (Rs.)"])
-                _edited = st.data_editor(
-                    _split, hide_index=True, use_container_width=True, disabled=["Component"],
-                    key=f"hr_ps_split_{ps_emp_id}_{ps_salary}",
-                    column_config={"Amount (Rs.)": st.column_config.NumberColumn(min_value=0, step=100, format="%d")},
-                    height=dataframe_height(len(_split)))
-            ps_earnings = [(r["Component"], int(r["Amount (Rs.)"] or 0)) for _, r in _edited.iterrows()]
-            ps_remarks = st.text_input("Remarks (optional)", key=f"hr_ps_remarks_{ps_emp_id}")
-            _fig = hr_payslip_figures(ps_earnings, ps_pt, ps_tds, ps_other, ps_wd, ps_ph, ps_dp)
-            if _fig["gross"] != ps_salary:
-                st.markdown(f'<div class="warn-box">The breakup adds up to Rs. {hr_inr(_fig["gross"])}, not the '
-                            f'salary of Rs. {hr_inr(ps_salary)}. The payslip uses the breakup total.</div>',
-                            unsafe_allow_html=True)
-            render_stat_tiles([
-                ("rupee", hr_inr(_fig["gross"]), "Gross", "Rs.", "normal"),
-                ("wallet", hr_inr(_fig["total_deductions"]), "Deductions", "Rs.", "normal"),
-                ("rupee", hr_inr(_fig["net"]), "Net pay", "Rs.", "normal"),
-                ("calendar", f"{_fig['effective']}", "Effective", "days", "normal"),
-            ])
-            ps_fmt = _hr_format_choice("hr_ps_fmt")
-            ps_sign = st.checkbox("Include signature and seal", value=True, key="hr_ps_sign",
+            _base = _hr_roles.get(ol_role, {"duties": [], "schedule": ""})
+            _duties_default, _sched_default = "\n".join(_base["duties"]), _base["schedule"]
+            # The key carries a fingerprint of the saved role, so editing a role in
+            # the Roles tab refreshes these boxes instead of showing stale text.
+            _fp = hashlib.md5((_duties_default + "|" + _sched_default).encode()).hexdigest()[:6]
+            ol_duties = st.text_area("Role and responsibilities (one per line)", value=_duties_default, height=170,
+                                     key=f"hr_ol_duties_{_tag}_{hr_slug(ol_role)}_{_fp}")
+            ol_sched = st.text_area("Working schedule", value=_sched_default, height=88,
+                                    key=f"hr_ol_sched_{_tag}_{hr_slug(ol_role)}_{_fp}")
+            ol_extra = st.text_area("Additional terms (optional)", value="", height=70, key=f"hr_ol_extra_{_tag}",
+                                    placeholder="e.g. accommodation, travel allowance")
+            oc9, oc10 = st.columns(2)
+            with oc9:
+                ol_project = st.text_input("Project", value=HR_DEFAULT_PROJECT, key=f"hr_ol_project_{_tag}",
+                                           help="Leave blank to leave the project out of the letter.")
+            with oc10:
+                ol_signer = st.text_input("Signed by", value=HR_SIGNATORY, key=f"hr_ol_signer_{_tag}")
+            ol_fmt = _hr_format_choice(f"hr_ol_fmt_{_tag}")
+            ol_sign = st.checkbox("Include signature and seal", value=True, key=f"hr_ol_sign_{_tag}",
                                   help="Untick to leave the space blank for a wet signature and seal.")
-            if st.button("Generate Payslip", type="primary", use_container_width=True, key="hr_ps_go"):
-                if ps_fmt == "docx" and not HR_DOCX_OK:
-                    st.error("❌ Word output needs python-docx in requirements.txt. Choose PDF for now.")
+            if _ex is None:
+                ol_add = st.checkbox("Add to employee records", value=not _hr_emp_missing, disabled=_hr_emp_missing,
+                                     key=f"hr_ol_add_{hv}")
+                _sug_id = hr_next_emp_id(_hr_emp["emp_id"])
+                ol_empid = st.text_input("Employee ID", value=_sug_id, key=f"hr_ol_empid_{hv}_{_sug_id}") if ol_add else ""
+            else:
+                ol_add, ol_empid = False, _ex["emp_id"]
+            # An existing employee keeps the reference already on their record, so a
+            # reissued letter carries the same number; otherwise the next one is used.
+            _ref_on_record = _ex is not None and bool(_ex["offer_ref"])
+            _ref = _ex["offer_ref"] if _ref_on_record else hr_next_offer_ref(_hr_emp["offer_ref"], ol_date)
+            st.caption(f"Reference: {_ref}" + (" (from their record)" if _ref_on_record else ""))
+
+            if st.button("Generate Offer Letter", type="primary", use_container_width=True, key="hr_ol_go"):
+                errs = []
+                if not ol_name.strip():
+                    errs.append("Enter the employee's name.")
+                if not ol_designation:
+                    errs.append("Enter the designation.")
+                if not ol_place.strip():
+                    errs.append("Enter the place of work.")
+                if ol_salary <= 0:
+                    errs.append("Enter the monthly salary.")
+                if ol_add and not ol_empid.strip():
+                    errs.append("Enter an employee ID.")
+                if ol_add and ol_empid.strip().upper() in set(_hr_emp["emp_id"].str.upper()):
+                    errs.append(f"{ol_empid.strip()} is already in the employee records.")
+                if ol_fmt == "docx" and not HR_DOCX_OK:
+                    errs.append("Word output needs python-docx in requirements.txt. Choose PDF for now.")
+                if errs:
+                    st.error("❌ " + " ".join(errs))
                 else:
                     try:
-                        _pb = hr_build_payslip(
-                            ps_fmt, hr_logo_bytes(), month_label=_month_long, name=emp["name"],
-                            emp_id=emp["emp_id"], designation=emp["designation"], location=emp["location"],
-                            earnings=ps_earnings, working_days=ps_wd, public_holidays=ps_ph, days_present=ps_dp,
-                            pt=ps_pt, tds=ps_tds, other=ps_other, bank=emp["bank"], account=emp["account_no"],
-                            pan=emp["pan"], pf=emp["pf_no"], remarks=ps_remarks.strip(),
-                            salutation=emp["salutation"] or "Mr.", **hr_sign_kwargs(ps_sign))
+                        _bytes = hr_build_offer_letter(
+                            ol_fmt, hr_logo_bytes(), name=ol_name.strip(), designation=ol_designation,
+                            place=ol_place.strip(), joining=ol_join, monthly_salary=int(ol_salary),
+                            letter_date=ol_date, ref_no=_ref, salutation=ol_sal, duties=ol_duties.split("\n"),
+                            schedule=ol_sched, additional=ol_extra, project=ol_project.strip(),
+                            signatory=ol_signer.strip() or HR_SIGNATORY, **hr_sign_kwargs(ol_sign))
                     except Exception as e:
-                        st.error(f"❌ Couldn't build the payslip ({e}).")
+                        st.error(f"❌ Couldn't build the letter ({e}).")
                     else:
-                        st.session_state["hr_slip_file"] = {
-                            "bytes": _pb, "mime": HR_MIME[ps_fmt],
-                            "name": f"Payslip_{hr_slug(emp['emp_id'])}_{ps_month}.{ps_fmt}",
-                            "label": f"{emp['name']} — {_month_long} ({ps_fmt.upper()})"}
-                        st.success("✅ Payslip ready.")
-            _pf = st.session_state.get("hr_slip_file")
-            if _pf:
-                st.download_button(f"📥 Download {_pf['label']}", data=_pf["bytes"], file_name=_pf["name"],
-                                   mime=_pf["mime"], key="hr_dl_slip", on_click="ignore", use_container_width=True)
+                        st.session_state["hr_offer_file"] = {
+                            "bytes": _bytes, "mime": HR_MIME[ol_fmt],
+                            "name": f"Offer_Letter_{hr_slug(ol_name)}.{ol_fmt}",
+                            "label": f"{ol_name.strip()} ({ol_fmt.upper()})"}
+                        if ol_add:
+                            _saved = hr_add_employee({
+                                "emp_id": ol_empid.strip(), "name": ol_name.strip(), "salutation": ol_sal,
+                                "designation": ol_designation, "location": ol_place.strip(),
+                                "monthly_salary": int(ol_salary), "joining_date": ol_join.isoformat(),
+                                "bank": "", "account_no": "", "pan": "", "pf_no": "", "status": "Active",
+                                "offer_ref": _ref})
+                            if _saved:
+                                st.session_state["hr_form_version"] = hv + 1
+                                st.success(f"✅ Offer letter ready. {ol_empid.strip()} added to the employee records.")
+                                st.rerun()
+                            else:
+                                st.warning("⚠️ The letter is ready below, but the employee record wasn't saved.")
+                        elif _ex is not None and not _ref_on_record:
+                            # First letter for someone already on the records:
+                            # note the reference on their record so the number is
+                            # used once and a reissue repeats it.
+                            _upd = _hr_emp.copy()
+                            _upd.loc[_upd["emp_id"] == _ex["emp_id"], "offer_ref"] = _ref
+                            if hr_save_employees(_upd):
+                                st.success(f"✅ Offer letter ready. Reference {_ref} saved to {_ex['emp_id']}'s record.")
+                                st.rerun()
+                            else:
+                                st.warning("⚠️ The letter is ready below, but the reference wasn't saved to the record.")
+                        else:
+                            st.success("✅ Offer letter ready.")
+            _f = st.session_state.get("hr_offer_file")
+            if _f:
+                st.download_button(f"📥 Download {_f['label']}", data=_f["bytes"], file_name=_f["name"],
+                                   mime=_f["mime"], key="hr_dl_offer", on_click="ignore", use_container_width=True)
 
-    # ── Employees ──────────────────────────────────────────────────────────
-    with hr_t_emp:
-        sec_hdr("users", "Employee Records")
-        if _hr_emp_missing:
-            _hr_setup_note("Employees", ", ".join(HR_EMP_COLS))
-        with st.expander("Add an employee"):
-            ae1, ae2, ae3 = st.columns([1, 1, 3])
-            with ae1:
-                _ae_sug = hr_next_emp_id(_hr_emp["emp_id"])
-                ae_id = st.text_input("Employee ID", value=_ae_sug, key=f"hr_ae_id_{hv}_{_ae_sug}")
-            with ae2:
-                ae_sal = st.selectbox("Title", ["Mr.", "Ms.", "Mrs."], key=f"hr_ae_sal_{hv}")
-            with ae3:
-                ae_name = st.text_input("Name", key=f"hr_ae_name_{hv}")
-            ae4, ae5 = st.columns(2)
-            with ae4:
-                ae_role = st.selectbox("Designation", list(_hr_roles) + ["Other (type below)"], key=f"hr_ae_role_{hv}")
-            with ae5:
-                ae_custom = st.text_input("Custom designation", key=f"hr_ae_custom_{hv}",
-                                          disabled=not ae_role.startswith("Other"))
-            ae6, ae7, ae8 = st.columns(3)
-            with ae6:
-                ae_loc = st.text_input("Location", value="Vijayawada", key=f"hr_ae_loc_{hv}")
-            with ae7:
-                ae_pay = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500, value=0, key=f"hr_ae_pay_{hv}")
-            with ae8:
-                ae_join = st.date_input("Date of joining", value=_hr_today, key=f"hr_ae_join_{hv}")
-            ae9, ae10, ae11, ae12 = st.columns(4)
-            with ae9:
-                ae_bank = st.text_input("Bank", key=f"hr_ae_bank_{hv}")
-            with ae10:
-                ae_acc = st.text_input("Account number", key=f"hr_ae_acc_{hv}")
-            with ae11:
-                ae_pan = st.text_input("PAN", key=f"hr_ae_pan_{hv}")
-            with ae12:
-                ae_pf = st.text_input("PF number", key=f"hr_ae_pf_{hv}")
-            if st.button("Add Employee", type="primary", use_container_width=True, key="hr_ae_go",
-                         disabled=_hr_emp_missing):
-                _des = (ae_custom if ae_role.startswith("Other") else ae_role).strip()
-                if not ae_id.strip() or not ae_name.strip() or not _des:
-                    st.error("❌ Employee ID, name and designation are required.")
-                elif ae_id.strip().upper() in set(_hr_emp["emp_id"].str.upper()):
-                    st.error(f"❌ {ae_id.strip()} already exists.")
-                elif hr_add_employee({
-                        "emp_id": ae_id.strip(), "name": ae_name.strip(), "salutation": ae_sal, "designation": _des,
-                        "location": ae_loc.strip(), "monthly_salary": int(ae_pay), "joining_date": ae_join.isoformat(),
-                        "bank": ae_bank.strip(), "account_no": ae_acc.strip(), "pan": ae_pan.strip().upper(),
-                        "pf_no": ae_pf.strip(), "status": "Active", "offer_ref": ""}):
-                    st.session_state["hr_form_version"] = hv + 1
-                    st.success(f"✅ {ae_id.strip()} — {ae_name.strip()} added.")
-                    st.rerun()
+        # ── Payslip ────────────────────────────────────────────────────────────
+        with hr_t_slip:
+            sec_hdr("receipt", "Payslip")
+            _act = _hr_emp[_hr_emp["status"].str.lower() != "exited"]
+            if _hr_emp_missing:
+                _hr_setup_note("Employees", ", ".join(HR_EMP_COLS))
+            elif _act.empty:
+                st.info("No employees yet. Add them in the Employees tab, or tick 'Add to employee records' "
+                        "when generating an offer letter.")
+            else:
+                _labels = {r["emp_id"]: f"{r['emp_id']} — {r['name']} ({r['designation']})" for _, r in _act.iterrows()}
+                ps_emp_id = st.selectbox("Employee", list(_labels), format_func=_labels.get, key="hr_ps_emp")
+                emp = _act[_act["emp_id"] == ps_emp_id].iloc[0]
+                _months = []
+                _y, _m = _hr_today.year, _hr_today.month
+                for _ in range(12):
+                    _months.append(f"{_y:04d}-{_m:02d}")
+                    _m -= 1
+                    if _m == 0:
+                        _y, _m = _y - 1, 12
+                ps_month = st.selectbox("Month", _months, index=1, format_func=month_label, key="hr_ps_month")
+                _py, _pm = int(ps_month[:4]), int(ps_month[5:])
+                _month_long = datetime(_py, _pm, 1).strftime("%B %Y")
+                _dim = _hr_cal.monthrange(_py, _pm)[1]
+                _jd = pd.to_datetime(emp["joining_date"], errors="coerce")
+                if pd.notna(_jd) and ps_month < _jd.strftime("%Y-%m"):
+                    st.markdown(f'<div class="warn-box">{emp["name"]} joined in {_jd.strftime("%B %Y")}, after '
+                                f'{_month_long}.</div>', unsafe_allow_html=True)
 
-        if _hr_emp.empty:
-            if not _hr_emp_missing:
-                st.info("No employees yet.")
-        else:
-            _view = _hr_emp.drop(columns=["offer_ref"]).copy()
-            _view["joining_date"] = pd.to_datetime(_view["joining_date"], errors="coerce").dt.date
-            _view["joining_date"] = _view["joining_date"].map(lambda d: d if pd.notna(d) else None)
-            _view.insert(0, "Delete", False)
-            _ed = st.data_editor(
-                _view, hide_index=True, use_container_width=True, disabled=["emp_id"],
-                key=f"hr_emp_editor_{_sheet_version('Employees')}",
-                column_config={
-                    "emp_id": st.column_config.TextColumn("ID"),
-                    "salutation": st.column_config.SelectboxColumn("Title", options=["Mr.", "Ms.", "Mrs."]),
-                    "name": st.column_config.TextColumn("Name"),
-                    "designation": st.column_config.TextColumn("Designation"),
-                    "location": st.column_config.TextColumn("Location"),
-                    "monthly_salary": st.column_config.NumberColumn("Salary (Rs.)", min_value=0, step=500, format="%d"),
-                    "joining_date": st.column_config.DateColumn("Joined", format="DD MMM YYYY"),
-                    "bank": st.column_config.TextColumn("Bank"),
-                    "account_no": st.column_config.TextColumn("Account No."),
-                    "pan": st.column_config.TextColumn("PAN"),
-                    "pf_no": st.column_config.TextColumn("PF No."),
-                    "status": st.column_config.SelectboxColumn("Status", options=["Active", "Exited"]),
-                },
-                height=dataframe_height(len(_view), max_px=480))
-            _n_del = int(_ed["Delete"].sum())
-            st.caption("Mark someone as Exited to keep their record but drop them from the payslip list. "
-                       "Account and PF numbers are saved with a leading # so Google Sheets keeps them as text.")
-            if st.button(f"💾 Save Changes{f' (deleting {_n_del})' if _n_del else ''}", type="primary",
-                         use_container_width=True, key="hr_emp_save", disabled=_hr_emp_missing):
-                _keep = hr_prepare_saved_employees(_ed, _hr_emp)
-                if hr_save_employees(_keep):
-                    st.success("✅ Employee records updated.")
-                    st.rerun()
+                ps_salary = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500,
+                                            value=int(emp["monthly_salary"]), key=f"hr_ps_sal_{ps_emp_id}")
+                pc1, pc2, pc3 = st.columns(3)
+                with pc1:
+                    ps_wd = st.number_input("Working days", min_value=1, max_value=31, value=_dim, step=1,
+                                            key=f"hr_ps_wd_{ps_month}",
+                                            help="The days in the month. Pay is the full monthly amount; "
+                                                 "attendance is shown on the slip, not prorated.")
+                with pc2:
+                    ps_ph = st.number_input("Public holidays", min_value=0, max_value=31, value=0, step=1,
+                                            key=f"hr_ps_ph_{ps_month}")
+                with pc3:
+                    ps_dp = min(st.number_input("Days present", min_value=0, max_value=31, value=_dim, step=1,
+                                                key=f"hr_ps_dp_{ps_emp_id}_{ps_month}"), ps_wd)
+                dc1, dc2, dc3 = st.columns(3)
+                with dc1:
+                    ps_pt = st.number_input("Professional tax (Rs.)", min_value=0, step=50,
+                                            value=hr_professional_tax(ps_salary), key=f"hr_ps_pt_{ps_emp_id}_{ps_salary}",
+                                            help="Andhra Pradesh / Telangana slab: nil to 15,000; 150 to 20,000; 200 above.")
+                with dc2:
+                    ps_tds = st.number_input("TDS (Rs.)", min_value=0, step=100, value=0, key=f"hr_ps_tds_{ps_emp_id}")
+                with dc3:
+                    ps_other = st.number_input("Other deductions (Rs.)", min_value=0, step=100, value=0,
+                                               key=f"hr_ps_other_{ps_emp_id}", help="Loans, advances, loss of pay.")
+                with st.expander("Salary breakup (edit if needed)"):
+                    _split = pd.DataFrame(hr_salary_split(ps_salary), columns=["Component", "Amount (Rs.)"])
+                    _edited = st.data_editor(
+                        _split, hide_index=True, use_container_width=True, disabled=["Component"],
+                        key=f"hr_ps_split_{ps_emp_id}_{ps_salary}",
+                        column_config={"Amount (Rs.)": st.column_config.NumberColumn(min_value=0, step=100, format="%d")},
+                        height=dataframe_height(len(_split)))
+                ps_earnings = [(r["Component"], int(r["Amount (Rs.)"] or 0)) for _, r in _edited.iterrows()]
+                ps_remarks = st.text_input("Remarks (optional)", key=f"hr_ps_remarks_{ps_emp_id}")
+                _fig = hr_payslip_figures(ps_earnings, ps_pt, ps_tds, ps_other, ps_wd, ps_ph, ps_dp)
+                if _fig["gross"] != ps_salary:
+                    st.markdown(f'<div class="warn-box">The breakup adds up to Rs. {hr_inr(_fig["gross"])}, not the '
+                                f'salary of Rs. {hr_inr(ps_salary)}. The payslip uses the breakup total.</div>',
+                                unsafe_allow_html=True)
+                render_stat_tiles([
+                    ("rupee", hr_inr(_fig["gross"]), "Gross", "Rs.", "normal"),
+                    ("wallet", hr_inr(_fig["total_deductions"]), "Deductions", "Rs.", "normal"),
+                    ("rupee", hr_inr(_fig["net"]), "Net pay", "Rs.", "normal"),
+                    ("calendar", f"{_fig['effective']}", "Effective", "days", "normal"),
+                ])
+                ps_fmt = _hr_format_choice("hr_ps_fmt")
+                ps_sign = st.checkbox("Include signature and seal", value=True, key="hr_ps_sign",
+                                      help="Untick to leave the space blank for a wet signature and seal.")
+                if st.button("Generate Payslip", type="primary", use_container_width=True, key="hr_ps_go"):
+                    if ps_fmt == "docx" and not HR_DOCX_OK:
+                        st.error("❌ Word output needs python-docx in requirements.txt. Choose PDF for now.")
+                    else:
+                        try:
+                            _pb = hr_build_payslip(
+                                ps_fmt, hr_logo_bytes(), month_label=_month_long, name=emp["name"],
+                                emp_id=emp["emp_id"], designation=emp["designation"], location=emp["location"],
+                                earnings=ps_earnings, working_days=ps_wd, public_holidays=ps_ph, days_present=ps_dp,
+                                pt=ps_pt, tds=ps_tds, other=ps_other, bank=emp["bank"], account=emp["account_no"],
+                                pan=emp["pan"], pf=emp["pf_no"], remarks=ps_remarks.strip(),
+                                salutation=emp["salutation"] or "Mr.", **hr_sign_kwargs(ps_sign))
+                        except Exception as e:
+                            st.error(f"❌ Couldn't build the payslip ({e}).")
+                        else:
+                            st.session_state["hr_slip_file"] = {
+                                "bytes": _pb, "mime": HR_MIME[ps_fmt],
+                                "name": f"Payslip_{hr_slug(emp['emp_id'])}_{ps_month}.{ps_fmt}",
+                                "label": f"{emp['name']} — {_month_long} ({ps_fmt.upper()})"}
+                            st.success("✅ Payslip ready.")
+                _pf = st.session_state.get("hr_slip_file")
+                if _pf:
+                    st.download_button(f"📥 Download {_pf['label']}", data=_pf["bytes"], file_name=_pf["name"],
+                                       mime=_pf["mime"], key="hr_dl_slip", on_click="ignore", use_container_width=True)
 
-    # ── Roles ──────────────────────────────────────────────────────────────
-    with hr_t_roles:
-        sec_hdr("list", "Roles")
-        st.markdown('<div class="info-box">The responsibilities and working schedule offered for each role in the '
-                    'offer letter. Edit a built-in role or add your own. They can still be changed on each letter.'
-                    '</div>', unsafe_allow_html=True)
-        if _hr_roles_missing:
-            _hr_setup_note("Roles", ", ".join(HR_ROLE_COLS))
-        _pick = st.selectbox("Role", list(_hr_roles) + ["+ New role"], key="hr_role_pick",
-                             format_func=lambda k: k if k == "+ New role" else
-                             f"{k}  ·  {'saved' if _hr_roles[k]['saved'] else 'built-in'}")
-        if _pick == "+ New role":
-            _role_name = st.text_input("Designation", key="hr_role_new", placeholder="e.g. Accounts Executive").strip()
-            _cur = {"duties": [], "schedule": "", "saved": False}
-        else:
-            _role_name, _cur = _pick, _hr_roles[_pick]
-        _rfp = hashlib.md5(("|".join(_cur["duties"]) + _cur["schedule"]).encode()).hexdigest()[:6]
-        _rd = st.text_area("Responsibilities (one per line)", value="\n".join(_cur["duties"]), height=220,
-                           key=f"hr_role_duties_{hr_slug(_pick)}_{_rfp}")
-        _rs = st.text_area("Working schedule", value=_cur["schedule"], height=90,
-                           key=f"hr_role_sched_{hr_slug(_pick)}_{_rfp}")
-        rb1, rb2 = st.columns(2)
-        with rb1:
-            if st.button("Save Role", type="primary", use_container_width=True, key="hr_role_save",
-                         disabled=_hr_roles_missing):
-                if not _role_name:
-                    st.error("❌ Enter a designation.")
-                elif not [d for d in _rd.split("\n") if d.strip()]:
-                    st.error("❌ Add at least one responsibility.")
-                elif hr_save_role(_role_name, _rd, _rs):
-                    st.success(f"✅ {_role_name} saved.")
-                    st.rerun()
-        with rb2:
-            if _cur.get("saved"):
-                _builtin = _pick in HR_DEFAULT_ROLES
-                if st.button("Revert to built-in" if _builtin else "Delete role", use_container_width=True,
-                             key="hr_role_del"):
-                    if hr_delete_role(_pick):
-                        st.success(f"✅ {_pick} {'reverted' if _builtin else 'deleted'}.")
+        # ── Employees ──────────────────────────────────────────────────────────
+        with hr_t_emp:
+            sec_hdr("users", "Employee Records")
+            if _hr_emp_missing:
+                _hr_setup_note("Employees", ", ".join(HR_EMP_COLS))
+            with st.expander("Add an employee"):
+                ae1, ae2, ae3 = st.columns([1, 1, 3])
+                with ae1:
+                    _ae_sug = hr_next_emp_id(_hr_emp["emp_id"])
+                    ae_id = st.text_input("Employee ID", value=_ae_sug, key=f"hr_ae_id_{hv}_{_ae_sug}")
+                with ae2:
+                    ae_sal = st.selectbox("Title", ["Mr.", "Ms.", "Mrs."], key=f"hr_ae_sal_{hv}")
+                with ae3:
+                    ae_name = st.text_input("Name", key=f"hr_ae_name_{hv}")
+                ae4, ae5 = st.columns(2)
+                with ae4:
+                    ae_role = st.selectbox("Designation", list(_hr_roles) + ["Other (type below)"], key=f"hr_ae_role_{hv}")
+                with ae5:
+                    ae_custom = st.text_input("Custom designation", key=f"hr_ae_custom_{hv}",
+                                              disabled=not ae_role.startswith("Other"))
+                ae6, ae7, ae8 = st.columns(3)
+                with ae6:
+                    ae_loc = st.text_input("Location", value="Vijayawada", key=f"hr_ae_loc_{hv}")
+                with ae7:
+                    ae_pay = st.number_input("Monthly gross salary (Rs.)", min_value=0, step=500, value=0, key=f"hr_ae_pay_{hv}")
+                with ae8:
+                    ae_join = st.date_input("Date of joining", value=_hr_today, key=f"hr_ae_join_{hv}")
+                ae9, ae10, ae11, ae12 = st.columns(4)
+                with ae9:
+                    ae_bank = st.text_input("Bank", key=f"hr_ae_bank_{hv}")
+                with ae10:
+                    ae_acc = st.text_input("Account number", key=f"hr_ae_acc_{hv}")
+                with ae11:
+                    ae_pan = st.text_input("PAN", key=f"hr_ae_pan_{hv}")
+                with ae12:
+                    ae_pf = st.text_input("PF number", key=f"hr_ae_pf_{hv}")
+                if st.button("Add Employee", type="primary", use_container_width=True, key="hr_ae_go",
+                             disabled=_hr_emp_missing):
+                    _des = (ae_custom if ae_role.startswith("Other") else ae_role).strip()
+                    if not ae_id.strip() or not ae_name.strip() or not _des:
+                        st.error("❌ Employee ID, name and designation are required.")
+                    elif ae_id.strip().upper() in set(_hr_emp["emp_id"].str.upper()):
+                        st.error(f"❌ {ae_id.strip()} already exists.")
+                    elif hr_add_employee({
+                            "emp_id": ae_id.strip(), "name": ae_name.strip(), "salutation": ae_sal, "designation": _des,
+                            "location": ae_loc.strip(), "monthly_salary": int(ae_pay), "joining_date": ae_join.isoformat(),
+                            "bank": ae_bank.strip(), "account_no": ae_acc.strip(), "pan": ae_pan.strip().upper(),
+                            "pf_no": ae_pf.strip(), "status": "Active", "offer_ref": ""}):
+                        st.session_state["hr_form_version"] = hv + 1
+                        st.success(f"✅ {ae_id.strip()} — {ae_name.strip()} added.")
                         st.rerun()
+
+            if _hr_emp.empty:
+                if not _hr_emp_missing:
+                    st.info("No employees yet.")
+            else:
+                _view = _hr_emp.drop(columns=["offer_ref"]).copy()
+                _view["joining_date"] = pd.to_datetime(_view["joining_date"], errors="coerce").dt.date
+                _view["joining_date"] = _view["joining_date"].map(lambda d: d if pd.notna(d) else None)
+                _view.insert(0, "Delete", False)
+                _ed = st.data_editor(
+                    _view, hide_index=True, use_container_width=True, disabled=["emp_id"],
+                    key=f"hr_emp_editor_{_sheet_version('Employees')}",
+                    column_config={
+                        "emp_id": st.column_config.TextColumn("ID"),
+                        "salutation": st.column_config.SelectboxColumn("Title", options=["Mr.", "Ms.", "Mrs."]),
+                        "name": st.column_config.TextColumn("Name"),
+                        "designation": st.column_config.TextColumn("Designation"),
+                        "location": st.column_config.TextColumn("Location"),
+                        "monthly_salary": st.column_config.NumberColumn("Salary (Rs.)", min_value=0, step=500, format="%d"),
+                        "joining_date": st.column_config.DateColumn("Joined", format="DD MMM YYYY"),
+                        "bank": st.column_config.TextColumn("Bank"),
+                        "account_no": st.column_config.TextColumn("Account No."),
+                        "pan": st.column_config.TextColumn("PAN"),
+                        "pf_no": st.column_config.TextColumn("PF No."),
+                        "status": st.column_config.SelectboxColumn("Status", options=["Active", "Exited"]),
+                    },
+                    height=dataframe_height(len(_view), max_px=480))
+                _n_del = int(_ed["Delete"].sum())
+                st.caption("Mark someone as Exited to keep their record but drop them from the payslip list. "
+                           "Account and PF numbers are saved with a leading # so Google Sheets keeps them as text.")
+                if st.button(f"💾 Save Changes{f' (deleting {_n_del})' if _n_del else ''}", type="primary",
+                             use_container_width=True, key="hr_emp_save", disabled=_hr_emp_missing):
+                    _keep = hr_prepare_saved_employees(_ed, _hr_emp)
+                    if hr_save_employees(_keep):
+                        st.success("✅ Employee records updated.")
+                        st.rerun()
+
+        # ── Roles ──────────────────────────────────────────────────────────────
+        with hr_t_roles:
+            sec_hdr("list", "Roles")
+            st.markdown('<div class="info-box">The responsibilities and working schedule offered for each role in the '
+                        'offer letter. Edit a built-in role or add your own. They can still be changed on each letter.'
+                        '</div>', unsafe_allow_html=True)
+            if _hr_roles_missing:
+                _hr_setup_note("Roles", ", ".join(HR_ROLE_COLS))
+            _pick = st.selectbox("Role", list(_hr_roles) + ["+ New role"], key="hr_role_pick",
+                                 format_func=lambda k: k if k == "+ New role" else
+                                 f"{k}  ·  {'saved' if _hr_roles[k]['saved'] else 'built-in'}")
+            if _pick == "+ New role":
+                _role_name = st.text_input("Designation", key="hr_role_new", placeholder="e.g. Accounts Executive").strip()
+                _cur = {"duties": [], "schedule": "", "saved": False}
+            else:
+                _role_name, _cur = _pick, _hr_roles[_pick]
+            _rfp = hashlib.md5(("|".join(_cur["duties"]) + _cur["schedule"]).encode()).hexdigest()[:6]
+            _rd = st.text_area("Responsibilities (one per line)", value="\n".join(_cur["duties"]), height=220,
+                               key=f"hr_role_duties_{hr_slug(_pick)}_{_rfp}")
+            _rs = st.text_area("Working schedule", value=_cur["schedule"], height=90,
+                               key=f"hr_role_sched_{hr_slug(_pick)}_{_rfp}")
+            rb1, rb2 = st.columns(2)
+            with rb1:
+                if st.button("Save Role", type="primary", use_container_width=True, key="hr_role_save",
+                             disabled=_hr_roles_missing):
+                    if not _role_name:
+                        st.error("❌ Enter a designation.")
+                    elif not [d for d in _rd.split("\n") if d.strip()]:
+                        st.error("❌ Add at least one responsibility.")
+                    elif hr_save_role(_role_name, _rd, _rs):
+                        st.success(f"✅ {_role_name} saved.")
+                        st.rerun()
+            with rb2:
+                if _cur.get("saved"):
+                    _builtin = _pick in HR_DEFAULT_ROLES
+                    if st.button("Revert to built-in" if _builtin else "Delete role", use_container_width=True,
+                                 key="hr_role_del"):
+                        if hr_delete_role(_pick):
+                            st.success(f"✅ {_pick} {'reverted' if _builtin else 'deleted'}.")
+                            st.rerun()
 
 
 with tab_admin:
-    tab_action_bar("admin")
-    # App version lives here rather than in the header: it is only needed to
-    # confirm which build is live after a deploy.
-    st.markdown(f'<div class="info-box">App version <b>v{APP_VERSION}</b></div>', unsafe_allow_html=True)
-    if st.button("🔓 Log Out This Browser", use_container_width=True, key="logout_btn"):
-        st.session_state["authenticated"] = False
-        if "k" in st.query_params:
-            del st.query_params["k"]
-        st.components.v1.html("""
+    if tab_admin.open:   # only the open tab runs (tabs are created with on_change="rerun")
+        tab_action_bar("admin")
+        # App version lives here rather than in the header: it is only needed to
+        # confirm which build is live after a deploy.
+        st.markdown(f'<div class="info-box">App version <b>v{APP_VERSION}</b></div>', unsafe_allow_html=True)
+        if st.button("🔓 Log Out This Browser", use_container_width=True, key="logout_btn"):
+            st.session_state["authenticated"] = False
+            if "k" in st.query_params:
+                del st.query_params["k"]
+            st.components.v1.html("""
         <script>
         try { window.parent.localStorage.removeItem('vja_remember_token'); } catch (e) {}
         </script>
         """, height=0)
-        st.rerun()
+            st.rerun()
 
-    st.markdown("""
+        st.markdown("""
     <div class="warn-box" style="background:var(--surface-000);border-color:var(--hairline);color:var(--ink-600);">
     💡 <b>Tip:</b> Add one or several at once below, review them as cards, then Save Batch.
     Existing entries are listed further down as cards — tap ✏️ Edit to change details or toggle
@@ -8331,207 +8532,207 @@ with tab_admin:
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Monthly install target ────────────────────────────────────────────────
-    sec_hdr("target", "Monthly Install Target & Working Days")
-    # Month picker so a target can be set ahead: this month, or any of the
-    # next twelve. Months without one of their own use the default below.
-    _today_adm = today_ist()
-    _mo_opts = []
-    _yy, _mm = _today_adm.year, _today_adm.month
-    for _ in range(13):
-        _mo_opts.append(f"{_yy:04d}-{_mm:02d}")
-        _mm = 1 if _mm == 12 else _mm + 1
-        _yy = _yy + 1 if _mm == 1 else _yy
-    tm1, tm2, tm3 = st.columns([1.2, 1, 1])
-    with tm1:
-        tgt_month = st.selectbox("Target for month", _mo_opts, format_func=month_label, key="target_month_pick")
-    with tm2:
-        _cur = target_for_month(tgt_month)
-        month_target_in = st.number_input("Installs target", min_value=0, step=100,
-                                          value=int(_cur), key=f"month_target_{tgt_month}")
-    with tm3:
-        st.write("")
-        if st.button("Save Month Target", type="primary", use_container_width=True, key="save_month_target"):
-            if save_settings({f"monthly_install_target:{tgt_month}": int(month_target_in)}):
-                st.success(f"{month_label(tgt_month)} target set to {int(month_target_in):,}.")
-                st.rerun()
-
-    with st.expander(f"Site targets for {month_label(tgt_month)} (optional)"):
-        _site_vals = {}
-        _sc = st.columns(max(1, min(4, len(active_locs))))
-        for i, _site in enumerate(active_locs):
-            with _sc[i % len(_sc)]:
-                _site_vals[_site] = st.number_input(
-                    _site, min_value=0, step=50, value=int(site_target_for(_site, tgt_month) or 0),
-                    key=f"site_target_{_site}_{tgt_month}")
-        _sum = sum(_site_vals.values())
-        if _sum:
-            st.markdown(f'<div class="info-box">Site targets add up to <b>{_sum:,}</b>'
-                        + (f' — the month target is {int(month_target_in):,}.' if int(month_target_in) != _sum else '.')
-                        + '</div>', unsafe_allow_html=True)
-        if st.button("Save Site Targets", use_container_width=True, key="save_site_targets"):
-            if save_settings({f"site_target:{k}:{tgt_month}": int(v) for k, v in _site_vals.items()}):
-                st.success(f"Site targets saved for {month_label(tgt_month)}.")
-                st.rerun()
-
-    _set_targets = months_with_targets()
-    if _set_targets:
-        _rows = [{"Month": month_label(k), "Target": f"{v:,}",
-                  "": "in use now" if k == month_key(_today_adm) else ""} for k, v in _set_targets.items()]
-        with st.expander(f"Months with their own target ({len(_set_targets)})"):
-            st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True,
-                         height=dataframe_height(len(_rows), max_px=260))
-            _clear = st.selectbox("Remove a month's target", ["—"] + list(_set_targets), key="clear_month_target",
-                                  format_func=lambda k: k if k == "—" else month_label(k))
-            if _clear != "—" and st.button(f"Remove {month_label(_clear)}", use_container_width=True, key="do_clear_month_target"):
-                _df = get_data("Settings")
-                _df = _df[_df["key"].astype(str).str.strip() != f"monthly_install_target:{_clear}"]
-                if safe_update("Settings", _df):
-                    st.success(f"{month_label(_clear)} now uses the default target.")
+        # ── Monthly install target ────────────────────────────────────────────────
+        sec_hdr("target", "Monthly Install Target & Working Days")
+        # Month picker so a target can be set ahead: this month, or any of the
+        # next twelve. Months without one of their own use the default below.
+        _today_adm = today_ist()
+        _mo_opts = []
+        _yy, _mm = _today_adm.year, _today_adm.month
+        for _ in range(13):
+            _mo_opts.append(f"{_yy:04d}-{_mm:02d}")
+            _mm = 1 if _mm == 12 else _mm + 1
+            _yy = _yy + 1 if _mm == 1 else _yy
+        tm1, tm2, tm3 = st.columns([1.2, 1, 1])
+        with tm1:
+            tgt_month = st.selectbox("Target for month", _mo_opts, format_func=month_label, key="target_month_pick")
+        with tm2:
+            _cur = target_for_month(tgt_month)
+            month_target_in = st.number_input("Installs target", min_value=0, step=100,
+                                              value=int(_cur), key=f"month_target_{tgt_month}")
+        with tm3:
+            st.write("")
+            if st.button("Save Month Target", type="primary", use_container_width=True, key="save_month_target"):
+                if save_settings({f"monthly_install_target:{tgt_month}": int(month_target_in)}):
+                    st.success(f"{month_label(tgt_month)} target set to {int(month_target_in):,}.")
                     st.rerun()
 
-    tg1, tg2, tg3 = st.columns(3)
-    with tg1:
-        new_target = st.number_input("Default target (months without their own)", min_value=0, step=100,
-                                     value=int(MONTHLY_TARGET), key="monthly_target_input")
-    with tg2:
-        new_wd_start = st.number_input("Working days from", min_value=1, max_value=31, step=1,
-                                       value=int(WORK_DAY_START), key="work_day_start_input")
-    with tg3:
-        new_wd_end = st.number_input("to", min_value=1, max_value=31, step=1,
-                                     value=int(WORK_DAY_END), key="work_day_end_input")
+        with st.expander(f"Site targets for {month_label(tgt_month)} (optional)"):
+            _site_vals = {}
+            _sc = st.columns(max(1, min(4, len(active_locs))))
+            for i, _site in enumerate(active_locs):
+                with _sc[i % len(_sc)]:
+                    _site_vals[_site] = st.number_input(
+                        _site, min_value=0, step=50, value=int(site_target_for(_site, tgt_month) or 0),
+                        key=f"site_target_{_site}_{tgt_month}")
+            _sum = sum(_site_vals.values())
+            if _sum:
+                st.markdown(f'<div class="info-box">Site targets add up to <b>{_sum:,}</b>'
+                            + (f' — the month target is {int(month_target_in):,}.' if int(month_target_in) != _sum else '.')
+                            + '</div>', unsafe_allow_html=True)
+            if st.button("Save Site Targets", use_container_width=True, key="save_site_targets"):
+                if save_settings({f"site_target:{k}:{tgt_month}": int(v) for k, v in _site_vals.items()}):
+                    st.success(f"Site targets saved for {month_label(tgt_month)}.")
+                    st.rerun()
 
-    if new_wd_end < new_wd_start:
-        st.markdown('<div class="danger-box">The last working day must not be before the first.</div>',
-                    unsafe_allow_html=True)
-    else:
-        import calendar as _cal_adm
-        _last = _cal_adm.monthrange(_today_adm.year, _today_adm.month)[1]
-        _days = max(0, min(int(new_wd_end), _last) - int(new_wd_start) + 1)
-        st.markdown(
-            f'<div class="info-box">Day {int(new_wd_start)} to {int(new_wd_end)} — '
-            f'<b>{_days}</b> working days in {month_label(month_key(_today_adm))}'
-            + (f', {new_target / _days:,.0f} installs/day to reach {int(new_target):,}.' if _days and new_target else '.')
-            + '</div>', unsafe_allow_html=True)
+        _set_targets = months_with_targets()
+        if _set_targets:
+            _rows = [{"Month": month_label(k), "Target": f"{v:,}",
+                      "": "in use now" if k == month_key(_today_adm) else ""} for k, v in _set_targets.items()]
+            with st.expander(f"Months with their own target ({len(_set_targets)})"):
+                st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(_rows), max_px=260))
+                _clear = st.selectbox("Remove a month's target", ["—"] + list(_set_targets), key="clear_month_target",
+                                      format_func=lambda k: k if k == "—" else month_label(k))
+                if _clear != "—" and st.button(f"Remove {month_label(_clear)}", use_container_width=True, key="do_clear_month_target"):
+                    _df = get_data("Settings")
+                    _df = _df[_df["key"].astype(str).str.strip() != f"monthly_install_target:{_clear}"]
+                    if safe_update("Settings", _df):
+                        st.success(f"{month_label(_clear)} now uses the default target.")
+                        st.rerun()
 
-    if st.button("Save", type="primary", use_container_width=True, key="save_monthly_target",
-                 disabled=new_wd_end < new_wd_start):
-        if save_settings({"monthly_install_target": int(new_target),
-                          "work_day_start": int(new_wd_start),
-                          "work_day_end": int(new_wd_end)}):
-            st.success(f"Target {int(new_target):,}, working days {int(new_wd_start)}–{int(new_wd_end)}.")
-            st.rerun()
+        tg1, tg2, tg3 = st.columns(3)
+        with tg1:
+            new_target = st.number_input("Default target (months without their own)", min_value=0, step=100,
+                                         value=int(MONTHLY_TARGET), key="monthly_target_input")
+        with tg2:
+            new_wd_start = st.number_input("Working days from", min_value=1, max_value=31, step=1,
+                                           value=int(WORK_DAY_START), key="work_day_start_input")
+        with tg3:
+            new_wd_end = st.number_input("to", min_value=1, max_value=31, step=1,
+                                         value=int(WORK_DAY_END), key="work_day_end_input")
 
-    st.divider()
+        if new_wd_end < new_wd_start:
+            st.markdown('<div class="danger-box">The last working day must not be before the first.</div>',
+                        unsafe_allow_html=True)
+        else:
+            import calendar as _cal_adm
+            _last = _cal_adm.monthrange(_today_adm.year, _today_adm.month)[1]
+            _days = max(0, min(int(new_wd_end), _last) - int(new_wd_start) + 1)
+            st.markdown(
+                f'<div class="info-box">Day {int(new_wd_start)} to {int(new_wd_end)} — '
+                f'<b>{_days}</b> working days in {month_label(month_key(_today_adm))}'
+                + (f', {new_target / _days:,.0f} installs/day to reach {int(new_target):,}.' if _days and new_target else '.')
+                + '</div>', unsafe_allow_html=True)
 
-    subtab_tech, subtab_sup, subtab_loc = st.tabs(["👷 Technicians", "🧑‍💼 Supervisors", "📍 Locations"])
-
-    # ── Technicians ───────────────────────────────────────────────────────────
-    with subtab_tech:
-        if "tech_batch" not in st.session_state:
-            st.session_state["tech_batch"] = []
-        if "tech_form_version" not in st.session_state:
-            st.session_state["tech_form_version"] = 0
-        tv = st.session_state["tech_form_version"]
-
-        sub_hdr("plus", "Add Technicians (one or several)")
-        tc1, tc2, tc3, tc4 = st.columns([2, 1, 1, 1.3])
-        with tc1:
-            new_t_name = st.text_input("Technician Name", key=f"new_t_name_{tv}")
-        with tc2:
-            new_t_phone = st.text_input("Phone (optional)", key=f"new_t_phone_{tv}")
-        with tc3:
-            new_t_aadhar = st.text_input("Aadhar (optional)", key=f"new_t_aadhar_{tv}")
-        with tc4:
-            new_t_login = st.text_input("Login ID (optional)", key=f"new_t_login_{tv}", placeholder="TL_Vinod")
-        # Pick an existing supervisor to avoid typo-created duplicate groups,
-        # or type a new one.
-        sup_names_avail = sorted(sup_name_to_id.keys())
-        sup_choice = st.selectbox("Reports to supervisor (optional)", ["— none —"] + sup_names_avail, key=f"new_t_sup_{tv}",
-                                  help="Create supervisors in the Supervisors tab.")
-        # Store the stable id, not the name, so renaming a supervisor later
-        # doesn't orphan this technician.
-        new_t_sup = sup_name_to_id.get(sup_choice, "") if sup_choice != "— none —" else ""
-        new_t_site = st.selectbox("Site", ["— none —"] + list(active_locs), key=f"new_t_site_{tv}",
-                                  help="The site (Section) this technician normally works at.")
-        new_t_site = "" if new_t_site == "— none —" else new_t_site
-
-        if st.button("➕ Add To Batch", key="add_tech_batch_btn", type="primary", use_container_width=True):
-            if not new_t_name.strip():
-                st.error("❌ Technician Name is required.")
-            elif any(b["name"] == new_t_name.strip() for b in st.session_state["tech_batch"]):
-                st.error("❌ Already added to this batch.")
-            else:
-                st.session_state["tech_batch"].append({
-                    "name": new_t_name.strip(), "phone": new_t_phone.strip(),
-                    "aadhar": new_t_aadhar.strip(), "login_id": new_t_login.strip(),
-                    "supervisor": new_t_sup, "site": new_t_site,
-                })
-                st.session_state["tech_form_version"] += 1
+        if st.button("Save", type="primary", use_container_width=True, key="save_monthly_target",
+                     disabled=new_wd_end < new_wd_start):
+            if save_settings({"monthly_install_target": int(new_target),
+                              "work_day_start": int(new_wd_start),
+                              "work_day_end": int(new_wd_end)}):
+                st.success(f"Target {int(new_target):,}, working days {int(new_wd_start)}–{int(new_wd_end)}.")
                 st.rerun()
 
-        if st.session_state["tech_batch"]:
-            sub_hdr("receipt", "Batch Ready To Save")
-            for i, b in enumerate(st.session_state["tech_batch"]):
-                bcard, bdel = st.columns([5, 1])
-                with bcard:
-                    detail = " · ".join([x for x in [b["phone"], b["aadhar"], b.get("login_id", ""), (f"Sup: {b.get('supervisor','')}" if b.get("supervisor") else "")] if x]) or "no details given"
-                    st.markdown(f"""
+        st.divider()
+
+        subtab_tech, subtab_sup, subtab_loc = st.tabs(["👷 Technicians", "🧑‍💼 Supervisors", "📍 Locations"])
+
+        # ── Technicians ───────────────────────────────────────────────────────────
+        with subtab_tech:
+            if "tech_batch" not in st.session_state:
+                st.session_state["tech_batch"] = []
+            if "tech_form_version" not in st.session_state:
+                st.session_state["tech_form_version"] = 0
+            tv = st.session_state["tech_form_version"]
+
+            sub_hdr("plus", "Add Technicians (one or several)")
+            tc1, tc2, tc3, tc4 = st.columns([2, 1, 1, 1.3])
+            with tc1:
+                new_t_name = st.text_input("Technician Name", key=f"new_t_name_{tv}")
+            with tc2:
+                new_t_phone = st.text_input("Phone (optional)", key=f"new_t_phone_{tv}")
+            with tc3:
+                new_t_aadhar = st.text_input("Aadhar (optional)", key=f"new_t_aadhar_{tv}")
+            with tc4:
+                new_t_login = st.text_input("Login ID (optional)", key=f"new_t_login_{tv}", placeholder="TL_Vinod")
+            # Pick an existing supervisor to avoid typo-created duplicate groups,
+            # or type a new one.
+            sup_names_avail = sorted(sup_name_to_id.keys())
+            sup_choice = st.selectbox("Reports to supervisor (optional)", ["— none —"] + sup_names_avail, key=f"new_t_sup_{tv}",
+                                      help="Create supervisors in the Supervisors tab.")
+            # Store the stable id, not the name, so renaming a supervisor later
+            # doesn't orphan this technician.
+            new_t_sup = sup_name_to_id.get(sup_choice, "") if sup_choice != "— none —" else ""
+            new_t_site = st.selectbox("Site", ["— none —"] + list(active_locs), key=f"new_t_site_{tv}",
+                                      help="The site (Section) this technician normally works at.")
+            new_t_site = "" if new_t_site == "— none —" else new_t_site
+
+            if st.button("➕ Add To Batch", key="add_tech_batch_btn", type="primary", use_container_width=True):
+                if not new_t_name.strip():
+                    st.error("❌ Technician Name is required.")
+                elif any(b["name"] == new_t_name.strip() for b in st.session_state["tech_batch"]):
+                    st.error("❌ Already added to this batch.")
+                else:
+                    st.session_state["tech_batch"].append({
+                        "name": new_t_name.strip(), "phone": new_t_phone.strip(),
+                        "aadhar": new_t_aadhar.strip(), "login_id": new_t_login.strip(),
+                        "supervisor": new_t_sup, "site": new_t_site,
+                    })
+                    st.session_state["tech_form_version"] += 1
+                    st.rerun()
+
+            if st.session_state["tech_batch"]:
+                sub_hdr("receipt", "Batch Ready To Save")
+                for i, b in enumerate(st.session_state["tech_batch"]):
+                    bcard, bdel = st.columns([5, 1])
+                    with bcard:
+                        detail = " · ".join([x for x in [b["phone"], b["aadhar"], b.get("login_id", ""), (f"Sup: {b.get('supervisor','')}" if b.get("supervisor") else "")] if x]) or "no details given"
+                        st.markdown(f"""
                     <div class="item-card">
                         <b>{b['name']}</b><br/><span style="color:var(--ink-600);font-size:.85rem;">{detail}</span>
                     </div>
                     """, unsafe_allow_html=True)
-                with bdel:
-                    if st.button("🗑️", key=f"del_tech_batch_{i}"):
-                        st.session_state["tech_batch"].pop(i)
-                        st.rerun()
+                    with bdel:
+                        if st.button("🗑️", key=f"del_tech_batch_{i}"):
+                            st.session_state["tech_batch"].pop(i)
+                            st.rerun()
 
-            if st.button(f"💾 Save Batch ({len(st.session_state['tech_batch'])})", key="save_tech_batch", type="primary", use_container_width=True):
-                df_t_exist = get_data("Technicians")
-                existing_names = set(df_t_exist["name"].values) if (not df_t_exist.empty and "name" in df_t_exist.columns) else set()
-                new_rows, skipped = [], []
-                for b in st.session_state["tech_batch"]:
-                    if b["name"] in existing_names:
-                        skipped.append(b["name"])
+                if st.button(f"💾 Save Batch ({len(st.session_state['tech_batch'])})", key="save_tech_batch", type="primary", use_container_width=True):
+                    df_t_exist = get_data("Technicians")
+                    existing_names = set(df_t_exist["name"].values) if (not df_t_exist.empty and "name" in df_t_exist.columns) else set()
+                    new_rows, skipped = [], []
+                    for b in st.session_state["tech_batch"]:
+                        if b["name"] in existing_names:
+                            skipped.append(b["name"])
+                        else:
+                            new_rows.append({"name": b["name"], "phone": b["phone"], "aadhar": b["aadhar"], "is_active": "1", "login_id": b.get("login_id", ""), "supervisor": b.get("supervisor", ""), "site": b.get("site", "")})
+                    if new_rows:
+                        updated = pd.concat([df_t_exist, pd.DataFrame(new_rows)], ignore_index=True) if not df_t_exist.empty else pd.DataFrame(new_rows)
+                        if safe_update("Technicians", updated):
+                            st.success(f"✅ Added {len(new_rows)} technician(s).")
+                            if skipped:
+                                st.warning(f"⚠️ Skipped (already exist): {', '.join(skipped)}")
+                            st.session_state["tech_batch"] = []
+                            st.rerun()
                     else:
-                        new_rows.append({"name": b["name"], "phone": b["phone"], "aadhar": b["aadhar"], "is_active": "1", "login_id": b.get("login_id", ""), "supervisor": b.get("supervisor", ""), "site": b.get("site", "")})
-                if new_rows:
-                    updated = pd.concat([df_t_exist, pd.DataFrame(new_rows)], ignore_index=True) if not df_t_exist.empty else pd.DataFrame(new_rows)
-                    if safe_update("Technicians", updated):
-                        st.success(f"✅ Added {len(new_rows)} technician(s).")
-                        if skipped:
-                            st.warning(f"⚠️ Skipped (already exist): {', '.join(skipped)}")
-                        st.session_state["tech_batch"] = []
-                        st.rerun()
-                else:
-                    st.error(f"❌ All names already exist: {', '.join(skipped)}")
+                        st.error(f"❌ All names already exist: {', '.join(skipped)}")
 
-        sec_hdr("users", "Existing Technicians")
-        df_t = df_technicians_master.copy()
-        if not df_t.empty:
-            df_t = df_t.rename(columns={c: str(c).strip().lower() for c in df_t.columns})
-            for col in ["name", "phone", "aadhar", "is_active", "login_id", "supervisor", "site"]:
-                if col not in df_t.columns:
-                    df_t[col] = ""
+            sec_hdr("users", "Existing Technicians")
+            df_t = df_technicians_master.copy()
+            if not df_t.empty:
+                df_t = df_t.rename(columns={c: str(c).strip().lower() for c in df_t.columns})
+                for col in ["name", "phone", "aadhar", "is_active", "login_id", "supervisor", "site"]:
+                    if col not in df_t.columns:
+                        df_t[col] = ""
 
-        if df_t.empty:
-            st.info("No technicians added yet.")
-        else:
-            for idx, row in df_t.iterrows():
-                is_active = str(row.get("is_active", "1")).strip() in ["1", "1.0", "true", "yes"]
-                pill_color = "var(--brand-700)" if is_active else "var(--ink-600)"
-                pill_bg = "var(--brand-050)" if is_active else "var(--surface-200)"
-                pill_text = "Active" if is_active else "Inactive"
+            if df_t.empty:
+                st.info("No technicians added yet.")
+            else:
+                for idx, row in df_t.iterrows():
+                    is_active = str(row.get("is_active", "1")).strip() in ["1", "1.0", "true", "yes"]
+                    pill_color = "var(--brand-700)" if is_active else "var(--ink-600)"
+                    pill_bg = "var(--brand-050)" if is_active else "var(--surface-200)"
+                    pill_text = "Active" if is_active else "Inactive"
 
-                rc1, rc2 = st.columns([5, 2])
-                with rc1:
-                    detail = " · ".join([x for x in [
-                        str(row.get("phone", "")), str(row.get("aadhar", "")),
-                        (f"Login: {row.get('login_id','')}" if str(row.get("login_id","")).strip() else ""),
-                        f"Sup: {resolve_supervisor_name(row.get('supervisor','')) or '—'}",
-                        f"Site: {str(row.get('site','')).strip() or '—'}",
-                    ] if x]) or "no details on file"
-                    st.markdown(f"""
+                    rc1, rc2 = st.columns([5, 2])
+                    with rc1:
+                        detail = " · ".join([x for x in [
+                            str(row.get("phone", "")), str(row.get("aadhar", "")),
+                            (f"Login: {row.get('login_id','')}" if str(row.get("login_id","")).strip() else ""),
+                            f"Sup: {resolve_supervisor_name(row.get('supervisor','')) or '—'}",
+                            f"Site: {str(row.get('site','')).strip() or '—'}",
+                        ] if x]) or "no details on file"
+                        st.markdown(f"""
                     <div class="item-card">
                         <b>{row.get('name','')}</b>
                         <span style="background:{pill_bg};color:{pill_color};border-radius:20px;padding:2px 10px;
@@ -8539,352 +8740,352 @@ with tab_admin:
                         <span style="color:var(--ink-600);font-size:.85rem;">{detail}</span>
                     </div>
                     """, unsafe_allow_html=True)
-                with rc2:
-                    ecol, dcol = st.columns(2)
-                    with ecol:
-                        edit_clicked = st.button("✏️", key=f"edit_tech_{idx}")
-                    with dcol:
-                        del_clicked = st.button("🗑️", key=f"del_tech_{idx}")
+                    with rc2:
+                        ecol, dcol = st.columns(2)
+                        with ecol:
+                            edit_clicked = st.button("✏️", key=f"edit_tech_{idx}")
+                        with dcol:
+                            del_clicked = st.button("🗑️", key=f"del_tech_{idx}")
 
-                if edit_clicked:
-                    st.session_state["editing_tech_idx"] = idx
-                if del_clicked:
-                    st.session_state["deleting_tech_idx"] = idx
+                    if edit_clicked:
+                        st.session_state["editing_tech_idx"] = idx
+                    if del_clicked:
+                        st.session_state["deleting_tech_idx"] = idx
 
-                if st.session_state.get("editing_tech_idx") == idx:
-                    with st.form(f"edit_tech_form_{idx}"):
-                        e_name = st.text_input("Name", value=str(row.get("name", "")))
-                        e_phone = st.text_input("Phone (optional)", value=str(row.get("phone", "")))
-                        e_aadhar = st.text_input("Aadhar (optional)", value=str(row.get("aadhar", "")))
-                        e_login = st.text_input("Login ID (optional)", value=str(row.get("login_id", "")), placeholder="TL_Vinod")
-                        _cur_sup_name = resolve_supervisor_name(row.get("supervisor", ""))
-                        _sup_opts = ["— none —"] + sorted(sup_name_to_id.keys())
-                        _sup_idx = _sup_opts.index(_cur_sup_name) if _cur_sup_name in _sup_opts else 0
-                        e_sup_name = st.selectbox("Reports to supervisor", _sup_opts, index=_sup_idx)
-                        e_sup = sup_name_to_id.get(e_sup_name, "") if e_sup_name != "— none —" else ""
-                        _site_opts = ["— none —"] + list(active_locs)
-                        _cur_site = str(row.get("site", "")).strip()
-                        e_site = st.selectbox("Site", _site_opts,
-                                              index=_site_opts.index(_cur_site) if _cur_site in _site_opts else 0)
-                        e_site = "" if e_site == "— none —" else e_site
-                        e_active = st.selectbox("Status", ["Active", "Inactive"], index=0 if is_active else 1)
-                        sv, cn = st.columns(2)
-                        with sv:
-                            do_save = st.form_submit_button("💾 Save", type="primary")
-                        with cn:
-                            do_cancel = st.form_submit_button("Cancel")
-                    if do_save:
-                        if not e_name.strip():
-                            st.error("❌ Name cannot be empty.")
-                        else:
-                            df_t.loc[idx, ["name", "phone", "aadhar", "login_id", "supervisor", "site", "is_active"]] = [
-                                e_name.strip(), e_phone.strip(), e_aadhar.strip(), e_login.strip(), e_sup.strip(),
-                                e_site, "1" if e_active == "Active" else "0"
-                            ]
-                            if safe_update("Technicians", df_t):
-                                del st.session_state["editing_tech_idx"]
-                                st.success("✅ Updated.")
-                                st.rerun()
-                    if do_cancel:
-                        del st.session_state["editing_tech_idx"]
-                        st.rerun()
-
-                if st.session_state.get("deleting_tech_idx") == idx:
-                    st.markdown(f'<div class="warn-box">⚠️ Delete <b>{row.get("name","")}</b>? This removes them from future entry forms.</div>', unsafe_allow_html=True)
-                    yc, ncol = st.columns(2)
-                    with yc:
-                        if st.button("✅ Yes, Delete", key=f"conf_del_tech_{idx}"):
-                            df_t_new = df_t.drop(index=idx).reset_index(drop=True)
-                            if safe_update("Technicians", df_t_new):
-                                del st.session_state["deleting_tech_idx"]
-                                st.success("Deleted.")
-                                st.rerun()
-                    with ncol:
-                        if st.button("❌ Cancel", key=f"cancel_del_tech_{idx}"):
-                            del st.session_state["deleting_tech_idx"]
+                    if st.session_state.get("editing_tech_idx") == idx:
+                        with st.form(f"edit_tech_form_{idx}"):
+                            e_name = st.text_input("Name", value=str(row.get("name", "")))
+                            e_phone = st.text_input("Phone (optional)", value=str(row.get("phone", "")))
+                            e_aadhar = st.text_input("Aadhar (optional)", value=str(row.get("aadhar", "")))
+                            e_login = st.text_input("Login ID (optional)", value=str(row.get("login_id", "")), placeholder="TL_Vinod")
+                            _cur_sup_name = resolve_supervisor_name(row.get("supervisor", ""))
+                            _sup_opts = ["— none —"] + sorted(sup_name_to_id.keys())
+                            _sup_idx = _sup_opts.index(_cur_sup_name) if _cur_sup_name in _sup_opts else 0
+                            e_sup_name = st.selectbox("Reports to supervisor", _sup_opts, index=_sup_idx)
+                            e_sup = sup_name_to_id.get(e_sup_name, "") if e_sup_name != "— none —" else ""
+                            _site_opts = ["— none —"] + list(active_locs)
+                            _cur_site = str(row.get("site", "")).strip()
+                            e_site = st.selectbox("Site", _site_opts,
+                                                  index=_site_opts.index(_cur_site) if _cur_site in _site_opts else 0)
+                            e_site = "" if e_site == "— none —" else e_site
+                            e_active = st.selectbox("Status", ["Active", "Inactive"], index=0 if is_active else 1)
+                            sv, cn = st.columns(2)
+                            with sv:
+                                do_save = st.form_submit_button("💾 Save", type="primary")
+                            with cn:
+                                do_cancel = st.form_submit_button("Cancel")
+                        if do_save:
+                            if not e_name.strip():
+                                st.error("❌ Name cannot be empty.")
+                            else:
+                                df_t.loc[idx, ["name", "phone", "aadhar", "login_id", "supervisor", "site", "is_active"]] = [
+                                    e_name.strip(), e_phone.strip(), e_aadhar.strip(), e_login.strip(), e_sup.strip(),
+                                    e_site, "1" if e_active == "Active" else "0"
+                                ]
+                                if safe_update("Technicians", df_t):
+                                    del st.session_state["editing_tech_idx"]
+                                    st.success("✅ Updated.")
+                                    st.rerun()
+                        if do_cancel:
+                            del st.session_state["editing_tech_idx"]
                             st.rerun()
 
-    # ── Supervisors ───────────────────────────────────────────────────────────
-    with subtab_sup:
+                    if st.session_state.get("deleting_tech_idx") == idx:
+                        st.markdown(f'<div class="warn-box">⚠️ Delete <b>{row.get("name","")}</b>? This removes them from future entry forms.</div>', unsafe_allow_html=True)
+                        yc, ncol = st.columns(2)
+                        with yc:
+                            if st.button("✅ Yes, Delete", key=f"conf_del_tech_{idx}"):
+                                df_t_new = df_t.drop(index=idx).reset_index(drop=True)
+                                if safe_update("Technicians", df_t_new):
+                                    del st.session_state["deleting_tech_idx"]
+                                    st.success("Deleted.")
+                                    st.rerun()
+                        with ncol:
+                            if st.button("❌ Cancel", key=f"cancel_del_tech_{idx}"):
+                                del st.session_state["deleting_tech_idx"]
+                                st.rerun()
 
-        df_sup = df_supervisors_master.copy()
-        if df_sup.empty:
-            df_sup = pd.DataFrame(columns=["supervisor_id", "name", "phone", "is_active"])
-        for col in ["supervisor_id", "name", "phone", "is_active"]:
-            if col not in df_sup.columns:
-                df_sup[col] = ""
+        # ── Supervisors ───────────────────────────────────────────────────────────
+        with subtab_sup:
 
-        # -- Add a supervisor --
-        sub_hdr("plus", "Add Supervisor")
-        if "sup_form_version" not in st.session_state:
-            st.session_state["sup_form_version"] = 0
-        sv_v = st.session_state["sup_form_version"]
-        sc1, sc2 = st.columns([2, 1])
-        with sc1:
-            new_sup_name = st.text_input("Supervisor Name", key=f"new_sup_name_{sv_v}")
-        with sc2:
-            new_sup_phone = st.text_input("Phone (optional)", key=f"new_sup_phone_{sv_v}")
-        if st.button("➕ Add Supervisor", type="primary", use_container_width=True, key="add_sup_btn"):
-            nm = new_sup_name.strip()
-            if not nm:
-                st.error("❌ Supervisor Name is required.")
-            elif nm in set(df_sup["name"].astype(str).str.strip()):
-                st.error(f"❌ '{nm}' already exists.")
+            df_sup = df_supervisors_master.copy()
+            if df_sup.empty:
+                df_sup = pd.DataFrame(columns=["supervisor_id", "name", "phone", "is_active"])
+            for col in ["supervisor_id", "name", "phone", "is_active"]:
+                if col not in df_sup.columns:
+                    df_sup[col] = ""
+
+            # -- Add a supervisor --
+            sub_hdr("plus", "Add Supervisor")
+            if "sup_form_version" not in st.session_state:
+                st.session_state["sup_form_version"] = 0
+            sv_v = st.session_state["sup_form_version"]
+            sc1, sc2 = st.columns([2, 1])
+            with sc1:
+                new_sup_name = st.text_input("Supervisor Name", key=f"new_sup_name_{sv_v}")
+            with sc2:
+                new_sup_phone = st.text_input("Phone (optional)", key=f"new_sup_phone_{sv_v}")
+            if st.button("➕ Add Supervisor", type="primary", use_container_width=True, key="add_sup_btn"):
+                nm = new_sup_name.strip()
+                if not nm:
+                    st.error("❌ Supervisor Name is required.")
+                elif nm in set(df_sup["name"].astype(str).str.strip()):
+                    st.error(f"❌ '{nm}' already exists.")
+                else:
+                    new_id = f"S{int(time.time())}"  # stable id, never reused
+                    updated_sup = pd.concat([df_sup, pd.DataFrame([{
+                        "supervisor_id": new_id, "name": nm, "phone": new_sup_phone.strip(), "is_active": "1",
+                    }])], ignore_index=True)
+                    if safe_update("Supervisors", updated_sup):
+                        st.session_state["sup_form_version"] += 1
+                        st.success(f"✅ Added {nm}.")
+                        st.rerun()
+
+            # -- Existing supervisors + team assignment --
+            sec_hdr("users", "Supervisors &amp; Their Teams")
+            df_t_all = df_technicians_master.copy()
+            if not df_t_all.empty:
+                df_t_all = df_t_all.rename(columns={x: str(x).strip().lower() for x in df_t_all.columns})
+            for col in ["name", "login_id", "supervisor", "is_active"]:
+                if col not in df_t_all.columns:
+                    df_t_all[col] = ""
+
+            if df_sup.empty or df_sup["name"].astype(str).str.strip().eq("").all():
+                st.info("No supervisors yet — add one above.")
             else:
-                new_id = f"S{int(time.time())}"  # stable id, never reused
-                updated_sup = pd.concat([df_sup, pd.DataFrame([{
-                    "supervisor_id": new_id, "name": nm, "phone": new_sup_phone.strip(), "is_active": "1",
-                }])], ignore_index=True)
-                if safe_update("Supervisors", updated_sup):
-                    st.session_state["sup_form_version"] += 1
-                    st.success(f"✅ Added {nm}.")
+                all_tech_names = sorted([n for n in df_t_all["name"].astype(str).str.strip() if n])
+                for s_idx, s_row in df_sup.iterrows():
+                    s_id = str(s_row.get("supervisor_id", "")).strip()
+                    s_name = str(s_row.get("name", "")).strip()
+                    if not s_name:
+                        continue
+
+                    # Technicians currently pointing at this supervisor (by id, or
+                    # legacy by name).
+                    assigned_mask = df_t_all["supervisor"].astype(str).str.strip().isin([s_id, s_name])
+                    assigned = sorted([n for n in df_t_all.loc[assigned_mask, "name"].astype(str).str.strip() if n])
+
+                    with st.expander(f"🧑‍💼 {s_name} — {len(assigned)} technician(s)"):
+                        picked = st.multiselect(
+                            "Assigned technicians", all_tech_names, default=assigned,
+                            key=f"sup_assign_{s_id or s_idx}",
+                            help="Add or remove technicians here. Removing one leaves them unassigned, it does not delete them.",
+                        )
+                        ac1, ac2 = st.columns(2)
+                        with ac1:
+                            if st.button("💾 Save Team", type="primary", use_container_width=True, key=f"save_team_{s_id or s_idx}"):
+                                df_new = df_t_all.copy()
+                                # Clear anyone previously under this supervisor, then
+                                # set the current picks — handles unassignment too.
+                                df_new.loc[df_new["supervisor"].astype(str).str.strip().isin([s_id, s_name]), "supervisor"] = ""
+                                df_new.loc[df_new["name"].astype(str).str.strip().isin(picked), "supervisor"] = s_id
+                                if safe_update("Technicians", df_new):
+                                    st.success(f"✅ {s_name}'s team updated ({len(picked)} technician(s)).")
+                                    st.rerun()
+                        with ac2:
+                            if st.button("🗑️ Delete Supervisor", use_container_width=True, key=f"del_sup_{s_id or s_idx}"):
+                                st.session_state["deleting_sup"] = s_id or str(s_idx)
+
+                        if st.session_state.get("deleting_sup") == (s_id or str(s_idx)):
+                            st.markdown(f'<div class="warn-box">⚠️ Delete <b>{s_name}</b>? Their {len(assigned)} technician(s) stay, but become unassigned.</div>', unsafe_allow_html=True)
+                            dy, dn = st.columns(2)
+                            with dy:
+                                if st.button("✅ Yes, Delete", key=f"conf_del_sup_{s_id or s_idx}"):
+                                    df_t_clear = df_t_all.copy()
+                                    df_t_clear.loc[df_t_clear["supervisor"].astype(str).str.strip().isin([s_id, s_name]), "supervisor"] = ""
+                                    df_sup_new = df_sup.drop(index=s_idx).reset_index(drop=True)
+                                    if safe_update("Supervisors", df_sup_new) and safe_update("Technicians", df_t_clear):
+                                        del st.session_state["deleting_sup"]
+                                        st.success(f"Deleted {s_name}.")
+                                        st.rerun()
+                            with dn:
+                                if st.button("❌ Cancel", key=f"cancel_del_sup_{s_id or s_idx}"):
+                                    del st.session_state["deleting_sup"]
+                                    st.rerun()
+
+                # Anyone not under any supervisor — surfaced so nobody is forgotten.
+                known_ids_names = set(df_sup["supervisor_id"].astype(str).str.strip()) | set(df_sup["name"].astype(str).str.strip())
+                unassigned_mask = ~df_t_all["supervisor"].astype(str).str.strip().isin(known_ids_names - {""})
+                unassigned_names = sorted([n for n in df_t_all.loc[unassigned_mask, "name"].astype(str).str.strip() if n])
+                if unassigned_names:
+                    st.markdown(f'<div class="warn-box">⚠️ Not assigned to any supervisor: <b>{", ".join(unassigned_names)}</b></div>', unsafe_allow_html=True)
+
+        # ── Locations ─────────────────────────────────────────────────────────────
+        with subtab_loc:
+            if "loc_batch" not in st.session_state:
+                st.session_state["loc_batch"] = []
+            if "loc_form_version" not in st.session_state:
+                st.session_state["loc_form_version"] = 0
+            lv = st.session_state["loc_form_version"]
+
+            sub_hdr("plus", "Add Locations (one or several)")
+            new_loc_name = st.text_input("Location Name", key=f"new_loc_name_{lv}")
+
+            if st.button("➕ Add To Batch", key="add_loc_batch_btn", type="primary", use_container_width=True):
+                if not new_loc_name.strip():
+                    st.error("❌ Location name is required.")
+                elif new_loc_name.strip() in st.session_state["loc_batch"]:
+                    st.error("❌ Already added to this batch.")
+                else:
+                    st.session_state["loc_batch"].append(new_loc_name.strip())
+                    st.session_state["loc_form_version"] += 1
                     st.rerun()
 
-        # -- Existing supervisors + team assignment --
-        sec_hdr("users", "Supervisors &amp; Their Teams")
-        df_t_all = df_technicians_master.copy()
-        if not df_t_all.empty:
-            df_t_all = df_t_all.rename(columns={x: str(x).strip().lower() for x in df_t_all.columns})
-        for col in ["name", "login_id", "supervisor", "is_active"]:
-            if col not in df_t_all.columns:
-                df_t_all[col] = ""
-
-        if df_sup.empty or df_sup["name"].astype(str).str.strip().eq("").all():
-            st.info("No supervisors yet — add one above.")
-        else:
-            all_tech_names = sorted([n for n in df_t_all["name"].astype(str).str.strip() if n])
-            for s_idx, s_row in df_sup.iterrows():
-                s_id = str(s_row.get("supervisor_id", "")).strip()
-                s_name = str(s_row.get("name", "")).strip()
-                if not s_name:
-                    continue
-
-                # Technicians currently pointing at this supervisor (by id, or
-                # legacy by name).
-                assigned_mask = df_t_all["supervisor"].astype(str).str.strip().isin([s_id, s_name])
-                assigned = sorted([n for n in df_t_all.loc[assigned_mask, "name"].astype(str).str.strip() if n])
-
-                with st.expander(f"🧑‍💼 {s_name} — {len(assigned)} technician(s)"):
-                    picked = st.multiselect(
-                        "Assigned technicians", all_tech_names, default=assigned,
-                        key=f"sup_assign_{s_id or s_idx}",
-                        help="Add or remove technicians here. Removing one leaves them unassigned, it does not delete them.",
-                    )
-                    ac1, ac2 = st.columns(2)
-                    with ac1:
-                        if st.button("💾 Save Team", type="primary", use_container_width=True, key=f"save_team_{s_id or s_idx}"):
-                            df_new = df_t_all.copy()
-                            # Clear anyone previously under this supervisor, then
-                            # set the current picks — handles unassignment too.
-                            df_new.loc[df_new["supervisor"].astype(str).str.strip().isin([s_id, s_name]), "supervisor"] = ""
-                            df_new.loc[df_new["name"].astype(str).str.strip().isin(picked), "supervisor"] = s_id
-                            if safe_update("Technicians", df_new):
-                                st.success(f"✅ {s_name}'s team updated ({len(picked)} technician(s)).")
-                                st.rerun()
-                    with ac2:
-                        if st.button("🗑️ Delete Supervisor", use_container_width=True, key=f"del_sup_{s_id or s_idx}"):
-                            st.session_state["deleting_sup"] = s_id or str(s_idx)
-
-                    if st.session_state.get("deleting_sup") == (s_id or str(s_idx)):
-                        st.markdown(f'<div class="warn-box">⚠️ Delete <b>{s_name}</b>? Their {len(assigned)} technician(s) stay, but become unassigned.</div>', unsafe_allow_html=True)
-                        dy, dn = st.columns(2)
-                        with dy:
-                            if st.button("✅ Yes, Delete", key=f"conf_del_sup_{s_id or s_idx}"):
-                                df_t_clear = df_t_all.copy()
-                                df_t_clear.loc[df_t_clear["supervisor"].astype(str).str.strip().isin([s_id, s_name]), "supervisor"] = ""
-                                df_sup_new = df_sup.drop(index=s_idx).reset_index(drop=True)
-                                if safe_update("Supervisors", df_sup_new) and safe_update("Technicians", df_t_clear):
-                                    del st.session_state["deleting_sup"]
-                                    st.success(f"Deleted {s_name}.")
-                                    st.rerun()
-                        with dn:
-                            if st.button("❌ Cancel", key=f"cancel_del_sup_{s_id or s_idx}"):
-                                del st.session_state["deleting_sup"]
-                                st.rerun()
-
-            # Anyone not under any supervisor — surfaced so nobody is forgotten.
-            known_ids_names = set(df_sup["supervisor_id"].astype(str).str.strip()) | set(df_sup["name"].astype(str).str.strip())
-            unassigned_mask = ~df_t_all["supervisor"].astype(str).str.strip().isin(known_ids_names - {""})
-            unassigned_names = sorted([n for n in df_t_all.loc[unassigned_mask, "name"].astype(str).str.strip() if n])
-            if unassigned_names:
-                st.markdown(f'<div class="warn-box">⚠️ Not assigned to any supervisor: <b>{", ".join(unassigned_names)}</b></div>', unsafe_allow_html=True)
-
-    # ── Locations ─────────────────────────────────────────────────────────────
-    with subtab_loc:
-        if "loc_batch" not in st.session_state:
-            st.session_state["loc_batch"] = []
-        if "loc_form_version" not in st.session_state:
-            st.session_state["loc_form_version"] = 0
-        lv = st.session_state["loc_form_version"]
-
-        sub_hdr("plus", "Add Locations (one or several)")
-        new_loc_name = st.text_input("Location Name", key=f"new_loc_name_{lv}")
-
-        if st.button("➕ Add To Batch", key="add_loc_batch_btn", type="primary", use_container_width=True):
-            if not new_loc_name.strip():
-                st.error("❌ Location name is required.")
-            elif new_loc_name.strip() in st.session_state["loc_batch"]:
-                st.error("❌ Already added to this batch.")
-            else:
-                st.session_state["loc_batch"].append(new_loc_name.strip())
-                st.session_state["loc_form_version"] += 1
-                st.rerun()
-
-        if st.session_state["loc_batch"]:
-            sub_hdr("receipt", "Batch Ready To Save")
-            for i, l in enumerate(st.session_state["loc_batch"]):
-                bcard, bdel = st.columns([5, 1])
-                with bcard:
-                    st.markdown(f"""
+            if st.session_state["loc_batch"]:
+                sub_hdr("receipt", "Batch Ready To Save")
+                for i, l in enumerate(st.session_state["loc_batch"]):
+                    bcard, bdel = st.columns([5, 1])
+                    with bcard:
+                        st.markdown(f"""
                     <div class="item-card">
                         <b>{l}</b>
                     </div>
                     """, unsafe_allow_html=True)
-                with bdel:
-                    if st.button("🗑️", key=f"del_loc_batch_{i}"):
-                        st.session_state["loc_batch"].pop(i)
-                        st.rerun()
+                    with bdel:
+                        if st.button("🗑️", key=f"del_loc_batch_{i}"):
+                            st.session_state["loc_batch"].pop(i)
+                            st.rerun()
 
-            if st.button(f"💾 Save Batch ({len(st.session_state['loc_batch'])})", key="save_loc_batch", type="primary", use_container_width=True):
-                df_l_exist = get_data("Locations")
-                existing_locs = set(df_l_exist["location_name"].values) if (not df_l_exist.empty and "location_name" in df_l_exist.columns) else set()
-                new_rows, skipped = [], []
-                for l in st.session_state["loc_batch"]:
-                    if l in existing_locs:
-                        skipped.append(l)
+                if st.button(f"💾 Save Batch ({len(st.session_state['loc_batch'])})", key="save_loc_batch", type="primary", use_container_width=True):
+                    df_l_exist = get_data("Locations")
+                    existing_locs = set(df_l_exist["location_name"].values) if (not df_l_exist.empty and "location_name" in df_l_exist.columns) else set()
+                    new_rows, skipped = [], []
+                    for l in st.session_state["loc_batch"]:
+                        if l in existing_locs:
+                            skipped.append(l)
+                        else:
+                            new_rows.append({"location_name": l})
+                    if new_rows:
+                        updated = pd.concat([df_l_exist, pd.DataFrame(new_rows)], ignore_index=True) if not df_l_exist.empty else pd.DataFrame(new_rows)
+                        if safe_update("Locations", updated):
+                            st.success(f"✅ Added {len(new_rows)} location(s).")
+                            if skipped:
+                                st.warning(f"⚠️ Skipped (already exist): {', '.join(skipped)}")
+                            st.session_state["loc_batch"] = []
+                            st.rerun()
                     else:
-                        new_rows.append({"location_name": l})
-                if new_rows:
-                    updated = pd.concat([df_l_exist, pd.DataFrame(new_rows)], ignore_index=True) if not df_l_exist.empty else pd.DataFrame(new_rows)
-                    if safe_update("Locations", updated):
-                        st.success(f"✅ Added {len(new_rows)} location(s).")
-                        if skipped:
-                            st.warning(f"⚠️ Skipped (already exist): {', '.join(skipped)}")
-                        st.session_state["loc_batch"] = []
-                        st.rerun()
-                else:
-                    st.error(f"❌ All locations already exist: {', '.join(skipped)}")
+                        st.error(f"❌ All locations already exist: {', '.join(skipped)}")
 
-        sec_hdr("pin", "Existing Locations")
-        df_l = df_locations_master.copy()
-        if not df_l.empty:
-            df_l = df_l.rename(columns={c: str(c).strip().lower() for c in df_l.columns})
-            if "location_name" not in df_l.columns:
-                df_l["location_name"] = ""
+            sec_hdr("pin", "Existing Locations")
+            df_l = df_locations_master.copy()
+            if not df_l.empty:
+                df_l = df_l.rename(columns={c: str(c).strip().lower() for c in df_l.columns})
+                if "location_name" not in df_l.columns:
+                    df_l["location_name"] = ""
 
-        if df_l.empty:
-            st.info("No locations added yet.")
-        else:
-            for idx, row in df_l.iterrows():
-                rc1, rc2 = st.columns([5, 2])
-                with rc1:
-                    st.markdown(f"""
+            if df_l.empty:
+                st.info("No locations added yet.")
+            else:
+                for idx, row in df_l.iterrows():
+                    rc1, rc2 = st.columns([5, 2])
+                    with rc1:
+                        st.markdown(f"""
                     <div class="item-card">
                         <b>{row.get('location_name','')}</b>
                     </div>
                     """, unsafe_allow_html=True)
-                with rc2:
-                    ecol, dcol = st.columns(2)
-                    with ecol:
-                        edit_loc_clicked = st.button("✏️", key=f"edit_loc_{idx}")
-                    with dcol:
-                        del_loc_clicked = st.button("🗑️", key=f"del_loc_{idx}")
+                    with rc2:
+                        ecol, dcol = st.columns(2)
+                        with ecol:
+                            edit_loc_clicked = st.button("✏️", key=f"edit_loc_{idx}")
+                        with dcol:
+                            del_loc_clicked = st.button("🗑️", key=f"del_loc_{idx}")
 
-                if edit_loc_clicked:
-                    st.session_state["editing_loc_idx"] = idx
-                if del_loc_clicked:
-                    st.session_state["deleting_loc_idx"] = idx
+                    if edit_loc_clicked:
+                        st.session_state["editing_loc_idx"] = idx
+                    if del_loc_clicked:
+                        st.session_state["deleting_loc_idx"] = idx
 
-                if st.session_state.get("editing_loc_idx") == idx:
-                    with st.form(f"edit_loc_form_{idx}"):
-                        e_loc_name = st.text_input("Location Name", value=str(row.get("location_name", "")))
-                        sv, cn = st.columns(2)
-                        with sv:
-                            do_save_loc = st.form_submit_button("💾 Save", type="primary")
-                        with cn:
-                            do_cancel_loc = st.form_submit_button("Cancel")
-                    if do_save_loc:
-                        if not e_loc_name.strip():
-                            st.error("❌ Location name cannot be empty.")
-                        else:
-                            df_l.loc[idx, "location_name"] = e_loc_name.strip()
-                            if safe_update("Locations", df_l):
-                                del st.session_state["editing_loc_idx"]
-                                st.success("✅ Updated.")
-                                st.rerun()
-                    if do_cancel_loc:
-                        del st.session_state["editing_loc_idx"]
-                        st.rerun()
-
-                if st.session_state.get("deleting_loc_idx") == idx:
-                    st.markdown(f'<div class="warn-box">⚠️ Delete <b>{row.get("location_name","")}</b>?</div>', unsafe_allow_html=True)
-                    yc, ncol = st.columns(2)
-                    with yc:
-                        if st.button("✅ Yes, Delete", key=f"conf_del_loc_{idx}"):
-                            df_l_new = df_l.drop(index=idx).reset_index(drop=True)
-                            if safe_update("Locations", df_l_new):
-                                del st.session_state["deleting_loc_idx"]
-                                st.success("Deleted.")
-                                st.rerun()
-                    with ncol:
-                        if st.button("❌ Cancel", key=f"cancel_del_loc_{idx}"):
-                            del st.session_state["deleting_loc_idx"]
+                    if st.session_state.get("editing_loc_idx") == idx:
+                        with st.form(f"edit_loc_form_{idx}"):
+                            e_loc_name = st.text_input("Location Name", value=str(row.get("location_name", "")))
+                            sv, cn = st.columns(2)
+                            with sv:
+                                do_save_loc = st.form_submit_button("💾 Save", type="primary")
+                            with cn:
+                                do_cancel_loc = st.form_submit_button("Cancel")
+                        if do_save_loc:
+                            if not e_loc_name.strip():
+                                st.error("❌ Location name cannot be empty.")
+                            else:
+                                df_l.loc[idx, "location_name"] = e_loc_name.strip()
+                                if safe_update("Locations", df_l):
+                                    del st.session_state["editing_loc_idx"]
+                                    st.success("✅ Updated.")
+                                    st.rerun()
+                        if do_cancel_loc:
+                            del st.session_state["editing_loc_idx"]
                             st.rerun()
 
-    # ── Data Maintenance ──────────────────────────────────────────────────────
-    st.divider()
-    sec_hdr("broom", "Data Maintenance")
+                    if st.session_state.get("deleting_loc_idx") == idx:
+                        st.markdown(f'<div class="warn-box">⚠️ Delete <b>{row.get("location_name","")}</b>?</div>', unsafe_allow_html=True)
+                        yc, ncol = st.columns(2)
+                        with yc:
+                            if st.button("✅ Yes, Delete", key=f"conf_del_loc_{idx}"):
+                                df_l_new = df_l.drop(index=idx).reset_index(drop=True)
+                                if safe_update("Locations", df_l_new):
+                                    del st.session_state["deleting_loc_idx"]
+                                    st.success("Deleted.")
+                                    st.rerun()
+                        with ncol:
+                            if st.button("❌ Cancel", key=f"cancel_del_loc_{idx}"):
+                                del st.session_state["deleting_loc_idx"]
+                                st.rerun()
 
-    with st.expander("🔢 Fix 1PH / 3PH Install Counts", expanded=not bool(get_setting("phase_fix_applied", ""))):
-        already = str(get_setting("phase_fix_applied", "")).strip()
-        if already:
-            st.success(f"Already applied on {already}. Counts from new uploads are correct.")
-        else:
-            st.markdown("""
+        # ── Data Maintenance ──────────────────────────────────────────────────────
+        st.divider()
+        sec_hdr("broom", "Data Maintenance")
+
+        with st.expander("🔢 Fix 1PH / 3PH Install Counts", expanded=not bool(get_setting("phase_fix_applied", ""))):
+            already = str(get_setting("phase_fix_applied", "")).strip()
+            if already:
+                st.success(f"Already applied on {already}. Counts from new uploads are correct.")
+            else:
+                st.markdown("""
             <div class="warn-box">
             Installs whose meter type contains both a 1 and a 3 (e.g. <b>3PH 10-60A</b>)
             were counted as 1PH <b>and</b> 3PH, so Dashboard totals ran higher than Analytics.
             New uploads are now correct. This corrects what is already saved.
             </div>
             """, unsafe_allow_html=True)
-            if st.button("Preview Correction", use_container_width=True, key="preview_phase_fix"):
-                st.session_state["phase_fix_plan"] = plan_phase_count_repair()
+                if st.button("Preview Correction", use_container_width=True, key="preview_phase_fix"):
+                    st.session_state["phase_fix_plan"] = plan_phase_count_repair()
 
-            if "phase_fix_plan" in st.session_state:
-                plan, values = st.session_state["phase_fix_plan"]
-                if not values.empty:
-                    st.markdown("**How each meter type in your data was counted:**")
-                    st.dataframe(values, use_container_width=True, hide_index=True,
-                                 height=dataframe_height(len(values)))
-                if plan.empty:
-                    st.info("No correction needed — nothing was double counted.")
-                else:
-                    d1, d3 = int(plan["d_1ph"].sum()), int(plan["d_3ph"].sum())
-                    render_stat_tiles([
-                        ("bolt", f"{d1:+,}", "1PH", "change", "danger" if d1 < 0 else "normal"),
-                        ("bolt", f"{d3:+,}", "3PH", "change", "danger" if d3 < 0 else "normal"),
-                        ("target", f"{d1 + d3:+,}", "Total", "change", "danger" if d1 + d3 < 0 else "normal"),
-                    ])
-                    by_date = plan.groupby("date")[["d_1ph", "d_3ph"]].sum().reset_index()
-                    by_date["Total change"] = by_date["d_1ph"] + by_date["d_3ph"]
-                    by_date.columns = ["Date", "1PH change", "3PH change", "Total change"]
-                    st.dataframe(by_date.sort_values("Date", ascending=False), use_container_width=True,
-                                 hide_index=True, height=dataframe_height(len(by_date)))
-                    if st.button(f"Apply Correction to {len(plan)} row(s)", type="primary",
-                                 use_container_width=True, key="apply_phase_fix"):
-                        n = apply_phase_count_repair(plan)
-                        if n:
-                            # Guard: the correction is a one-time delta. Running
-                            # it twice would subtract the overcount twice.
-                            save_setting("phase_fix_applied", today_ist().isoformat())
-                            del st.session_state["phase_fix_plan"]
-                            st.success(f"✅ Corrected {n} row(s). Dashboard now matches Analytics.")
-                            st.rerun()
-                        else:
-                            st.error("Nothing was updated — no matching Installations rows found.")
+                if "phase_fix_plan" in st.session_state:
+                    plan, values = st.session_state["phase_fix_plan"]
+                    if not values.empty:
+                        st.markdown("**How each meter type in your data was counted:**")
+                        st.dataframe(values, use_container_width=True, hide_index=True,
+                                     height=dataframe_height(len(values)))
+                    if plan.empty:
+                        st.info("No correction needed — nothing was double counted.")
+                    else:
+                        d1, d3 = int(plan["d_1ph"].sum()), int(plan["d_3ph"].sum())
+                        render_stat_tiles([
+                            ("bolt", f"{d1:+,}", "1PH", "change", "danger" if d1 < 0 else "normal"),
+                            ("bolt", f"{d3:+,}", "3PH", "change", "danger" if d3 < 0 else "normal"),
+                            ("target", f"{d1 + d3:+,}", "Total", "change", "danger" if d1 + d3 < 0 else "normal"),
+                        ])
+                        by_date = plan.groupby("date")[["d_1ph", "d_3ph"]].sum().reset_index()
+                        by_date["Total change"] = by_date["d_1ph"] + by_date["d_3ph"]
+                        by_date.columns = ["Date", "1PH change", "3PH change", "Total change"]
+                        st.dataframe(by_date.sort_values("Date", ascending=False), use_container_width=True,
+                                     hide_index=True, height=dataframe_height(len(by_date)))
+                        if st.button(f"Apply Correction to {len(plan)} row(s)", type="primary",
+                                     use_container_width=True, key="apply_phase_fix"):
+                            n = apply_phase_count_repair(plan)
+                            if n:
+                                # Guard: the correction is a one-time delta. Running
+                                # it twice would subtract the overcount twice.
+                                save_setting("phase_fix_applied", today_ist().isoformat())
+                                del st.session_state["phase_fix_plan"]
+                                st.success(f"✅ Corrected {n} row(s). Dashboard now matches Analytics.")
+                                st.rerun()
+                            else:
+                                st.error("Nothing was updated — no matching Installations rows found.")
 
-    with st.expander("🗺️ Sync Map From Installs Log"):
-        st.markdown("""
+        with st.expander("🗺️ Sync Map From Installs Log"):
+            st.markdown("""
         <div class="info-box">
         Copies every install in the Installs log onto the Map, and fills in
         coordinates on Map pins that are missing them. Use once to recover
@@ -8892,28 +9093,28 @@ with tab_admin:
         nothing is duplicated and no install counts change.
         </div>
         """, unsafe_allow_html=True)
-        if st.button("Sync Map Now", type="primary", use_container_width=True, key="sync_map_from_log"):
-            df_log_all = get_data("UploadedInstallLog")
-            if df_log_all.empty or "key" not in df_log_all.columns:
-                st.warning("The Installs log is empty — nothing to sync.")
-            else:
-                recs = []
-                for _, r in df_log_all.iterrows():
-                    if not is_valid_installer_id(r.get("installer_id")):
-                        continue
-                    recs.append({col: r.get(col, "") for col in
-                                 ["key", "date", "time", "installer_id", "tech_name", "location",
-                                  "sno", "old_meter_no", "new_meter_no", "lat", "long"]})
-                with st.spinner(f"Syncing {len(recs):,} install(s) to the Map..."):
-                    changed, ok = mirror_records_to_map(recs)
-                if not ok:
-                    st.error("❌ Couldn't write to the Map. Check the 'MapRecords' tab exists in the Google Sheet.")
-                elif changed:
-                    st.success(f"✅ Added or updated {changed:,} record(s) on the Map.")
+            if st.button("Sync Map Now", type="primary", use_container_width=True, key="sync_map_from_log"):
+                df_log_all = get_data("UploadedInstallLog")
+                if df_log_all.empty or "key" not in df_log_all.columns:
+                    st.warning("The Installs log is empty — nothing to sync.")
                 else:
-                    st.info("The Map already matches the Installs log.")
-    with st.expander(f"🔒 Remove Non-{INSTALLER_ID_PREFIX} Installer Records"):
-        st.markdown(f"""
+                    recs = []
+                    for _, r in df_log_all.iterrows():
+                        if not is_valid_installer_id(r.get("installer_id")):
+                            continue
+                        recs.append({col: r.get(col, "") for col in
+                                     ["key", "date", "time", "installer_id", "tech_name", "location",
+                                      "sno", "old_meter_no", "new_meter_no", "lat", "long"]})
+                    with st.spinner(f"Syncing {len(recs):,} install(s) to the Map..."):
+                        changed, ok = mirror_records_to_map(recs)
+                    if not ok:
+                        st.error("❌ Couldn't write to the Map. Check the 'MapRecords' tab exists in the Google Sheet.")
+                    elif changed:
+                        st.success(f"✅ Added or updated {changed:,} record(s) on the Map.")
+                    else:
+                        st.info("The Map already matches the Installs log.")
+        with st.expander(f"🔒 Remove Non-{INSTALLER_ID_PREFIX} Installer Records"):
+            st.markdown(f"""
         <div class="danger-box">
         ⚠️ Permanently removes any install record whose Installer LoginID doesn't start with
         <b>{INSTALLER_ID_PREFIX}</b> (from records saved before this filter was standardized
@@ -8921,76 +9122,76 @@ with tab_admin:
         Installations totals. This cannot be undone.
         </div>
         """, unsafe_allow_html=True)
-        cleanup_pin = st.text_input("Enter PIN to unlock", type="password", key="cleanup_pin")
-        if cleanup_pin == PIN_CODE:
-            if st.button(f"🧹 Remove All Non-{INSTALLER_ID_PREFIX} Records", type="primary", use_container_width=True, key="run_cleanup_btn"):
-                removed_log, removed_araw = cleanup_non_tl_records()
-                if removed_log or removed_araw:
-                    st.success(f"✅ Removed {removed_log} record(s) from Installs data and {removed_araw} from Analytics data. Installations totals have been corrected.")
-                else:
-                    st.info(f"No non-{INSTALLER_ID_PREFIX} records found — nothing to remove.")
-                st.rerun()
-        elif cleanup_pin:
-            st.error("❌ Incorrect PIN.")
+            cleanup_pin = st.text_input("Enter PIN to unlock", type="password", key="cleanup_pin")
+            if cleanup_pin == PIN_CODE:
+                if st.button(f"🧹 Remove All Non-{INSTALLER_ID_PREFIX} Records", type="primary", use_container_width=True, key="run_cleanup_btn"):
+                    removed_log, removed_araw = cleanup_non_tl_records()
+                    if removed_log or removed_araw:
+                        st.success(f"✅ Removed {removed_log} record(s) from Installs data and {removed_araw} from Analytics data. Installations totals have been corrected.")
+                    else:
+                        st.info(f"No non-{INSTALLER_ID_PREFIX} records found — nothing to remove.")
+                    st.rerun()
+            elif cleanup_pin:
+                st.error("❌ Incorrect PIN.")
 
-    with st.expander("🔎 Check For Possible Double-Counted Installs"):
-        st.markdown("""
+        with st.expander("🔎 Check For Possible Double-Counted Installs"):
+            st.markdown("""
         <div class="info-box">
         Finds Installations rows whose total is <b>higher</b> than the uploaded installs behind
         them. Each flagged row holds real uploaded installs <b>plus</b> an extra amount — so the
         fix is to remove the extra, never to delete the row.
         </div>
         """, unsafe_allow_html=True)
-        if st.button("🔎 Run Discrepancy Check", use_container_width=True, key="run_discrepancy_check"):
-            # Kept in session state: a button drawn inside another button's
-            # result never fires, because clicking it reruns the app and the
-            # outer button is no longer "pressed".
-            st.session_state["discrepancy_report"] = diagnose_installations_discrepancy()
+            if st.button("🔎 Run Discrepancy Check", use_container_width=True, key="run_discrepancy_check"):
+                # Kept in session state: a button drawn inside another button's
+                # result never fires, because clicking it reruns the app and the
+                # outer button is no longer "pressed".
+                st.session_state["discrepancy_report"] = diagnose_installations_discrepancy()
 
-        if "discrepancy_report" in st.session_state:
-            flagged = st.session_state["discrepancy_report"]
-            if flagged.empty:
-                st.success("✅ No discrepancies — every row matches its uploaded installs.")
-            else:
-                extra_total = int(flagged["Implied Manual Qty"].sum())
-                st.warning(f"⚠️ {len(flagged)} row(s) have {extra_total} install(s) more than their uploads support.")
-                st.markdown("""
+            if "discrepancy_report" in st.session_state:
+                flagged = st.session_state["discrepancy_report"]
+                if flagged.empty:
+                    st.success("✅ No discrepancies — every row matches its uploaded installs.")
+                else:
+                    extra_total = int(flagged["Implied Manual Qty"].sum())
+                    st.warning(f"⚠️ {len(flagged)} row(s) have {extra_total} install(s) more than their uploads support.")
+                    st.markdown("""
                 <div class="warn-box">
                 Tick a row to remove its extra — its uploaded installs stay, split correctly into
                 1PH / 3PH. Leave a row unticked only if the extra is real work that was never uploaded.
                 </div>
                 """, unsafe_allow_html=True)
-                select_all = st.checkbox("Select all rows", key="discrepancy_select_all")
-                editable = flagged.copy()
-                editable.insert(0, "Remove extra", bool(select_all))
-                edited = st.data_editor(
-                    editable, use_container_width=True, hide_index=True,
-                    # The key includes the select-all state so toggling it
-                    # rebuilds the ticks instead of keeping stale ones.
-                    key=f"discrepancy_editor_{int(select_all)}",
-                    disabled=[col for col in editable.columns if col != "Remove extra"],
-                    height=dataframe_height(len(editable)),
-                )
-                picked = edited[edited["Remove extra"]]
-                extra = int(picked["Implied Manual Qty"].sum()) if not picked.empty else 0
-                if st.button(f"Remove {extra} extra install(s) from {len(picked)} row(s)", type="primary",
-                             use_container_width=True, disabled=picked.empty, key="apply_discrepancy_fix"):
-                    keys = list(zip(picked["Date"], picked["Technician"], picked["Location"]))
-                    n = reduce_rows_to_upload_counts(keys)
-                    del st.session_state["discrepancy_report"]
-                    if n:
-                        st.success(f"✅ Removed {extra} extra install(s) from {n} row(s). Dashboard now matches Analytics.")
-                    else:
-                        st.error("Nothing changed — those rows may have been edited since the check ran. Run the check again.")
-                    st.rerun()
+                    select_all = st.checkbox("Select all rows", key="discrepancy_select_all")
+                    editable = flagged.copy()
+                    editable.insert(0, "Remove extra", bool(select_all))
+                    edited = st.data_editor(
+                        editable, use_container_width=True, hide_index=True,
+                        # The key includes the select-all state so toggling it
+                        # rebuilds the ticks instead of keeping stale ones.
+                        key=f"discrepancy_editor_{int(select_all)}",
+                        disabled=[col for col in editable.columns if col != "Remove extra"],
+                        height=dataframe_height(len(editable)),
+                    )
+                    picked = edited[edited["Remove extra"]]
+                    extra = int(picked["Implied Manual Qty"].sum()) if not picked.empty else 0
+                    if st.button(f"Remove {extra} extra install(s) from {len(picked)} row(s)", type="primary",
+                                 use_container_width=True, disabled=picked.empty, key="apply_discrepancy_fix"):
+                        keys = list(zip(picked["Date"], picked["Technician"], picked["Location"]))
+                        n = reduce_rows_to_upload_counts(keys)
+                        del st.session_state["discrepancy_report"]
+                        if n:
+                            st.success(f"✅ Removed {extra} extra install(s) from {n} row(s). Dashboard now matches Analytics.")
+                        else:
+                            st.error("Nothing changed — those rows may have been edited since the check ran. Run the check again.")
+                        st.rerun()
 
-            if not flagged.empty:
-                st.download_button("📥 Download This Report", data=flagged.to_csv(index=False).encode("utf-8"),
-                                   file_name="installations_discrepancy_report.csv", mime="text/csv",
-                                   use_container_width=True, on_click="ignore")
+                if not flagged.empty:
+                    st.download_button("📥 Download This Report", data=flagged.to_csv(index=False).encode("utf-8"),
+                                       file_name="installations_discrepancy_report.csv", mime="text/csv",
+                                       use_container_width=True, on_click="ignore")
 
-    with st.expander("↩️ Undo A Previous Upload"):
-        st.markdown("""
+        with st.expander("↩️ Undo A Previous Upload"):
+            st.markdown("""
         <div class="info-box">
         Re-upload the exact same Excel file you used for a previous upload (e.g. the file you
         once used in the Map tab's legacy uploader, before that was separated from Installations).
@@ -8999,64 +9200,69 @@ with tab_admin:
         you remove precisely those, correctly reversing their 1PH/3PH counts.
         </div>
         """, unsafe_allow_html=True)
-        undo_pin = st.text_input("Enter PIN to unlock", type="password", key="undo_pin")
-        if undo_pin == PIN_CODE:
-            undo_file = st.file_uploader("Re-upload the file to undo", type=["xlsx"], key="undo_uploader")
-            if undo_file is not None:
-                if st.button("🔍 Find Matching Records In Installs Data", use_container_width=True, key="undo_find_btn"):
-                    file_keys = find_matching_log_keys_from_file(undo_file)
-                    if file_keys is None:
-                        st.error("❌ Could not read this file's columns — make sure it's the same export format.")
-                    elif not file_keys:
-                        st.warning("⚠️ No valid records found in this file.")
-                    else:
-                        df_log_undo = get_data("UploadedInstallLog")
-                        if df_log_undo.empty or "key" not in df_log_undo.columns:
-                            st.info("No Installs data on file at all — nothing to undo.")
+            undo_pin = st.text_input("Enter PIN to unlock", type="password", key="undo_pin")
+            if undo_pin == PIN_CODE:
+                undo_file = st.file_uploader("Re-upload the file to undo", type=["xlsx"], key="undo_uploader")
+                if undo_file is not None:
+                    if st.button("🔍 Find Matching Records In Installs Data", use_container_width=True, key="undo_find_btn"):
+                        file_keys = find_matching_log_keys_from_file(undo_file)
+                        if file_keys is None:
+                            st.error("❌ Could not read this file's columns — make sure it's the same export format.")
+                        elif not file_keys:
+                            st.warning("⚠️ No valid records found in this file.")
                         else:
-                            matching = df_log_undo[df_log_undo["key"].isin(file_keys)]
-                            if matching.empty:
-                                st.info("None of this file's records currently exist in Installs data — they may already have been removed, or this file was never merged in.")
+                            df_log_undo = get_data("UploadedInstallLog")
+                            if df_log_undo.empty or "key" not in df_log_undo.columns:
+                                st.info("No Installs data on file at all — nothing to undo.")
                             else:
-                                st.session_state["pending_undo_keys"] = set(matching["key"].values)
-                                st.warning(f"⚠️ Found {len(matching)} record(s) from this file still in Installs data.")
-                                st.dataframe(matching, use_container_width=True, hide_index=True, height=dataframe_height(len(matching)))
-            if "pending_undo_keys" in st.session_state:
-                if st.button(f"🗑️ Remove These {len(st.session_state['pending_undo_keys'])} Record(s) & Reverse Counts", type="primary", use_container_width=True, key="undo_remove_btn"):
-                    removed = remove_install_log_rows(st.session_state["pending_undo_keys"])
-                    st.success(f"✅ Removed {removed} record(s) and corrected Installations totals.")
-                    del st.session_state["pending_undo_keys"]
-                    st.rerun()
-        elif undo_pin:
-            st.error("❌ Incorrect PIN.")
+                                matching = df_log_undo[df_log_undo["key"].isin(file_keys)]
+                                if matching.empty:
+                                    st.info("None of this file's records currently exist in Installs data — they may already have been removed, or this file was never merged in.")
+                                else:
+                                    st.session_state["pending_undo_keys"] = set(matching["key"].values)
+                                    st.warning(f"⚠️ Found {len(matching)} record(s) from this file still in Installs data.")
+                                    st.dataframe(matching, use_container_width=True, hide_index=True, height=dataframe_height(len(matching)))
+                if "pending_undo_keys" in st.session_state:
+                    if st.button(f"🗑️ Remove These {len(st.session_state['pending_undo_keys'])} Record(s) & Reverse Counts", type="primary", use_container_width=True, key="undo_remove_btn"):
+                        removed = remove_install_log_rows(st.session_state["pending_undo_keys"])
+                        st.success(f"✅ Removed {removed} record(s) and corrected Installations totals.")
+                        del st.session_state["pending_undo_keys"]
+                        st.rerun()
+            elif undo_pin:
+                st.error("❌ Incorrect PIN.")
 
-    with st.expander("🔁 Find & Remove Duplicate Installs (SNO-based)"):
-        st.markdown("""
+        with st.expander("🔁 Find & Remove Duplicate Installs (SNO-based)"):
+            st.markdown("""
         <div class="info-box">
         Same SNO twice on the same date usually means one install was uploaded twice.
         Scoped to Installs data — for Map-only duplicates use the Map tab.
         </div>
         """, unsafe_allow_html=True)
-        if st.button("🔎 Scan For Duplicates", use_container_width=True, key="scan_sno_dups_btn"):
-            st.session_state["sno_dups_scanned"] = True
-        scanned = st.session_state.get("sno_dups_scanned", False)
-        sno_dups = find_sno_duplicates() if scanned else pd.DataFrame()
-        if scanned and sno_dups.empty:
-            st.success("✅ No same-SNO-same-date duplicates found in Installs data.")
-        elif scanned:
-            st.warning(f"⚠️ Found {len(sno_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
-            edited_sno_dups = st.data_editor(sno_dups, use_container_width=True, hide_index=True, key="sno_dups_editor", disabled=[c for c in sno_dups.columns if c != "Keep?"])
-            dup_pin = st.text_input("Enter PIN to unlock removal", type="password", key="sno_dup_pin")
-            if dup_pin == PIN_CODE:
-                to_remove_sno = edited_sno_dups[~edited_sno_dups["Keep?"]]["Key"].tolist()
-                if st.button(f"🗑️ Remove {len(to_remove_sno)} Unchecked Record(s) & Reverse Counts", type="primary", use_container_width=True, disabled=not to_remove_sno, key="remove_sno_dups_btn"):
-                    removed = remove_install_log_rows(to_remove_sno)
-                    st.success(f"✅ Removed {removed} duplicate record(s) and corrected Installations totals.")
-                    st.rerun()
-            elif dup_pin:
-                st.error("❌ Incorrect PIN.")
+            if st.button("🔎 Scan For Duplicates", use_container_width=True, key="scan_sno_dups_btn"):
+                st.session_state["sno_dups_scanned"] = True
+            scanned = st.session_state.get("sno_dups_scanned", False)
+            sno_dups = find_sno_duplicates() if scanned else pd.DataFrame()
+            if scanned and sno_dups.empty:
+                st.success("✅ No same-SNO-same-date duplicates found in Installs data.")
+            elif scanned:
+                st.warning(f"⚠️ Found {len(sno_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
+                edited_sno_dups = st.data_editor(sno_dups, use_container_width=True, hide_index=True, key="sno_dups_editor", disabled=[c for c in sno_dups.columns if c != "Keep?"])
+                dup_pin = st.text_input("Enter PIN to unlock removal", type="password", key="sno_dup_pin")
+                if dup_pin == PIN_CODE:
+                    to_remove_sno = edited_sno_dups[~edited_sno_dups["Keep?"]]["Key"].tolist()
+                    if st.button(f"🗑️ Remove {len(to_remove_sno)} Unchecked Record(s) & Reverse Counts", type="primary", use_container_width=True, disabled=not to_remove_sno, key="remove_sno_dups_btn"):
+                        removed = remove_install_log_rows(to_remove_sno)
+                        st.success(f"✅ Removed {removed} duplicate record(s) and corrected Installations totals.")
+                        st.rerun()
+                elif dup_pin:
+                    st.error("❌ Incorrect PIN.")
 
-        near_dups = find_near_time_duplicates() if scanned else pd.DataFrame()
-        if not near_dups.empty:
-            sub_hdr("clock", "Lower-Confidence: Same Installer, Times Within 2 Minutes")
-            st.dataframe(near_dups, use_container_width=True, hide_index=True, height=dataframe_height(len(near_dups)))
+            near_dups = find_near_time_duplicates() if scanned else pd.DataFrame()
+            if not near_dups.empty:
+                sub_hdr("clock", "Lower-Confidence: Same Installer, Times Within 2 Minutes")
+                st.dataframe(near_dups, use_container_width=True, hide_index=True, height=dataframe_height(len(near_dups)))
+
+
+# ── End of the run: clear the first-load screen ──────────────────────────────
+_splash.empty()
+st.session_state["_splash_done"] = True
