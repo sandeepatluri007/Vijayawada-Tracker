@@ -3259,7 +3259,10 @@ def _hr_offer_pdf(c, logo) -> bytes:
     _hr_pdf_para(pdf, c["closing"])
 
     # Signatures: left blank for a wet signature and the company seal.
-    if pdf.get_y() > 232:
+    # Keep the block whole, but move it to a new page only when it genuinely
+    # won't fit under the text. A fixed cut-off pushed it over even with room
+    # to spare. The block below is 37 mm tall.
+    if pdf.get_y() + 38 > pdf.page_break_trigger:
         pdf.add_page()
     pdf.ln(4)
     pdf.set_font("Helvetica", "", 9.5)
