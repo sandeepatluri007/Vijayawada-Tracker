@@ -30,6 +30,9 @@ the app creates and appends data automatically):
                            joining_date, bank, account_no, pan, pf_no, status, offer_ref
                            (HR tab: offer letters, payslips)
   Roles                 - designation, duties, schedule
+  Liaisoning            - location, section_code, lineman, rate, designation, phone
+                           (older sheets without designation/phone are updated
+                           automatically the first time the Liaisoning tab opens)
                            (HR tab: responsibilities offered per role in offer letters)
                            (ageing material sent back to store; comes off pending stock)
                            (Technicians.supervisor holds the supervisor_id)
@@ -4502,6 +4505,17 @@ def load_liaisoning() -> pd.DataFrame:
     for c in ("location", "section_code", "lineman"):
         df[c] = df[c].astype(str).str.strip()
     df["section_code"] = df["section_code"].apply(normalize_section_code)
+    for c in ("designation", "phone"):
+        if c not in df.columns:
+            df[c] = ""
+        df[c] = df[c].astype(str).str.strip().replace({"nan": "", "None": ""})
+    df["phone"] = df["phone"].apply(lambda v: v[:-2] if v.endswith(".0") else v)
+    # Spacing tidied ("PADAMATI.  RAJESH " -> "PADAMATI. RAJESH") so one person
+    # never shows up as two linemen.
+    df["lineman"] = df["lineman"].apply(lambda v: " ".join(_re.sub(r"\.(?=\S)", ". ", v).split()) if v not in ("nan", "None") else "")
+    # One spelling per lineman and per section, so neither is split in two.
+    df["lineman"] = _one_spelling(df["lineman"], lambda v: _re.sub(r"[^A-Z0-9]", "", str(v).upper()))
+    df["location"] = _one_spelling(df["location"], section_key)
     return df
 
 
@@ -4527,7 +4541,8 @@ def liaisoning_table(mkey: str) -> pd.DataFrame:
     counts = month_section_counts(mkey)
     mapping = load_liaisoning()
     if counts.empty and mapping.empty:
-        return pd.DataFrame(columns=["location", "section_code", "installs", "lineman", "rate", "payable"])
+        return pd.DataFrame(columns=["location", "section_code", "installs", "lineman", "rate", "payable",
+                                     "designation", "phone"])
     if counts.empty:
         counts = pd.DataFrame(columns=["location", "section_code", "installs"])
     # Matched on a normalised section name, so capitalisation or spacing
@@ -4541,12 +4556,243 @@ def liaisoning_table(mkey: str) -> pd.DataFrame:
     # Show the name as it appears in the install data, falling back to the
     # mapping's spelling for codes with no installs yet.
     merged["location"] = merged["location"].fillna(merged.get("location_map"))
+    _pref = dict(zip(counts["_key"], counts["location"]))
+    merged["location"] = merged["_key"].map(_pref).fillna(merged["location"])
     merged["installs"] = pd.to_numeric(merged["installs"], errors="coerce").fillna(0).astype(int)
     merged["lineman"] = merged["lineman"].fillna("").astype(str)
     merged["rate"] = pd.to_numeric(merged["rate"], errors="coerce").fillna(0.0)
     merged["payable"] = merged["installs"] * merged["rate"]
-    cols = ["location", "section_code", "installs", "lineman", "rate", "payable"]
+    for c in ("designation", "phone"):
+        merged[c] = merged[c].fillna("").astype(str) if c in merged.columns else ""
+    cols = ["location", "section_code", "installs", "lineman", "rate", "payable", "designation", "phone"]
     return merged[cols].sort_values(["location", "section_code"]).reset_index(drop=True)
+
+
+# ── Liaisoning: linemen list upload, spelling checks, format migration ──────
+# The Liaisoning sheet gained two columns: designation and phone. Older sheets
+# (location, section_code, lineman, rate) are read as-is — the new columns come
+# back blank — and are rewritten in the new layout once, keeping every row.
+LIAISONING_EXTRA_COLS = ["designation", "phone"]
+LIAISONING_ALL_COLS = LIAISONING_COLS + LIAISONING_EXTRA_COLS
+import difflib as _difflib
+
+
+def clean_lineman_name(name) -> str:
+    """Tidy spacing in a lineman's name without changing its spelling:
+    'PADAMATI.  RAJESH ' -> 'PADAMATI. RAJESH', 'SK.JANI' -> 'SK. JANI'."""
+    t = str(name or "").replace("\n", " ").strip()
+    if t.lower() in ("nan", "none"):
+        return ""
+    t = _re.sub(r"\.(?=\S)", ". ", t)
+    return " ".join(t.split())
+
+
+def lineman_key(name) -> str:
+    """Comparison key for a lineman: case, dots and spaces ignored, so
+    'Padamati Rajesh', 'PADAMATI.  RAJESH ' and 'padamati.rajesh' are one person."""
+    return _re.sub(r"[^A-Z0-9]", "", str(name or "").upper())
+
+
+def closest_match(name, candidates, key=lineman_key, cutoff: float = 0.85):
+    """The candidate that `name` is the same as, allowing for case and spacing
+    (exact on the key) or a small spelling slip ('KOCHCHARLA' / 'KOCHARLA').
+    Returns (candidate, 'exact'|'spelling') or (None, None)."""
+    k = key(name)
+    if not k:
+        return None, None
+    keyed = {}
+    for c in candidates:
+        ck = key(c)
+        if ck and ck not in keyed:
+            keyed[ck] = c
+    if k in keyed:
+        return keyed[k], "exact"
+    best = _difflib.get_close_matches(k, list(keyed), n=1, cutoff=cutoff)
+    if best:
+        return keyed[best[0]], "spelling"
+    return None, None
+
+
+def clean_phone(v) -> str:
+    t = str(v or "").strip()
+    if t.endswith(".0"):
+        t = t[:-2]
+    if t.lower() in ("nan", "none"):
+        return ""
+    return _re.sub(r"[^\d+]", "", t)
+
+
+def parse_route_codes(text):
+    """Route codes as written in a department staff list: '18,34,35', '09, 10',
+    '11.13,20' (a dot typed for a comma) or a range '07-12'. Returns
+    (codes, skipped) — skipped holds entries that aren't section codes, like 'HV'."""
+    raw = str(text or "").strip()
+    if raw.lower() in ("", "nan", "none"):
+        return [], []
+    # 11.13 is two codes typed with a dot, not a decimal.
+    raw = _re.sub(r"(?<=\d)\.(?=\d)", ",", raw)
+    raw = raw.replace(";", ",").replace("/", ",").replace("&", ",")
+    skipped = []
+    for tok in _re.split(r"[,\s]+", _re.sub(r"\s*[-–]\s*", "-", raw)):
+        if tok and not _re.fullmatch(r"\d{1,2}(-\d{1,2})?", tok):
+            skipped.append(tok)
+    return parse_section_codes(raw), skipped
+
+
+def _staff_header(rows):
+    """Find the header row of a staff list and which column holds what.
+    Returns (row_index, {'name','designation','phone','codes'}) or (None, {})."""
+    for i, row in enumerate(rows[:15]):
+        cells = [str(c or "").strip().upper() for c in row]
+        cols = {}
+        for j, c in enumerate(cells):
+            cc = _re.sub(r"[^A-Z ]", " ", c)
+            cc = " ".join(cc.split())
+            if "codes" not in cols and ("ROUTE" in cc or ("SECTION" in cc and "CODE" in cc) or cc in ("CODES", "CODE")):
+                cols["codes"] = j
+            elif "name" not in cols and "NAME" in cc:
+                cols["name"] = j
+            elif "designation" not in cols and (cc.startswith("DESIG") or cc.startswith("DIGIN") or cc.startswith("DESG") or cc == "POST"):
+                cols["designation"] = j
+            elif ("PH" in cc.replace(" ", "") or "PHONE" in cc or "MOBILE" in cc or "CELL" in cc):
+                # Lists often have two phone columns; the first filled one is used.
+                cols.setdefault("phones", []).append(j)
+        if "name" in cols and "codes" in cols:
+            return i, cols
+    return None, {}
+
+
+def staff_list_sheets(file_bytes: bytes, file_name: str) -> dict:
+    """{sheet name -> rows} for every sheet that looks like a linemen list
+    (has a NAME and a ROUTE/SECTION CODES column)."""
+    out = {}
+    if str(file_name).lower().endswith(".csv"):
+        frame = pd.read_csv(io.BytesIO(file_bytes), header=None, dtype=str, keep_default_na=False)
+        rows = frame.values.tolist()
+        if _staff_header(rows)[0] is not None:
+            out["CSV"] = rows
+        return out
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
+    for ws in wb.worksheets:
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+        if _staff_header(rows)[0] is not None:
+            out[ws.title] = rows
+    return out
+
+
+def staff_list_title(rows) -> str:
+    """Text above the header row — e.g. 'ELECTRICAL DEPARTMENT CHITTINAGAR
+    SECTION OFFICE STAFF LIST' — which usually names the section."""
+    hi, _ = _staff_header(rows)
+    parts = []
+    for row in rows[: (hi or 0)]:
+        parts += [str(c) for c in row if c not in (None, "") and str(c).strip()]
+    return " ".join(parts)
+
+
+def guess_section(title: str, known):
+    """Section named in a staff-list title. A known section found in the title
+    wins (case and spacing ignored); otherwise the word before 'SECTION'."""
+    t = section_key(title)
+    for k in sorted(known, key=lambda x: -len(str(x))):
+        kk = section_key(k)
+        if kk and _re.search(r"\b" + _re.escape(kk) + r"\b", t):
+            return k
+    m = _re.search(r"([A-Z][A-Z .]+?)\s+SECTION\b", t)
+    if m:
+        words = m.group(1).split()
+        if words and words[-1] not in ("DEPARTMENT", "ELECTRICAL"):
+            return words[-1].title()
+    return ""
+
+
+def parse_staff_rows(rows) -> pd.DataFrame:
+    """Linemen rows from a staff list: name, designation, phone, codes, skipped
+    (non-code entries such as 'HV'). Rows with no name are dropped; rows with
+    a name but no codes are kept so they can be shown as not imported."""
+    hi, cols = _staff_header(rows)
+    recs = []
+    if hi is None:
+        return pd.DataFrame(columns=["name", "designation", "phone", "codes", "skipped"])
+    for row in rows[hi + 1:]:
+        def cell(k):
+            j = cols.get(k)
+            return row[j] if j is not None and j < len(row) else None
+        nm = clean_lineman_name(cell("name"))
+        if not nm or _re.fullmatch(r"[\d.\s]*", nm):
+            continue
+        codes, skipped = parse_route_codes(cell("codes"))
+        phone = ""
+        for j in cols.get("phones", []):
+            phone = clean_phone(row[j]) if j < len(row) else ""
+            if phone:
+                break
+        recs.append({"name": nm, "designation": clean_lineman_name(cell("designation")),
+                     "phone": phone, "codes": codes, "skipped": skipped})
+    return pd.DataFrame(recs, columns=["name", "designation", "phone", "codes", "skipped"])
+
+
+def _one_spelling(series: pd.Series, keyfn, preferred: dict = None) -> pd.Series:
+    """Give every value that is the same on `keyfn` one spelling: the preferred
+    one if given, otherwise the first one saved. 'Jammi  Pullayya' and
+    'JAMMI.PULLAYYA' are one lineman; 'Chittinagar' and 'CHITTINAGAR' one section."""
+    first = {}
+    for v in series:
+        k = keyfn(v)
+        if k and k not in first:
+            first[k] = (preferred or {}).get(k, v)
+    return series.map(lambda v: first.get(keyfn(v), v))
+
+
+def liaisoning_frame(df: pd.DataFrame, section_names: dict = None) -> pd.DataFrame:
+    """Any Liaisoning rows -> the current layout, keeping every row. Used for
+    every write, so older sheets move to the new format the first time.
+    `section_names` maps section_key -> the spelling to use."""
+    df = df.copy()
+    for c in LIAISONING_ALL_COLS:
+        if c not in df.columns:
+            df[c] = ""
+    df["location"] = df["location"].astype(str).str.strip().replace({"nan": "", "None": ""})
+    df["location"] = _one_spelling(df["location"], section_key, section_names)
+    df["section_code"] = df["section_code"].apply(normalize_section_code)
+    df["lineman"] = _one_spelling(df["lineman"].apply(clean_lineman_name), lineman_key)
+    df["designation"] = df["designation"].apply(clean_lineman_name)
+    df["phone"] = df["phone"].apply(clean_phone)
+    df["rate"] = pd.to_numeric(df["rate"], errors="coerce").fillna(0.0)
+    return df[LIAISONING_ALL_COLS].reset_index(drop=True)
+
+
+def liaisoning_needs_migration(section_names: dict = None) -> bool:
+    """True when the sheet is in the old layout, or holds the same lineman or
+    section spelt more than one way."""
+    raw = get_data("Liaisoning")
+    if raw.empty:
+        return False
+    if any(c not in raw.columns for c in LIAISONING_EXTRA_COLS):
+        return True
+    new = liaisoning_frame(raw, section_names)
+    for c in ("location", "section_code", "lineman", "designation", "phone"):
+        if list(raw[c].astype(str).str.strip().replace({"nan": ""})) != list(new[c].astype(str)):
+            return True
+    return False
+
+
+def similar_name_groups(names, keyfn=lineman_key, cutoff: float = 0.85):
+    """Groups of saved names that are probably one person/place spelt two ways
+    ('KOCHCHARLA. RAJESH' / 'KOCHARLA. RAJESH')."""
+    names = sorted({n for n in names if str(n).strip()}, key=str.upper)
+    groups, used = [], set()
+    for i, a in enumerate(names):
+        if a in used:
+            continue
+        g = [a]
+        for b in names[i + 1:]:
+            if b not in used and _difflib.SequenceMatcher(None, keyfn(a), keyfn(b)).ratio() >= cutoff:
+                g.append(b)
+        if len(g) > 1:
+            used.update(g)
+            groups.append(g)
+    return groups
 
 
 # Upper end of the "Cost At Any Install Count" slider.
@@ -7393,6 +7639,61 @@ with tab_exp:
 with tab_liaison:
     if tab_liaison.open:   # only the open tab runs (tabs are created with on_change="rerun")
         tab_action_bar("liaison")
+        df_map_l = load_liaisoning()
+
+        # Every section name known anywhere: Admin locations, install data, mappings.
+        _log_l = install_log_prepared()
+        _install_secs = (sorted({x for x in _log_l["_site"].unique() if x and x != "Unspecified"})
+                         if not _log_l.empty and "_site" in _log_l.columns else [])
+        _sec_by_key = {}
+        for _s in list(_install_secs) + list(active_locs) + list(df_map_l["location"]):
+            _s = str(_s).strip()
+            if _s and _s.lower() != "nan" and section_key(_s) not in _sec_by_key:
+                _sec_by_key[section_key(_s)] = _s
+        known_secs = sorted(_sec_by_key.values(), key=str.upper)
+
+        # -- Move older sheets to the new layout once, keeping every row ---------
+        # Adds the designation / phone columns, tidies spacing in names, and
+        # gives each lineman and section a single spelling.
+        if not st.session_state.get("_liaison_migrated") and liaisoning_needs_migration(_sec_by_key):
+            st.session_state["_liaison_migrated"] = True
+            _raw_l = get_data("Liaisoning")
+            _mig = liaisoning_frame(_raw_l, _sec_by_key)
+            if len(_mig) == len(_raw_l) and safe_update("Liaisoning", _mig):
+                st.toast(f"Lineman list moved to the new format — all {len(_mig)} row(s) kept.", icon="✅")
+                df_map_l = load_liaisoning()
+
+        def _liaison_section_picker(key: str, guess: str = "") -> str:
+            """Pick a section from the known list, or type one that isn't there.
+            A typed name close to a known one (case, spacing or a spelling slip)
+            uses the known one unless told it's a different section."""
+            NEW = "➕ Not in the list — type the name"
+            opts = known_secs + [NEW]
+            idx = (known_secs.index(guess) if guess in known_secs
+                   else (len(opts) - 1 if guess else None))
+            pick = st.selectbox("Section / Location", opts, index=idx, key=f"{key}_pick",
+                                placeholder="Choose the section")
+            if pick is None:
+                st.markdown('<div class="warn-box">Which section is this list for? Choose it above, '
+                            'or pick “Not in the list” to type it.</div>', unsafe_allow_html=True)
+                return ""
+            if pick != NEW:
+                return pick
+            typed = " ".join(st.text_input("Section / location name", value=guess, key=f"{key}_new",
+                                           placeholder="e.g. Chittinagar").split())
+            if not typed:
+                return ""
+            match, _how = closest_match(typed, known_secs, key=section_key, cutoff=0.8)
+            if match:
+                if st.checkbox(f"Keep “{typed}” as a separate section (it looks like “{match}”)",
+                               key=f"{key}_sep"):
+                    return typed
+                st.markdown(f'<div class="info-box">“{typed}” matches the existing section '
+                            f'<b>{match}</b> — saved under that name.</div>', unsafe_allow_html=True)
+                return match
+            return typed
+
+        # -- Filters ---------------------------------------------------------------
         _today_l = today_ist()
         _lmonths = {month_key(_today_l)}
         _ly, _lm = _today_l.year, _today_l.month
@@ -7402,11 +7703,28 @@ with tab_liaison:
                 _ly, _lm = _ly - 1, 12
             _lmonths.add(f"{_ly:04d}-{_lm:02d}")
         l_month_opts = sorted(_lmonths, reverse=True)
-        l_month = st.selectbox("Month", l_month_opts, index=l_month_opts.index(month_key(_today_l)),
-                               format_func=month_label, key="liaison_month")
-
-        lt = liaisoning_table(l_month)
-        df_map_l = load_liaisoning()
+        fc1, fc2 = st.columns([1, 2])
+        with fc1:
+            l_month = st.selectbox("Month", l_month_opts, index=l_month_opts.index(month_key(_today_l)),
+                                   format_func=month_label, key="liaison_month")
+        lt_all = liaisoning_table(l_month)
+        # One entry per section however it's spelt; the install data's spelling wins.
+        _f_secs = {}
+        for _s in list(lt_all["location"]) + known_secs:
+            _s = str(_s).strip()
+            if _s and _s.lower() != "nan":
+                _f_secs.setdefault(section_key(_s), _s)
+        sec_filter_opts = sorted(_f_secs.values(), key=str.upper)
+        if "liaison_secs" in st.session_state:
+            st.session_state["liaison_secs"] = [x for x in st.session_state["liaison_secs"] if x in sec_filter_opts]
+        with fc2:
+            l_secs = st.multiselect("Section / Location", sec_filter_opts, key="liaison_secs",
+                                    placeholder="All sections")
+        lt = lt_all
+        if l_secs:
+            _keys = {section_key(x) for x in l_secs}
+            lt = lt_all[lt_all["location"].apply(section_key).isin(_keys)].reset_index(drop=True)
+        _scope = ", ".join(l_secs) if l_secs else "All sections"
 
         sec_hdr("rupee", f"Liaisoning — {month_label(l_month)}")
         if lt.empty:
@@ -7425,161 +7743,458 @@ with tab_liaison:
                 st.markdown(
                     f'<div class="warn-box">{len(worked_unmapped)} section code(s) with '
                     f'{int(worked_unmapped["installs"].sum()):,} install(s) have no lineman yet — '
-                    f'they are listed below and are not counted in the payable.</div>',
+                    f'they are listed under “All section codes” and are not counted in the payable.</div>',
                     unsafe_allow_html=True)
 
-            # -- Payable per lineman ------------------------------------------
+            # -- Payable per lineman, with the section-code breakup ---------------
             if not mapped.empty:
                 sub_hdr("users", "Payable By Lineman")
-                # Includes linemen with no installs this month — a zero is itself
-                # information when you are checking who to pay.
-                per_lineman = mapped.groupby("lineman").agg(
-                    Sections=("location", lambda x: ", ".join(sorted(set(x)))),
-                    Codes=("section_code", lambda x: ", ".join(sorted(set(x)))),
-                    Installs=("installs", "sum"), Payable=("payable", "sum")).reset_index()
-                per_lineman = per_lineman.rename(columns={"lineman": "Lineman"})
-                per_lineman["Installs"] = per_lineman["Installs"].astype(int)
-                per_lineman["Payable"] = per_lineman["Payable"].round(0).astype(int)
-                per_lineman = per_lineman.sort_values("Payable", ascending=False)
-                total_row = pd.DataFrame([{"Lineman": "TOTAL", "Sections": "", "Codes": "",
-                                           "Installs": int(per_lineman["Installs"].sum()),
-                                           "Payable": int(per_lineman["Payable"].sum())}])
-                per_lineman_disp = pd.concat([per_lineman, total_row], ignore_index=True)
-                st.dataframe(per_lineman_disp, use_container_width=True, hide_index=True,
-                             height=dataframe_height(len(per_lineman_disp)))
-                download_image_button(
-                    per_lineman_disp, f"Liaisoning_{l_month}.png", key="dl_img_liaison",
-                    title=f"Liaisoning Payable — {month_label(l_month)}\n"
-                          f"{int(mapped['installs'].sum()):,} install(s) across {mapped['section_code'].nunique()} section code(s)")
+                man_opts = sorted(set(mapped["lineman"]), key=str.upper)
+                if "liaison_men" in st.session_state:
+                    st.session_state["liaison_men"] = [x for x in st.session_state["liaison_men"] if x in man_opts]
+                pc1, pc2 = st.columns([2, 1])
+                with pc1:
+                    l_men = st.multiselect("Lineman", man_opts, key="liaison_men", placeholder="All linemen")
+                with pc2:
+                    show_zero = st.toggle("Show codes with no installs", value=False, key="liaison_zero")
+                pm = mapped[mapped["lineman"].isin(l_men)] if l_men else mapped
 
-            # -- Section code detail -------------------------------------------
-            sub_hdr("pin", "By Section & Section Code")
-            st.markdown('<div class="info-box">Every mapped section code is listed, including ones '
-                        'with no installs this month.</div>', unsafe_allow_html=True)
-            detail = lt.rename(columns={"location": "Section", "section_code": "Section Code",
-                                        "installs": "Installs", "lineman": "Lineman",
-                                        "rate": "Rate (Rs.)", "payable": "Payable (Rs.)"})
-            detail["Lineman"] = detail["Lineman"].replace("", "— not mapped —")
-            detail["Installs"] = detail["Installs"].astype(int)
-            detail["Payable (Rs.)"] = detail["Payable (Rs.)"].round(0).astype(int)
-            st.dataframe(detail, use_container_width=True, hide_index=True,
-                         height=dataframe_height(len(detail), max_px=520))
-            st.download_button("📥 Download CSV", data=detail.to_csv(index=False).encode("utf-8"),
-                               file_name=f"liaisoning_{l_month}.csv", mime="text/csv",
-                               use_container_width=True, key="liaison_csv", on_click="ignore")
+                # Summary — includes linemen with no installs: a zero is itself
+                # information when checking who to pay.
+                def _first(x):
+                    x = [v for v in x if str(v).strip()]
+                    return x[0] if x else ""
+                summ = pm.groupby("lineman").agg(
+                    Designation=("designation", _first), Phone=("phone", _first),
+                    Sections=("location", lambda x: ", ".join(sorted(set(x), key=str.upper))),
+                    Codes=("section_code", "nunique"),
+                    Worked=("installs", lambda x: int((x > 0).sum())),
+                    Installs=("installs", "sum"), Payable=("payable", "sum")).reset_index()
+                summ["Codes Worked"] = summ["Worked"].astype(str) + " / " + summ["Codes"].astype(str)
+                summ["Installs"] = summ["Installs"].astype(int)
+                summ["Payable"] = summ["Payable"].round(0).astype(int)
+                summ = summ.sort_values(["Payable", "lineman"], ascending=[False, True])
+                order = list(summ["lineman"])
+                summ_disp = summ.rename(columns={"lineman": "Lineman", "Payable": "Payable (Rs.)"})[
+                    ["Lineman", "Installs", "Payable (Rs.)", "Codes Worked", "Sections", "Designation", "Phone"]]
+                summ_disp = pd.concat([summ_disp, pd.DataFrame([{
+                    "Lineman": "TOTAL", "Designation": "", "Phone": "", "Sections": "",
+                    "Codes Worked": f"{int(summ['Worked'].sum())} / {int(summ['Codes'].sum())}",
+                    "Installs": int(summ["Installs"].sum()),
+                    "Payable (Rs.)": int(summ["Payable"].sum())}])], ignore_index=True)
+                for _c in ("Designation", "Phone"):
+                    if not summ_disp[_c].astype(str).str.strip().any():
+                        summ_disp = summ_disp.drop(columns=_c)
+
+                def _bold_last(row):
+                    last = row.name == len(summ_disp) - 1
+                    return ["font-weight:700;background-color:#E6F4F5" if last else "" for _ in row]
+                st.dataframe(summ_disp.style.apply(_bold_last, axis=1), use_container_width=True,
+                             hide_index=True, height=dataframe_height(len(summ_disp)))
+
+                # Breakup: each lineman's section codes, a total under each, and a
+                # grand total for whatever the filters cover.
+                rows_b, kinds = [], []
+                for man in order:
+                    g = pm[pm["lineman"] == man].sort_values(["location", "section_code"])
+                    shown = g if show_zero else g[g["installs"] > 0]
+                    first = True
+                    for _, r in shown.iterrows():
+                        rows_b.append({"Lineman": man if first else "", "Section": r["location"],
+                                       "Section Code": r["section_code"], "Installs": int(r["installs"]),
+                                       "Rate (Rs.)": f"{r['rate']:,.0f}", "Payable (Rs.)": int(round(r["payable"]))})
+                        kinds.append("row")
+                        first = False
+                    rows_b.append({"Lineman": f"{man} — Total" if not shown.empty else f"{man} — no installs",
+                                   "Section": "", "Section Code": f"{int((g['installs'] > 0).sum())} code(s)",
+                                   "Installs": int(g["installs"].sum()), "Rate (Rs.)": "",
+                                   "Payable (Rs.)": int(round(g["payable"].sum()))})
+                    kinds.append("sub")
+                rows_b.append({"Lineman": "TOTAL", "Section": _scope, "Section Code": "",
+                               "Installs": int(pm["installs"].sum()), "Rate (Rs.)": "",
+                               "Payable (Rs.)": int(round(pm["payable"].sum()))})
+                kinds.append("total")
+                # Money next to the name, so it's visible on a phone without scrolling.
+                breakup = pd.DataFrame(rows_b, columns=["Lineman", "Section Code", "Installs", "Payable (Rs.)",
+                                                        "Rate (Rs.)", "Section"])
+
+                def _style_breakup(row):
+                    k = kinds[row.name]
+                    if k == "sub":
+                        return ["font-weight:600;background-color:#F2F4F6"] * len(row)
+                    if k == "total":
+                        return ["font-weight:700;background-color:#E6F4F5"] * len(row)
+                    return [""] * len(row)
+                sub_hdr("pin", "Breakup By Section Code")
+                st.dataframe(breakup.style.apply(_style_breakup, axis=1), use_container_width=True,
+                             hide_index=True, height=dataframe_height(len(breakup), max_px=760))
+                st.markdown(
+                    f'<div class="info-box"><b>Total — {month_label(l_month)} · {_scope}'
+                    + (f' · {len(l_men)} selected lineman' + ('' if len(l_men) == 1 else 'en') if l_men else '')
+                    + f':</b> {int(pm["installs"].sum()):,} install(s) · '
+                    f'<b>Rs. {pm["payable"].sum():,.0f}</b></div>', unsafe_allow_html=True)
+                _title_l = (f"Liaisoning Payable — {month_label(l_month)} · {_scope}\n"
+                            f"{int(pm['installs'].sum()):,} install(s) · Rs. {pm['payable'].sum():,.0f}")
+                dc1, dc2, dc3 = st.columns(3)
+                with dc1:
+                    download_image_button(summ_disp, f"Liaisoning_{l_month}.png", key="dl_img_liaison",
+                                          title=_title_l, label="📷 Summary Image")
+                with dc2:
+                    download_image_button(breakup, f"Liaisoning_Breakup_{l_month}.png", key="dl_img_liaison_bk",
+                                          title=_title_l, label="📷 Breakup Image")
+                with dc3:
+                    st.download_button("📥 Breakup CSV", data=breakup.to_csv(index=False).encode("utf-8"),
+                                       file_name=f"liaisoning_breakup_{l_month}.csv", mime="text/csv",
+                                       use_container_width=True, key="liaison_bk_csv", on_click="ignore")
+
+            # -- Every section code, mapped or not ----------------------------------
+            with st.expander(f"All section codes ({len(lt)}) — including ones with no lineman"):
+                detail = lt.rename(columns={"location": "Section", "section_code": "Section Code",
+                                            "installs": "Installs", "lineman": "Lineman",
+                                            "rate": "Rate (Rs.)", "payable": "Payable (Rs.)"})[
+                    ["Section", "Section Code", "Installs", "Lineman", "Rate (Rs.)", "Payable (Rs.)"]].copy()
+                detail["Lineman"] = detail["Lineman"].replace("", "— not mapped —")
+                detail["Installs"] = detail["Installs"].astype(int)
+                detail["Payable (Rs.)"] = detail["Payable (Rs.)"].round(0).astype(int)
+                st.dataframe(detail, use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(detail), max_px=520))
+                st.download_button("📥 Download CSV", data=detail.to_csv(index=False).encode("utf-8"),
+                                   file_name=f"liaisoning_{l_month}.csv", mime="text/csv",
+                                   use_container_width=True, key="liaison_csv", on_click="ignore")
 
         # -- Mappings that matched nothing ---------------------------------------
         # A mapping with no installs is normal early in the month, but a section
-        # name that appears NOWHERE in the install data is a spelling problem —
-        # worth saying so rather than leaving a lineman silently unpaid.
-        _map_all = load_liaisoning()
+        # name that appears NOWHERE in the install data is a spelling problem.
+        _map_all = df_map_l
+        if l_secs:
+            _map_all = _map_all[_map_all["location"].apply(section_key).isin({section_key(x) for x in l_secs})]
         if not _map_all.empty:
             _counts_all = month_section_counts(l_month)
             _data_keys = {section_key(x) for x in _counts_all["location"]} if not _counts_all.empty else set()
-            _worked = {(section_key(r["location"]), r["section_code"]) for _, r in _counts_all.iterrows()} if not _counts_all.empty else set()
-            rows = []
-            for _, r in _map_all.iterrows():
-                k = section_key(r["location"])
-                if (k, r["section_code"]) in _worked:
-                    continue
-                rows.append({"Section": r["location"], "Section Code": r["section_code"], "Lineman": r["lineman"],
-                             "Why": ("Section name not found in install data — check the spelling against: "
-                                     + ", ".join(sorted({x for x in _counts_all['location']})) if k not in _data_keys
-                                     else "No installs in this section code this month")})
-            if rows:
-                unmatched = pd.DataFrame(rows)
-                bad_name = unmatched["Why"].str.startswith("Section name").sum()
-                with st.expander(f"⚠️ {len(unmatched)} mapping(s) matched no installs"
-                                 + (f" — {bad_name} with a section name that isn't in the data" if bad_name else "")):
-                    st.dataframe(unmatched, use_container_width=True, hide_index=True,
-                                 height=dataframe_height(len(unmatched), max_px=320))
+            _worked = ({(section_key(a), b) for a, b in zip(_counts_all["location"], _counts_all["section_code"])}
+                       if not _counts_all.empty else set())
+            _bad = [r for r in _map_all.itertuples() if section_key(r.location) not in _data_keys]
+            if _bad and _data_keys:
+                bad_names = sorted({r.location for r in _bad}, key=str.upper)
+                st.markdown(
+                    f'<div class="warn-box">Section name(s) {", ".join(bad_names)} don\'t appear in '
+                    f'{month_label(l_month)}\'s install data (it has: '
+                    f'{", ".join(sorted(set(_counts_all["location"]), key=str.upper))}). '
+                    f'If that\'s a spelling difference, fix it under Current Mappings.</div>',
+                    unsafe_allow_html=True)
 
-        # -- Map a section code to a lineman -------------------------------------
+        # ══ Add linemen: upload a list, or enter by hand ═════════════════════════
         st.divider()
-        sec_hdr("plus", "Map Section Codes To Linemen")
+        sec_hdr("plus", "Add Linemen & Section Codes")
         if "liaison_form_version" not in st.session_state:
             st.session_state["liaison_form_version"] = 0
         lv = st.session_state["liaison_form_version"]
+        known_linemen = sorted({x for x in df_map_l["lineman"] if x}, key=str.upper)
+        _rates = df_map_l.loc[df_map_l["rate"] > 0, "rate"]
+        _common_rate = float(_rates.mode().iloc[0]) if not _rates.empty else 0.0
+        add_mode = st.segmented_control("How", ["📤 Upload list", "✍️ Enter manually"],
+                                        default="📤 Upload list", key="liaison_add_mode",
+                                        label_visibility="collapsed") or "📤 Upload list"
 
-        seen = month_section_counts(l_month)
-        known_locs = sorted(set(active_locs) | set(seen["location"]) | set(df_map_l["location"]))
-        lc1, lc2 = st.columns(2)
-        with lc1:
-            m_loc = st.selectbox("Section", known_locs or ["Unspecified"], key=f"liaison_loc_{lv}")
-        already = set(df_map_l.loc[df_map_l["location"] == m_loc, "section_code"])
-        with lc2:
-            # Typed, not picked from a list: codes are mapped up front, before any
-            # installs exist in them.
-            m_codes_raw = st.text_input("Section codes", key=f"liaison_codes_{lv}_{m_loc}",
-                                        placeholder="07, 12, 26  or  07-12",
-                                        help="Two digits each. Separate with commas or spaces, or give a range like 07-12.")
-        m_codes = parse_section_codes(m_codes_raw)
-        if m_codes:
-            dupes = [c for c in m_codes if c in already]
-            st.markdown(
-                f'<div class="info-box">{len(m_codes)} code(s): {", ".join(m_codes)}'
-                + (f' — {", ".join(dupes)} already mapped in {m_loc} and will be reassigned.' if dupes else '')
-                + '</div>', unsafe_allow_html=True)
-        codes_here = sorted(set(seen.loc[seen["location"] == m_loc, "section_code"]))
-        unmapped_here = [c for c in codes_here if c not in already]
-        if unmapped_here:
-            st.markdown(
-                f'<div class="warn-box">Seen in {m_loc}\'s installs but not mapped yet: '
-                f'<b>{", ".join(unmapped_here)}</b></div>', unsafe_allow_html=True)
-        known_linemen = sorted({x for x in df_map_l["lineman"] if x})
-        lc3, lc4 = st.columns(2)
-        with lc3:
-            pick = st.selectbox("Lineman", ["— new —"] + known_linemen, key=f"liaison_man_pick_{lv}")
-            m_lineman = st.text_input("New lineman name", key=f"liaison_man_{lv}") if pick == "— new —" else pick
-        with lc4:
-            _default_rate = float(df_map_l.loc[df_map_l["lineman"] == pick, "rate"].iloc[0]) if (
-                pick != "— new —" and not df_map_l[df_map_l["lineman"] == pick].empty) else 0.0
-            m_rate = st.number_input("Rate per install (Rs.)", min_value=0.0, step=1.0,
-                                     value=_default_rate, key=f"liaison_rate_{lv}_{pick}")
-        if st.button("➕ Save Mapping", type="primary", use_container_width=True, key="liaison_add"):
-            if not str(m_lineman).strip():
-                st.error("❌ Enter the lineman's name.")
-            elif not m_codes:
-                st.error("❌ Enter at least one section code, e.g. 07, 12 or 07-12.")
-            elif m_rate <= 0:
-                st.error("❌ Enter the rate per install.")
-            else:
-                df_new = df_map_l[LIAISONING_COLS].copy()
-                # Re-mapping a code replaces its row rather than adding a second.
-                df_new = df_new[~((df_new["location"] == m_loc) & (df_new["section_code"].isin(m_codes)))]
-                df_new = pd.concat([df_new, pd.DataFrame([
-                    {"location": m_loc, "section_code": c, "lineman": str(m_lineman).strip(), "rate": m_rate}
-                    for c in m_codes])], ignore_index=True)
-                if safe_update("Liaisoning", df_new):
-                    st.session_state["liaison_form_version"] += 1
-                    st.success(f"✅ {len(m_codes)} section code(s) mapped to {str(m_lineman).strip()} at Rs. {m_rate:,.0f}/install.")
-                    st.rerun()
+        if add_mode == "📤 Upload list":
+            st.markdown('<div class="info-box">Upload the section office staff list (Excel or CSV) with a '
+                        '<b>NAME</b> and a <b>ROUTE CODES</b> column. Names are matched to linemen already '
+                        'saved, ignoring capitals, dots and spacing, and small spelling differences are '
+                        'flagged so one person isn\'t saved twice.</div>', unsafe_allow_html=True)
+            up_l = st.file_uploader("Linemen list", type=["xlsx", "csv"], key=f"liaison_up_{lv}",
+                                    label_visibility="collapsed")
+            if up_l is not None:
+                _ub = up_l.getvalue()
+                _uh = hashlib.md5(_ub).hexdigest()[:10]
+                _cache = st.session_state.get("_liaison_upload")
+                if not _cache or _cache[0] != _uh:
+                    try:
+                        _cache = (_uh, staff_list_sheets(_ub, up_l.name))
+                    except Exception as e:
+                        _cache = (_uh, {})
+                        st.error(f"❌ Couldn't read that file ({e}).")
+                    st.session_state["_liaison_upload"] = _cache
+                sheets_l = _cache[1]
+                if not sheets_l:
+                    st.error("❌ No sheet in this file has both a NAME column and a ROUTE CODES / SECTION CODES column.")
+                else:
+                    sh_names = list(sheets_l)
+                    if len(sh_names) > 1:
+                        u_sheet = st.selectbox("Sheet", sh_names, key=f"liaison_sheet_{lv}_{_uh}",
+                                               help="This file has more than one linemen list — pick the current one.")
+                    else:
+                        u_sheet = sh_names[0]
+                    _rows = sheets_l[u_sheet]
+                    staff = parse_staff_rows(_rows)
+                    _guess = guess_section(staff_list_title(_rows), known_secs)
+                    uc1, uc2 = st.columns(2)
+                    with uc1:
+                        u_sec = _liaison_section_picker(f"liaison_usec_{lv}_{_uh}_{u_sheet}", _guess)
+                    with uc2:
+                        u_rate = st.number_input("Rate per install for new linemen (Rs.)", min_value=0.0,
+                                                 step=1.0, value=_common_rate, key=f"liaison_urate_{lv}_{_uh}")
+                    if u_sec:
+                        _sk = section_key(u_sec)
+                        in_sec = df_map_l[df_map_l["location"].apply(section_key) == _sk]
+                        code_owner = dict(zip(in_sec["section_code"], in_sec["lineman"]))
+                        prev = []
+                        for r in staff.itertuples():
+                            match, how = closest_match(r.name, known_linemen)
+                            name = match or r.name
+                            mine = df_map_l[df_map_l["lineman"].apply(lineman_key) == lineman_key(name)]
+                            rate = float(mine["rate"].iloc[0]) if not mine.empty and mine["rate"].iloc[0] > 0 else u_rate
+                            notes = []
+                            if how == "spelling":
+                                notes.append(f"File has “{r.name}” — matched to saved lineman “{match}”")
+                            elif how == "exact" and match != r.name:
+                                notes.append(f"Same as saved “{match}” (capitals/spacing differ)")
+                            elif how == "exact":
+                                notes.append("Already saved")
+                            elif how is None:
+                                notes.append("New lineman")
+                            if r.skipped:
+                                notes.append("Skipped (not a code): " + ", ".join(r.skipped))
+                            if not r.codes:
+                                notes.append("No section codes — not imported")
+                            if r.phone and len(_re.sub(r"\D", "", r.phone)) != 10:
+                                notes.append(f"Check phone {r.phone}")
+                            prev.append({"Import": bool(r.codes), "Lineman": name, "Designation": r.designation,
+                                         "Phone": r.phone, "Section Codes": ", ".join(r.codes),
+                                         "Rate (Rs.)": rate, "Check": " · ".join(notes)})
+                        prev_df = pd.DataFrame(prev, columns=["Import", "Lineman", "Designation", "Phone",
+                                                              "Section Codes", "Rate (Rs.)", "Check"])
+                        st.caption(f"{len(prev_df)} name(s) in {u_sheet} · edit anything below before saving. "
+                                   "Changing a matched name back to the file's spelling saves it as a separate lineman.")
+                        ed = st.data_editor(
+                            prev_df, use_container_width=True, hide_index=True,
+                            key=f"liaison_prev_{lv}_{_uh}_{u_sheet}_{_sk}",
+                            disabled=["Check"],
+                            column_config={
+                                "Import": st.column_config.CheckboxColumn(width="small"),
+                                "Rate (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="%.0f"),
+                                "Section Codes": st.column_config.TextColumn(help="Two digits each, comma separated"),
+                                "Check": st.column_config.TextColumn(width="large")},
+                            height=dataframe_height(len(prev_df), max_px=560))
+
+                        # Work out what saving would do, and say so before it happens.
+                        take = ed[ed["Import"]].copy()
+                        plan, errs, seen_code = [], [], {}
+                        for _, r in take.iterrows():
+                            nm = clean_lineman_name(r["Lineman"])
+                            codes, _sk_bad = parse_route_codes(r["Section Codes"])
+                            _rt = pd.to_numeric(r["Rate (Rs.)"], errors="coerce")
+                            if not nm:
+                                errs.append("A row ticked for import has no name.")
+                                continue
+                            if not codes:
+                                errs.append(f"{nm}: no section codes.")
+                                continue
+                            if not (pd.notna(_rt) and float(_rt) > 0):
+                                errs.append(f"{nm}: enter the rate per install.")
+                            for c in codes:
+                                if c in seen_code and lineman_key(seen_code[c]) != lineman_key(nm):
+                                    errs.append(f"Code {c} is given to both {seen_code[c]} and {nm}.")
+                                seen_code[c] = nm
+                            plan.append((nm, clean_lineman_name(r["Designation"]), clean_phone(r["Phone"]),
+                                         codes, float(_rt) if pd.notna(_rt) else 0.0))
+                        new_codes = set(seen_code)
+                        moved = [f"{c} ({code_owner[c]} → {seen_code[c]})" for c in sorted(new_codes)
+                                 if c in code_owner and lineman_key(code_owner[c]) != lineman_key(seen_code[c])]
+                        left_out = sorted(set(code_owner) - new_codes)
+                        replace_sec = False
+                        if left_out:
+                            replace_sec = st.radio(
+                                f"{len(left_out)} code(s) already saved for {u_sec} aren't in this list: "
+                                f"{', '.join(left_out)}",
+                                ["Keep them as they are", "Remove them — this list replaces the section"],
+                                key=f"liaison_urepl_{lv}_{_uh}_{u_sheet}").startswith("Remove")
+                        if moved:
+                            st.markdown('<div class="warn-box">Will move to a different lineman: '
+                                        + ", ".join(moved) + '</div>', unsafe_allow_html=True)
+                        for e in dict.fromkeys(errs):
+                            st.error(f"❌ {e}")
+                        n_new = sum(1 for p in plan if not closest_match(p[0], known_linemen)[0])
+                        if st.button(f"💾 Save {len(plan)} {'lineman' if len(plan) == 1 else 'linemen'} · {len(new_codes)} code(s) to {u_sec}",
+                                     type="primary", use_container_width=True, key=f"liaison_usave_{lv}",
+                                     disabled=bool(errs) or not plan):
+                            base = liaisoning_frame(df_map_l)
+                            _in = base["location"].apply(section_key) == _sk
+                            drop = _in & (base["section_code"].isin(new_codes) | replace_sec)
+                            base = base[~drop]
+                            add = []
+                            for nm, des, ph, codes, rate in plan:
+                                same = base["lineman"].apply(lineman_key) == lineman_key(nm)
+                                # Keep contact details the same on all of a lineman's rows.
+                                if des:
+                                    base.loc[same, "designation"] = des
+                                if ph:
+                                    base.loc[same, "phone"] = ph
+                                add += [{"location": u_sec, "section_code": c, "lineman": nm, "rate": rate,
+                                         "designation": des, "phone": ph} for c in codes]
+                            out = liaisoning_frame(pd.concat([base, pd.DataFrame(add)], ignore_index=True), _sec_by_key)
+                            if safe_update("Liaisoning", out):
+                                st.session_state["liaison_form_version"] += 1
+                                st.session_state.pop("_liaison_upload", None)
+                                st.success(f"✅ {len(new_codes)} section code(s) saved for {len(plan)} {'lineman' if len(plan) == 1 else 'linemen'} "
+                                           f"in {u_sec}" + (f" — {n_new} new" if n_new else "") + ".")
+                                st.rerun()
+        else:
+            # -- Manual entry ------------------------------------------------------
+            lc1, lc2 = st.columns(2)
+            with lc1:
+                m_loc = _liaison_section_picker(f"liaison_loc_{lv}",
+                                                known_secs[0] if len(known_secs) == 1 else "")
+            already = (dict(zip(df_map_l.loc[df_map_l["location"].apply(section_key) == section_key(m_loc), "section_code"],
+                                df_map_l.loc[df_map_l["location"].apply(section_key) == section_key(m_loc), "lineman"]))
+                       if m_loc else {})
+            with lc2:
+                # Typed, not picked from a list: codes are mapped up front, before
+                # any installs exist in them.
+                m_codes_raw = st.text_input("Section codes", key=f"liaison_codes_{lv}_{m_loc}",
+                                            placeholder="07, 12, 26  or  07-12",
+                                            help="Two digits each. Separate with commas or spaces, or give a range like 07-12.")
+            m_codes, m_skip = parse_route_codes(m_codes_raw)
+            if m_codes:
+                dupes = [f"{c} ({already[c]})" for c in m_codes if c in already]
+                st.markdown(
+                    f'<div class="info-box">{len(m_codes)} code(s): {", ".join(m_codes)}'
+                    + (f' — {", ".join(dupes)} already mapped in {m_loc} and will be reassigned.' if dupes else '')
+                    + '</div>', unsafe_allow_html=True)
+            if m_skip:
+                st.markdown(f'<div class="warn-box">Not section codes, ignored: {", ".join(m_skip)}</div>',
+                            unsafe_allow_html=True)
+            if m_loc:
+                seen = month_section_counts(l_month)
+                codes_here = sorted(set(seen.loc[seen["location"].apply(section_key) == section_key(m_loc), "section_code"]))
+                unmapped_here = [c for c in codes_here if c not in already]
+                if unmapped_here:
+                    st.markdown(
+                        f'<div class="warn-box">Seen in {m_loc}\'s installs but not mapped yet: '
+                        f'<b>{", ".join(unmapped_here)}</b></div>', unsafe_allow_html=True)
+            lc3, lc4 = st.columns(2)
+            with lc3:
+                pick = st.selectbox("Lineman", ["— new —"] + known_linemen, key=f"liaison_man_pick_{lv}")
+                if pick == "— new —":
+                    m_lineman = clean_lineman_name(st.text_input("New lineman name", key=f"liaison_man_{lv}"))
+                    _m, _how = closest_match(m_lineman, known_linemen) if m_lineman else (None, None)
+                    if _m:
+                        if st.checkbox(f"Save as a different person (looks like saved lineman “{_m}”)",
+                                       key=f"liaison_man_sep_{lv}"):
+                            pass
+                        else:
+                            st.markdown(f'<div class="info-box">Matches saved lineman <b>{_m}</b> — '
+                                        f'codes will be added to them.</div>', unsafe_allow_html=True)
+                            m_lineman = _m
+                else:
+                    m_lineman = pick
+            _mine = df_map_l[df_map_l["lineman"] == m_lineman] if m_lineman else df_map_l.iloc[0:0]
+            with lc4:
+                _default_rate = float(_mine["rate"].iloc[0]) if not _mine.empty else _common_rate
+                m_rate = st.number_input("Rate per install (Rs.)", min_value=0.0, step=1.0,
+                                         value=_default_rate, key=f"liaison_rate_{lv}_{m_lineman}")
+            lc5, lc6 = st.columns(2)
+            _d0 = next((x for x in _mine["designation"] if x), "") if not _mine.empty else ""
+            _p0 = next((x for x in _mine["phone"] if x), "") if not _mine.empty else ""
+            with lc5:
+                m_des = st.text_input("Designation (optional)", value=_d0, key=f"liaison_des_{lv}_{m_lineman}",
+                                      placeholder="LM, JLM …")
+            with lc6:
+                m_ph = st.text_input("Phone (optional)", value=_p0, key=f"liaison_ph_{lv}_{m_lineman}")
+            if st.button("➕ Save Mapping", type="primary", use_container_width=True, key="liaison_add"):
+                if not m_loc:
+                    st.error("❌ Choose the section.")
+                elif not str(m_lineman).strip():
+                    st.error("❌ Enter the lineman's name.")
+                elif not m_codes:
+                    st.error("❌ Enter at least one section code, e.g. 07, 12 or 07-12.")
+                elif m_rate <= 0:
+                    st.error("❌ Enter the rate per install.")
+                else:
+                    base = liaisoning_frame(df_map_l)
+                    # Re-mapping a code replaces its row rather than adding a second.
+                    base = base[~((base["location"].apply(section_key) == section_key(m_loc))
+                                  & (base["section_code"].isin(m_codes)))]
+                    same = base["lineman"].apply(lineman_key) == lineman_key(m_lineman)
+                    if clean_lineman_name(m_des):
+                        base.loc[same, "designation"] = clean_lineman_name(m_des)
+                    if clean_phone(m_ph):
+                        base.loc[same, "phone"] = clean_phone(m_ph)
+                    out = liaisoning_frame(pd.concat([base, pd.DataFrame([
+                        {"location": m_loc, "section_code": c, "lineman": m_lineman, "rate": m_rate,
+                         "designation": clean_lineman_name(m_des), "phone": clean_phone(m_ph)}
+                        for c in m_codes])], ignore_index=True), _sec_by_key)
+                    if safe_update("Liaisoning", out):
+                        st.session_state["liaison_form_version"] += 1
+                        st.success(f"✅ {len(m_codes)} section code(s) mapped to {m_lineman} at Rs. {m_rate:,.0f}/install.")
+                        st.rerun()
 
         # -- Existing mappings ----------------------------------------------------
         sec_hdr("list", "Current Mappings")
         if df_map_l.empty or df_map_l["section_code"].eq("").all():
             st.info("No section codes mapped yet.")
         else:
-            mv = df_map_l[LIAISONING_COLS].copy()
+            full_l = liaisoning_frame(df_map_l)
+            # Names that are probably one person / place spelt two ways.
+            _sim = ([("lineman", g) for g in similar_name_groups(full_l["lineman"])]
+                    + [("location", g) for g in similar_name_groups(full_l["location"], section_key, 0.8)])
+            if _sim:
+                with st.expander(f"⚠️ {len(_sim)} possible spelling difference(s) — check and merge", expanded=True):
+                    for _i, (_col, _g) in enumerate(_sim):
+                        _what = "Lineman" if _col == "lineman" else "Section"
+                        _cnt = {n: int((full_l[_col] == n).sum()) for n in _g}
+                        # Default to the likely-right spelling: the one in the install
+                        # data (sections), then the one with contact details, then the
+                        # one used most.
+                        _inst_keys = {section_key(x) for x in _install_secs}
+                        _g = sorted(_g, key=lambda n: (
+                            -(section_key(n) in _inst_keys and n in _install_secs) if _col == "location" else 0,
+                            -int(full_l.loc[full_l[_col] == n, "phone"].astype(bool).any()),
+                            -_cnt[n], str(n).upper()))
+                        sc1, sc2 = st.columns([3, 1])
+                        with sc1:
+                            _keep = st.selectbox(
+                                f"{_what}: " + " / ".join(f"{n} ({_cnt[n]})" for n in _g) + " — save all as",
+                                _g, key=f"liaison_sim_{_col}_{_i}_{_sheet_version('Liaisoning')}")
+                        with sc2:
+                            st.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+                            if st.button("Merge", key=f"liaison_merge_{_col}_{_i}", use_container_width=True):
+                                merged_l = full_l.copy()
+                                merged_l.loc[merged_l[_col].isin(_g), _col] = _keep
+                                if safe_update("Liaisoning", liaisoning_frame(merged_l, _sec_by_key)):
+                                    st.success(f"✅ Saved as {_keep}.")
+                                    st.rerun()
+                    st.caption("Different people with similar names? Leave them — nothing changes unless you tap Merge.")
+            _cm_opts = ["All sections"] + sorted({x for x in full_l["location"] if x}, key=str.upper)
+            cm_sec = st.selectbox("Show", _cm_opts, key="liaison_cm_sec", label_visibility="collapsed")
+            view = full_l if cm_sec == "All sections" else full_l[full_l["location"] == cm_sec]
+            mv = view.copy()
             mv.insert(0, "Delete", False)
             mv = mv.rename(columns={"location": "Section", "section_code": "Section Code",
-                                    "lineman": "Lineman", "rate": "Rate (Rs.)"}).sort_values(["Section", "Section Code"])
+                                    "lineman": "Lineman", "rate": "Rate (Rs.)",
+                                    "designation": "Designation", "phone": "Phone"}).sort_values(
+                ["Section", "Lineman", "Section Code"])
+            mv = mv[["Delete", "Section", "Section Code", "Lineman", "Designation", "Phone", "Rate (Rs.)"]]
             med = st.data_editor(
                 mv, use_container_width=True, hide_index=True,
-                key=f"liaison_editor_{_sheet_version('Liaisoning')}",
-                disabled=["Section", "Section Code"],
+                key=f"liaison_editor_{_sheet_version('Liaisoning')}_{cm_sec}",
+                disabled=["Section Code"],
                 column_config={"Rate (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="%.2f")},
                 height=dataframe_height(len(mv)))
             n_del_l = int(med["Delete"].sum())
             if st.button(f"💾 Save Changes{f' (deleting {n_del_l})' if n_del_l else ''}", type="primary",
                          use_container_width=True, key="liaison_save"):
                 keep = med[~med["Delete"]]
-                out = pd.DataFrame({
-                    "location": keep["Section"],
-                    "section_code": keep["Section Code"].apply(normalize_section_code),
-                    "lineman": keep["Lineman"].astype(str).str.strip(),
-                    "rate": pd.to_numeric(keep["Rate (Rs.)"], errors="coerce").fillna(0.0),
-                }, columns=LIAISONING_COLS)
+                edited = pd.DataFrame({
+                    "location": keep["Section"].astype(str).str.strip(),
+                    "section_code": keep["Section Code"],
+                    "lineman": keep["Lineman"].astype(str),
+                    "rate": keep["Rate (Rs.)"],
+                    "designation": keep["Designation"].astype(str),
+                    "phone": keep["Phone"].astype(str),
+                })
+                # Rows hidden by the section filter are kept untouched.
+                others = full_l[~full_l.index.isin(mv.index)]
+                out = liaisoning_frame(pd.concat([others, edited], ignore_index=True), _sec_by_key)
                 if safe_update("Liaisoning", out):
                     st.success("✅ Mappings updated.")
                     st.rerun()
