@@ -245,12 +245,26 @@ def today_ist() -> date:
 DEFAULT_WORK_DAY_START, DEFAULT_WORK_DAY_END = 3, 27
 WORK_DAY_START, WORK_DAY_END = DEFAULT_WORK_DAY_START, DEFAULT_WORK_DAY_END
 DEFAULT_MONTHLY_TARGET = 5000   # fallback until one is set in Admin
+# Public holidays inside the working window (Dasara, Diwali...), set in Admin:
+# {"2026-10-20": "Dasara"}. No work is done on them, so they come off every
+# working-day count — days left, installs needed per day, and the forecast.
+HOLIDAYS = {}
+
+
+def is_holiday(d) -> bool:
+    return (d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]) in HOLIDAYS
+
+
+def is_working_day(d) -> bool:
+    """Inside the working window (Admin) and not a declared holiday."""
+    return WORK_DAY_START <= d.day <= WORK_DAY_END and not is_holiday(d)
 
 
 def working_days_in_month(year: int, month: int) -> int:
     import calendar
     last = calendar.monthrange(year, month)[1]
-    return max(0, min(WORK_DAY_END, last) - WORK_DAY_START + 1)
+    return sum(1 for dd in range(WORK_DAY_START, min(WORK_DAY_END, last) + 1)
+               if not is_holiday(date(year, month, dd)))
 
 
 def working_days_remaining(today: date, last_install_date=None) -> int:
@@ -273,7 +287,8 @@ def working_days_remaining(today: date, last_install_date=None) -> int:
     first_open = max(first_open, WORK_DAY_START)
     if first_open > end:
         return 0
-    return end - first_open + 1
+    return sum(1 for dd in range(first_open, end + 1)
+               if not is_holiday(date(today.year, today.month, dd)))
 
 
 def monthly_target_status(installed: int, target: int, today: date, last_install_date=None) -> dict:
@@ -290,6 +305,89 @@ def monthly_target_status(installed: int, target: int, today: date, last_install
         "per_day_needed": per_day_needed, "original_per_day": original_per_day,
         "pct": (installed / target * 100) if target > 0 else 0.0,
         "on_track": per_day_needed <= original_per_day * 1.05 if target > 0 else True,
+    }
+
+
+# ── Month-end forecast ────────────────────────────────────────────────────
+# Forecast = installed so far + pace x working days still expected to be worked.
+#   pace      — weighted average of the most recent worked days, newest
+#               weighted most (each day back counts ~0.7x the one after it).
+#               A plain month average lags when the team grows or shrinks
+#               mid-month; one day alone swings too much.
+#   days left — working days left in the window (Admin), less the holidays
+#               declared in Admin. The team works every other day (Sundays and
+#               rain included), so no further discount is taken.
+#   range     — the same, at the slower and faster quarter of recent days.
+# Today counts only once the working day is over: a half-uploaded day would
+# drag the pace down.
+FORECAST_RECENT_DAYS = 10
+FORECAST_DECAY = 0.7
+
+
+def month_end_forecast(daily: dict, today: date, now_time: str = None,
+                       prev_daily: dict = None, day_end: str = "18:00:00") -> dict:
+    """daily = {date -> installs} for this month (all types). prev_daily = the
+    same for last month, used only while this month has under 3 worked days."""
+    import calendar
+    last = calendar.monthrange(today.year, today.month)[1]
+    w_start, w_end = WORK_DAY_START, min(WORK_DAY_END, last)
+    done = int(sum(daily.values()))
+    day_over = (now_time or "23:59:59") >= day_end
+    # Days whose result is final: before today, plus today once the day is over.
+    final_upto = today.day if day_over else today.day - 1
+    final = {d.day: int(v) for d, v in daily.items() if d.day <= final_upto}
+    window_days = [d for d in range(w_start, min(w_end, final_upto) + 1)
+                   if not is_holiday(date(today.year, today.month, d))]
+    worked = [(d, final[d]) for d in window_days if final.get(d, 0) > 0]
+    idle = len(window_days) - len(worked)
+
+    # Days still to come in the window. Today is still to come until it's over
+    # unless installs were already uploaded for it — then it's counted as done
+    # rather than counted twice.
+    first_open = final_upto + 1
+    if not day_over and daily and any(d.day == today.day and v > 0 for d, v in daily.items()):
+        first_open = today.day + 1
+    days_left = sum(1 for d in range(max(first_open, w_start), w_end + 1)
+                    if not is_holiday(date(today.year, today.month, d)))
+    holidays_left = sum(1 for d in range(max(first_open, w_start), w_end + 1)
+                        if is_holiday(date(today.year, today.month, d)))
+
+    recent = [v for _, v in worked[-FORECAST_RECENT_DAYS:]]
+    prev_vals = [int(v) for v in (prev_daily or {}).values() if v > 0]
+    basis = "recent"
+    if recent:
+        wts = [FORECAST_DECAY ** i for i in range(len(recent) - 1, -1, -1)]
+        pace = sum(v * w for v, w in zip(recent, wts)) / sum(wts)
+        if len(recent) < 3 and prev_vals:
+            # Too few days to trust alone: lean on last month, less each day.
+            prev_pace = sum(prev_vals) / len(prev_vals)
+            k = len(recent) / 3
+            pace = k * pace + (1 - k) * prev_pace
+            basis = "blend"
+    elif prev_vals:
+        pace, basis = sum(prev_vals) / len(prev_vals), "last_month"
+    else:
+        pace, basis = 0.0, "none"
+
+    sample = sorted(recent if len(recent) >= 3 else (recent + prev_vals[-FORECAST_RECENT_DAYS:]))
+    def q(p):
+        if not sample:
+            return pace
+        i = (len(sample) - 1) * p
+        lo, hi = int(i), min(int(i) + 1, len(sample) - 1)
+        return sample[lo] + (sample[hi] - sample[lo]) * (i - lo)
+    slow, fast = min(q(0.25), pace), max(q(0.75), pace)
+
+    elapsed = len(window_days)
+    idle_share = 0.0
+    exp_days = days_left
+    return {
+        "done": done, "forecast": int(round(done + pace * exp_days)),
+        "low": int(round(done + slow * exp_days)), "high": int(round(done + fast * exp_days)),
+        "pace": pace, "days_left": days_left, "expected_days": exp_days,
+        "idle_days": idle, "elapsed_days": elapsed, "worked_days": len(worked),
+        "idle_share": idle_share, "basis": basis, "today_final": day_over,
+        "holidays_left": holidays_left,
     }
 
 
@@ -2819,6 +2917,20 @@ WORK_DAY_START = max(1, min(31, int(get_setting("work_day_start", DEFAULT_WORK_D
 WORK_DAY_END = max(WORK_DAY_START, min(31, int(get_setting("work_day_end", DEFAULT_WORK_DAY_END))))
 
 
+def load_holidays() -> dict:
+    """Settings key "holidays": JSON {"YYYY-MM-DD": "name"}."""
+    import json as _json
+    raw = get_setting("holidays", "")
+    try:
+        data = _json.loads(raw) if raw else {}
+        return {str(k)[:10]: str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+HOLIDAYS = load_holidays()
+
+
 # ── Expenses: cost per install ─────────────────────────────────────────────
 # Every figure is computed live from the Expenses and Vehicles sheets, so any
 # change to a cost shows up in the per-install numbers straight away.
@@ -4214,17 +4326,24 @@ def render_daily_calendar(mkey: str):
                     # breakup to show for a day with nothing on it. A day still
                     # in the future isn't a shortfall, so it stays neutral —
                     # only days up to today count as a red zero.
-                    future = date(y, m, dayno) > today_ist()
-                    bg = "var(--surface-000)" if future else CF_RED_BG
-                    fg = "var(--ink-600)" if future else CF_RED_FONT
+                    # Today isn't a shortfall yet either — its upload may still be to come.
+                    future = date(y, m, dayno) >= today_ist()
+                    # A declared holiday, or a day outside the working window,
+                    # isn't a shortfall either: shown neutral, holidays labelled.
+                    _hol = HOLIDAYS.get(dstr)
+                    off = bool(_hol) or not (WORK_DAY_START <= dayno <= WORK_DAY_END)
+                    neutral = future or off
+                    bg = "var(--surface-100)" if off else ("var(--surface-000)" if future else CF_RED_BG)
+                    fg = "var(--ink-600)" if neutral else CF_RED_FONT
+                    mark = "Hol" if _hol else "-"
                     st.markdown(
-                        f'<div class="cal-empty" style="text-align:center;border-radius:var(--radius-sm);'
+                        f'<div class="cal-empty" title="{_hol or ""}" style="text-align:center;border-radius:var(--radius-sm);'
                         f'border:1px solid var(--hairline);background:{bg};color:{fg};'
                         f'padding:7px 2px;line-height:1.15;">'
                         f'<div style="font-size:10.5px;font-weight:700;opacity:.75;">{dayno}</div>'
-                        f'<div style="font-size:15px;font-weight:800;'
-                        + ('opacity:.45;' if future else '') +
-                        f'">-</div></div>',
+                        f'<div style="font-size:{"11px" if _hol else "15px"};font-weight:800;'
+                        + ('opacity:.45;' if neutral and not _hol else '') +
+                        f'">{mark}</div></div>',
                         unsafe_allow_html=True)
                     continue
                 # Label is the count only; the day number comes from the CSS
@@ -4250,15 +4369,20 @@ def render_daily_calendar(mkey: str):
         hi_day = max(worked, key=worked.get)
         lo_day = min(worked, key=worked.get)
         last_day_n = _cal.monthrange(y, m)[1]
+        # Working days that had no installs — declared holidays and days outside
+        # the working window aren't counted; they were never meant to be worked.
         holidays = [d for d in range(1, last_day_n + 1)
                     if date(y, m, d) <= today_ist()
+                    and is_working_day(date(y, m, d))
                     and int(counts.get(f"{y:04d}-{m:02d}-{d:02d}", 0)) == 0]
+        _declared = sum(1 for k in HOLIDAYS if k.startswith(f"{y:04d}-{m:02d}-"))
         fmt_day = lambda ds: datetime.strptime(ds, "%Y-%m-%d").strftime("%d %b")
         render_stat_tiles([
             ("chart", f"{worked[hi_day]:,}", "Max", fmt_day(hi_day), "normal"),
             ("gauge", f"{worked[lo_day]:,}", "Min", fmt_day(lo_day), "normal"),
-            ("calendar", f"{len(holidays)}", "Holidays", "no installs",
+            ("calendar", f"{len(holidays)}", "Missed days", "no installs",
              "danger" if holidays else "normal"),
+            ("calendar", f"{_declared}", "Holidays", "declared", "normal"),
         ])
 
     sub_hdr("pin", f"Section-Wise On {picked}")
@@ -6193,6 +6317,72 @@ with tab_dash:
                 ("gauge", f"{tgt['per_day_needed']:.0f}", "Need", "per day",
                  "normal" if tgt["on_track"] else "danger"),
             ])
+            # -- Month-end forecast -------------------------------------------
+            def _daily_totals(frame):
+                if frame.empty:
+                    return {}
+                g = frame.assign(_n=frame["qty_1ph"] + frame["qty_3ph"]).groupby(frame["_date"].dt.date)["_n"].sum()
+                return {d: int(v) for d, v in g.items() if v > 0}
+            _pm_y, _pm_m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+            prev_month = df_month[(df_month["_date"].dt.month == _pm_m) & (df_month["_date"].dt.year == _pm_y)]
+            _daily_now, _daily_prev = _daily_totals(this_month), _daily_totals(prev_month)
+            fc = month_end_forecast(_daily_now, today, datetime.now(IST).strftime("%H:%M:%S"),
+                                    _daily_prev, FORECAST_DAY_END)
+            if fc["basis"] != "none":
+                _share1 = (m_1ph / m_total) if m_total else 1.0
+                _f1 = int(round(fc["forecast"] * _share1))
+                _vs = (fc["forecast"] / month_target * 100) if month_target else 0
+                _gap = fc["forecast"] - month_target
+                render_stat_tiles([
+                    ("chart", f"{fc['forecast']:,}", "Forecast", "month end",
+                     "normal" if not month_target or fc["forecast"] >= month_target else "danger"),
+                    ("gauge", f"{fc['low']:,}–{fc['high']:,}", "Likely", "range", "normal"),
+                    ("target", f"{_vs:.0f}%" if month_target else "—", "Of", "target",
+                     "normal" if not month_target or _vs >= 100 else "danger"),
+                    ("bolt", f"{fc['pace']:.0f}", "Current", "pace / day", "normal"),
+                ])
+                _basis_txt = {"recent": f"pace of the last {min(fc['worked_days'], FORECAST_RECENT_DAYS)} worked day(s)",
+                              "blend": "this month's first days blended with last month's pace",
+                              "last_month": "last month's pace (no installs yet this month)"}[fc["basis"]]
+                st.caption(
+                    f"Forecast {fc['forecast']:,} ({_f1:,} 1PH · {fc['forecast'] - _f1:,} 3PH) — "
+                    + (f"{abs(_gap):,} {'above' if _gap >= 0 else 'short of'} target. " if month_target else "")
+                    + f"{_basis_txt[0].upper() + _basis_txt[1:]}, over {fc['days_left']} working day(s) left"
+                    + (f" (after {fc['holidays_left']} holiday(s))" if fc["holidays_left"] else "")
+                    + ".")
+
+                with st.expander("How the forecast is worked out"):
+                    st.markdown(
+                        f"- **Installed so far:** {fc['done']:,}\n"
+                        f"- **Pace:** {fc['pace']:.1f}/day — a weighted average of recent worked days, newest counted most\n"
+                        f"- **Working days left:** {fc['days_left']} (window {WORK_DAY_START}–{WORK_DAY_END}"
+                        + (f", less {fc['holidays_left']} holiday(s)" if fc["holidays_left"] else "")
+                        + ", set in Admin)\n"
+                        f"- **Forecast:** {fc['done']:,} + {fc['pace']:.1f} × {fc['days_left']} = **{fc['forecast']:,}**\n"
+                        f"- **Range:** at the slower and faster quarter of recent days\n"
+                        + ("" if fc["today_final"] else "- Today isn't counted in the pace until the day is over.\n"))
+                    # Replay last month: what would each method have said on each day?
+                    if len(_daily_prev) >= 6:
+                        import calendar as _cal
+                        _pl = _cal.monthrange(_pm_y, _pm_m)[1]
+                        _actual = sum(_daily_prev.values())
+                        errs_w, errs_a = [], []
+                        for _d in range(WORK_DAY_START + 2, min(WORK_DAY_END, _pl)):
+                            _day = date(_pm_y, _pm_m, _d)
+                            _sofar = {k: v for k, v in _daily_prev.items() if k <= _day}
+                            if len(_sofar) < 3:
+                                continue
+                            _f = month_end_forecast(_sofar, _day, "23:59:59", None, FORECAST_DAY_END)
+                            errs_w.append(abs(_f["forecast"] - _actual) / _actual * 100)
+                            # Simple method: average of every worked day x days left (no recency weighting).
+                            _avg = sum(_sofar.values()) / len(_sofar)
+                            errs_a.append(abs(sum(_sofar.values()) + _avg * _f["days_left"] - _actual) / _actual * 100)
+                        if errs_w:
+                            st.caption(
+                                f"Checked on {month_label(f'{_pm_y:04d}-{_pm_m:02d}')} ({_actual:,} installed): "
+                                f"this method was off by {sum(errs_w) / len(errs_w):.1f}% on average across the month, "
+                                f"against {sum(errs_a) / len(errs_a):.1f}% for a plain month-average.")
+
             sub_hdr("rupee", "This Month — Billing")
             month_1ph_count = m_1ph
             billing = calculate_1ph_incentive_billing(m_1ph)
@@ -9223,9 +9413,12 @@ with tab_admin:
         else:
             import calendar as _cal_adm
             _last = _cal_adm.monthrange(_today_adm.year, _today_adm.month)[1]
-            _days = max(0, min(int(new_wd_end), _last) - int(new_wd_start) + 1)
+            _hol_here = sum(1 for dd in range(int(new_wd_start), min(int(new_wd_end), _last) + 1)
+                            if is_holiday(date(_today_adm.year, _today_adm.month, dd)))
+            _days = max(0, min(int(new_wd_end), _last) - int(new_wd_start) + 1) - _hol_here
             st.markdown(
-                f'<div class="info-box">Day {int(new_wd_start)} to {int(new_wd_end)} — '
+                f'<div class="info-box">Day {int(new_wd_start)} to {int(new_wd_end)}'
+                + (f', less {_hol_here} holiday(s)' if _hol_here else '') + ' — '
                 f'<b>{_days}</b> working days in {month_label(month_key(_today_adm))}'
                 + (f', {new_target / _days:,.0f} installs/day to reach {int(new_target):,}.' if _days and new_target else '.')
                 + '</div>', unsafe_allow_html=True)
@@ -9237,6 +9430,86 @@ with tab_admin:
                               "work_day_end": int(new_wd_end)}):
                 st.success(f"Target {int(new_target):,}, working days {int(new_wd_start)}–{int(new_wd_end)}.")
                 st.rerun()
+
+        # ── Holidays ──────────────────────────────────────────────────────────
+        # Days inside the working window when no work is done (Dasara, Diwali).
+        sub_hdr("calendar", "Holidays")
+        st.markdown(
+            f'<div class="info-box">Days between day {WORK_DAY_START} and {WORK_DAY_END} when no work is done — '
+            'Dasara, Diwali and other public holidays. They come off the working days left, the installs '
+            'needed per day and the forecast, and show as “Hol” on the Analytics calendar.</div>',
+            unsafe_allow_html=True)
+        if "holiday_form_version" not in st.session_state:
+            st.session_state["holiday_form_version"] = 0
+        hv = st.session_state["holiday_form_version"]
+        hc1, hc2 = st.columns(2)
+        with hc1:
+            hol_dates = st.date_input("Date(s)", value=[], key=f"holiday_dates_{hv}", format="DD/MM/YYYY",
+                                      help="Pick one day, or a start and end day for a run of holidays (e.g. 20–21 Oct).")
+        with hc2:
+            hol_name = st.text_input("Holiday name", key=f"holiday_name_{hv}", placeholder="e.g. Dasara")
+        if isinstance(hol_dates, (list, tuple)):
+            _hd = list(hol_dates)
+            _picked = ([_hd[0] + timedelta(days=i) for i in range((_hd[1] - _hd[0]).days + 1)]
+                       if len(_hd) == 2 else _hd)
+        else:
+            _picked = [hol_dates] if hol_dates else []
+        _outside = [d for d in _picked if not (WORK_DAY_START <= d.day <= WORK_DAY_END)]
+        _new = [d for d in _picked if d not in _outside]
+        if _outside:
+            st.markdown(f'<div class="info-box">{", ".join(d.strftime("%d %b") for d in _outside)} '
+                        f'— already outside the working days ({WORK_DAY_START}–{WORK_DAY_END}), nothing to add.</div>',
+                        unsafe_allow_html=True)
+        if st.button(f"➕ Add Holiday{'s' if len(_new) > 1 else ''}" + (f" ({len(_new)})" if _new else ""),
+                     type="primary", use_container_width=True, key="holiday_add", disabled=not _new):
+            if not hol_name.strip():
+                st.error("❌ Enter the holiday's name.")
+            else:
+                import json as _json
+                _hols = dict(HOLIDAYS)
+                for d in _new:
+                    _hols[d.isoformat()] = " ".join(hol_name.split())
+                if save_settings({"holidays": _json.dumps(dict(sorted(_hols.items())))}):
+                    st.session_state["holiday_form_version"] += 1
+                    st.success(f"✅ {' '.join(hol_name.split())}: "
+                               + ", ".join(d.strftime("%d %b %Y") for d in _new) + " — no work on these days.")
+                    st.rerun()
+
+        if HOLIDAYS:
+            _hrows = []
+            for k, v in sorted(HOLIDAYS.items()):
+                try:
+                    _d = date.fromisoformat(k)
+                except ValueError:
+                    continue
+                _hrows.append({"Delete": False, "Date": _d.strftime("%d %b %Y"), "Day": _d.strftime("%a"),
+                               "Holiday": v, "_key": k, "_past": _d < date(_today_adm.year, _today_adm.month, 1)})
+            _hdf = pd.DataFrame(_hrows)
+            _up = _hdf[~_hdf["_past"]]
+            _past = _hdf[_hdf["_past"]]
+            def _hol_editor(frame, key):
+                return st.data_editor(frame[["Delete", "Date", "Day", "Holiday"]], use_container_width=True,
+                                      hide_index=True, disabled=["Date", "Day"], key=key,
+                                      height=dataframe_height(len(frame), max_px=360))
+            edited = []
+            if not _up.empty:
+                st.caption(f"{len(_up)} holiday(s) this month and ahead")
+                edited.append((_up, _hol_editor(_up, f"holiday_editor_{_sheet_version('Settings')}")))
+            if not _past.empty:
+                with st.expander(f"Earlier holidays ({len(_past)})"):
+                    edited.append((_past, _hol_editor(_past, f"holiday_editor_past_{_sheet_version('Settings')}")))
+            _n_del = sum(int(e["Delete"].sum()) for _, e in edited)
+            if st.button(f"💾 Save Holidays{f' (deleting {_n_del})' if _n_del else ''}", use_container_width=True,
+                         key="holiday_save"):
+                import json as _json
+                _hols = {}
+                for orig, e in edited:
+                    for (_, o), (_, r) in zip(orig.iterrows(), e.iterrows()):
+                        if not r["Delete"]:
+                            _hols[o["_key"]] = " ".join(str(r["Holiday"]).split()) or o["Holiday"]
+                if save_settings({"holidays": _json.dumps(dict(sorted(_hols.items())))}):
+                    st.success("✅ Holidays updated.")
+                    st.rerun()
 
         st.divider()
 
