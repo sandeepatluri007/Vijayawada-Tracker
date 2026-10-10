@@ -2973,6 +2973,32 @@ def _loc_or_unspecified(series) -> pd.Series:
     return series.astype(str).str.strip().replace("", "Unspecified").fillna("Unspecified")
 
 
+def _loc_key(name) -> str:
+    """Location match key: capitals and spacing ignored. Installs arrive from the
+    MDM export as "CHITTINAGAR" while stock is received as "Chittinagar"; an
+    exact match made them two locations, with the installs at minus."""
+    return " ".join(str(name).strip().upper().split())
+
+
+def _canonical_locations(*series) -> dict:
+    """{key -> one spelling} for every location seen. The Admin Locations list
+    wins, so the table shows the names set up there; otherwise the first
+    spelling met is used."""
+    names = {}
+    try:
+        for l in active_locs:
+            names.setdefault(_loc_key(l), str(l).strip())
+    except NameError:
+        pass
+    for ser in series:
+        for v in ser:
+            k = _loc_key(v)
+            if k:
+                names.setdefault(k, str(v).strip())
+    names[_loc_key("Unspecified")] = "Unspecified"
+    return names
+
+
 def stock_summary() -> dict:
     """Overall stock per meter type: received, installed, returned, pending."""
     df_inv, df_inst, df_ret = get_data("Inventory"), get_data("Installations"), load_returns()
@@ -2994,6 +3020,15 @@ def stock_by_location() -> pd.DataFrame:
     being dropped or guessed at."""
     df_inv, df_inst, df_ret = get_data("Inventory"), get_data("Installations"), load_returns()
     rows = {}
+    canon = _canonical_locations(
+        _loc_or_unspecified(df_inv["location"]) if not df_inv.empty and "location" in df_inv.columns else [],
+        _loc_or_unspecified(df_ret["location"]) if not df_ret.empty else [],
+        _loc_or_unspecified(df_inst["location"]) if not df_inst.empty and "location" in df_inst.columns else [])
+
+    def one_name(series):
+        """Every spelling of a location -> the same name, so stock received as
+        "Chittinagar" is what installs at "CHITTINAGAR" draw on."""
+        return _loc_or_unspecified(series).map(lambda v: canon.get(_loc_key(v), v))
 
     def cell(loc, t):
         return rows.setdefault((loc, t), {"Location": loc, "Type": t, "Received": 0,
@@ -3001,7 +3036,7 @@ def stock_by_location() -> pd.DataFrame:
 
     if not df_inv.empty and has_col(df_inv, "type", "qty"):
         inv = df_inv.copy()
-        inv["location"] = _loc_or_unspecified(inv["location"]) if "location" in inv.columns else "Unspecified"
+        inv["location"] = one_name(inv["location"]) if "location" in inv.columns else "Unspecified"
         inv["qty"] = safe_numeric_col(inv, "qty")
         for (loc, t), q in inv.groupby(["location", "type"])["qty"].sum().items():
             cell(loc, t)["Received"] += int(q)
@@ -3012,7 +3047,7 @@ def stock_by_location() -> pd.DataFrame:
     # also counted as used by installs, and the sites carried too little.
     if not df_ret.empty:
         ret = df_ret.copy()
-        ret["location"] = _loc_or_unspecified(ret["location"])
+        ret["location"] = one_name(ret["location"])
         for (loc, t), q in ret.groupby(["location", "type"])["qty"].sum().items():
             cell(loc, t)["Returned"] += int(q)
 
@@ -3023,7 +3058,7 @@ def stock_by_location() -> pd.DataFrame:
     # against the install log rather than being apportioned by a rule.
     if not df_inst.empty and has_col(df_inst, "location", "qty_1ph", "qty_3ph"):
         ins = df_inst.copy()
-        ins["location"] = _loc_or_unspecified(ins["location"])
+        ins["location"] = one_name(ins["location"])
         ins["_date"] = pd.to_datetime(ins["date"], errors="coerce") if "date" in ins.columns else pd.NaT
         ins = ins.sort_values("_date", na_position="last")
         for t, col in zip(METER_TYPES, ("qty_1ph", "qty_3ph")):
@@ -8766,7 +8801,7 @@ with tab_inv:
 
         if ret_sub:
             _avail = next((int(r["Pending"]) for _, r in stock_by_location().iterrows()
-                           if r["Location"] == rloc and r["Type"] == rtype), 0)
+                           if _loc_key(r["Location"]) == _loc_key(rloc) and r["Type"] == rtype), 0)
             if _avail > 0 and rqty > _avail:
                 st.error(f"❌ Only {_avail:,} × {rtype} pending at {rloc} — can't return {int(rqty):,}.")
             else:
