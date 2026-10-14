@@ -403,38 +403,56 @@ INCENTIVE_TIER_SLABS_1PH = [
 ]
 
 
-def calculate_1ph_incentive_billing(total_installs: int) -> dict:
-    """1PH billing for a month."""
-    return calculate_billing(total_installs, INCENTIVE_UNIT_RATE_1PH, INCENTIVE_FLAT_ADDON_1PH)
+def calculate_1ph_incentive_billing(total_installs: int, installs_3ph: int = 0) -> dict:
+    """1PH billing for a month. The tier slabs run on ALL the month's installs
+    (1PH + 3PH), so pass the 3PH count too; 1PH gets its share of the incentive."""
+    return calculate_billing(total_installs, INCENTIVE_UNIT_RATE_1PH, INCENTIVE_FLAT_ADDON_1PH,
+                             slab_total=total_installs + max(0, int(installs_3ph)))
 
 
-def calculate_3ph_billing(total_installs: int) -> dict:
-    """3PH billing for a month: its own unit rate and survey, through the SAME
-    tier slabs as 1PH, counted on the 3PH installs alone."""
-    return calculate_billing(total_installs, RATE_3PH_NEW, SURVEY_3PH)
+def calculate_3ph_billing(total_installs: int, installs_1ph: int = 0) -> dict:
+    """3PH billing for a month: its own unit rate and survey, through the same
+    tier slabs — counted on the month's TOTAL installs (1PH + 3PH), not on 3PH
+    alone. Pass the 1PH count so 3PH gets its share of the incentive."""
+    return calculate_billing(total_installs, RATE_3PH_NEW, SURVEY_3PH,
+                             slab_total=total_installs + max(0, int(installs_1ph)))
 
 
-def calculate_billing(total_installs: int, unit_rate: float, addon: float) -> dict:
-    """Replicates the '1Ph Incentive Tier Calculator' workbook's formula
-    exactly: Installs_in_slab = MAX(0, MIN(total,To) - MIN(total,From-1)),
-    Slab Incentive = Installs_in_slab x Rate, summed across all slabs.
-    Total Monthly Cost = Base Cost + Tiered Slab Incentive + Flat Add-on."""
-    if total_installs <= 0:
-        return {"base_cost": 0.0, "tier_incentive": 0.0, "flat_addon": 0.0, "total_cost": 0.0, "blended_per_install": 0.0, "slabs": []}
-    slab_breakdown = []
-    tier_incentive = 0.0
+def tier_slabs(slab_total: int):
+    """Progressive slabs on a month's install count (the workbook's formula:
+    Installs_in_slab = MAX(0, MIN(total,To) - MIN(total,From-1))).
+    Returns (incentive, breakdown rows)."""
+    rows, incentive = [], 0.0
     for lo, hi, rate in INCENTIVE_TIER_SLABS_1PH:
-        installs_in_slab = max(0, min(total_installs, hi) - min(total_installs, lo - 1))
-        slab_amount = installs_in_slab * rate
-        tier_incentive += slab_amount
-        slab_breakdown.append({"From": lo, "To": hi if hi < 9_999_999 else "∞", "Rate (Rs.)": rate, "Installs": installs_in_slab, "Amount (Rs.)": slab_amount})
+        n = max(0, min(slab_total, hi) - min(slab_total, lo - 1))
+        incentive += n * rate
+        rows.append({"From": lo, "To": hi if hi < 9_999_999 else "∞", "Rate (Rs.)": rate,
+                     "Installs": n, "Amount (Rs.)": n * rate})
+    return incentive, rows
+
+
+def calculate_billing(total_installs: int, unit_rate: float, addon: float, slab_total: int = None) -> dict:
+    """Total Monthly Cost = Base Cost + Tiered Slab Incentive + Flat Add-on.
+
+    The incentive is earned on the month's TOTAL installs, whatever their type
+    (`slab_total` = 1PH + 3PH). Every install in a slab earns that slab's rate,
+    so this type's share of the incentive is in proportion to its installs:
+    incentive on the total x (this type's installs / total). The 1PH and 3PH
+    shares add up to exactly the incentive on the combined count."""
+    slab_total = total_installs if slab_total is None else max(int(slab_total), total_installs)
+    combined, slab_breakdown = tier_slabs(slab_total) if slab_total > 0 else (0.0, [])
+    if total_installs <= 0:
+        return {"base_cost": 0.0, "tier_incentive": 0.0, "flat_addon": 0.0, "total_cost": 0.0,
+                "blended_per_install": 0.0, "slabs": slab_breakdown, "slab_total": slab_total,
+                "tier_incentive_combined": combined}
+    tier_incentive = combined * total_installs / slab_total
     base_cost = total_installs * unit_rate
     flat_addon = total_installs * addon
     total_cost = base_cost + tier_incentive + flat_addon
     return {
         "base_cost": base_cost, "tier_incentive": tier_incentive, "flat_addon": flat_addon,
         "total_cost": total_cost, "blended_per_install": total_cost / total_installs,
-        "slabs": slab_breakdown,
+        "slabs": slab_breakdown, "slab_total": slab_total, "tier_incentive_combined": combined,
     }
 # A stable per-PIN token, remembered in the browser (localStorage) after a
 # successful login, so Streamlit Community Cloud's app-sleep / session-reset
@@ -4482,7 +4500,7 @@ def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: flo
     the same figures the downloaded workbook will compute.
 
     1PH and 3PH each contribute their own old-rate revenue, price hike and
-    tier incentive (same slabs, on each type's own count). The expense per
+    share of the tier incentive (slabs on the combined 1PH + 3PH count). The expense per
     install applies to ALL installs, so the month's full cost is charged."""
     old3 = RATE_3PH_OLD if old_rate_3ph is None else old_rate_3ph
     new3 = RATE_3PH_NEW if new_rate_3ph is None else new_rate_3ph
@@ -4494,8 +4512,9 @@ def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: flo
     retention = retention_pct * old_base_revenue
     gst_old = gst_pct * old_base_revenue
     price_hike = (new_rate - old_rate) * installs + (new3 - old3) * n3
-    tier_incentive = (calculate_1ph_incentive_billing(installs)["tier_incentive"]
-                      + calculate_3ph_billing(n3)["tier_incentive"])
+    # Slabs on the combined count: the two shares add up to the incentive on 1PH + 3PH.
+    tier_incentive = (calculate_1ph_incentive_billing(installs, n3)["tier_incentive"]
+                      + calculate_3ph_billing(n3, installs)["tier_incentive"])
     additional = price_hike + tier_incentive
     gst_additional = gst_pct * additional
 
@@ -4555,6 +4574,25 @@ def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
             calc3[ref] = calc3[ref].value.replace("1Ph", "3Ph").replace("1PH", "3PH")
     calc3["A3"] = f"Month: {month_label(mkey)}  |  3PH installs from the install log: {installs_3ph:,}"
 
+    # ── Slabs on the month's TOTAL installs (1PH + 3PH) ──────────────────
+    # The incentive is earned on all installs whatever their type. Each sheet
+    # works the slabs on the combined count (B10) and takes its own share of
+    # the incentive in B26: incentive x this type's installs / total. The two
+    # shares add up to the incentive on the combined count.
+    for sh, other in ((calc, "'3Ph Incentive Calc'"), (calc3, "'1Ph Incentive Calc'")):
+        sh["A10"] = "Total installs for the slabs (1PH + 3PH)"
+        sh["B10"] = f"=B7+{other}!$B$7"
+        sh["A10"]._style = sh["A7"]._style
+        sh["B10"]._style = sh["B8"]._style
+        for r in range(14, 19):
+            sh[f"E{r}"] = f"=MAX(0,MIN($B$10,C{r})-MIN($B$10,B{r}-1))"
+        sh["A21"] = "Check: Slab installs = Total installs (1PH + 3PH)?"
+        sh["B21"] = '=IF(E19=B10,"OK","MISMATCH - check slab From/To")'
+        sh["A26"] = "Tiered Slab Incentive — this type's share (F19 x installs / total)"
+        sh["B26"] = "=IF(B10=0,0,F19*B7/B10)"
+        sh["A29"] = "Blended Cost per Install (Rs.)"
+        sh["B29"] = "=IF(B7=0,0,B28/B7)"
+
     ps = wb["Profit Sharing"]
     # 3PH inputs beside the 1PH ones (E5:E9 were empty), linked to its sheet.
     ps["B5"] = "1PH Value"
@@ -4574,8 +4612,10 @@ def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
     ps["B18"] = "Expense/install x all installs (1PH + 3PH)"
     ps["C22"] = "=(B8-B7)*B6+(E8-E7)*E6"
     ps["B22"] = "1PH (new - old) x installs + 3PH (new - old) x installs"
-    ps["C23"] = "='1Ph Incentive Calc'!$F$19+'3Ph Incentive Calc'!$F$19"
-    ps["B23"] = "1PH tier incentive + 3PH tier incentive"
+    # Each sheet's share (B26); F19 is now the incentive on the combined count,
+    # so adding the two F19s would count it twice.
+    ps["C23"] = "='1Ph Incentive Calc'!$B$26+'3Ph Incentive Calc'!$B$26"
+    ps["B23"] = "Tier incentive on all installs (1PH share + 3PH share)"
     if isinstance(ps["A11"].value, str):
         ps["A11"] = "Retention % (on the old base amount, 1PH + 3PH)"
 
@@ -5116,11 +5156,11 @@ def site_cost_breakdown(df_exp: pd.DataFrame, mkey: str) -> dict:
     n1_all = int(inst["n1"].sum()) if not inst.empty else 0
     n3_all = int(inst["n3"].sum()) if not inst.empty else 0
     # Per-install billed value at each type's blended rate for the month. The
-    # slabs apply to the month's total for each type, so a per-site slab
+    # slabs apply to the month's combined total (1PH + 3PH), so a per-site slab
     # calculation would be wrong.
-    v1 = (calculate_1ph_incentive_billing(n1_all)["total_cost"] / n1_all) if n1_all \
+    v1 = (calculate_1ph_incentive_billing(n1_all, n3_all)["total_cost"] / n1_all) if n1_all \
         else (INCENTIVE_UNIT_RATE_1PH + INCENTIVE_FLAT_ADDON_1PH)
-    v3 = (calculate_3ph_billing(n3_all)["total_cost"] / n3_all) if n3_all \
+    v3 = (calculate_3ph_billing(n3_all, n1_all)["total_cost"] / n3_all) if n3_all \
         else (RATE_3PH_NEW + SURVEY_3PH)
 
     active = [r["site"] for _, r in inst.iterrows() if (r["n1"] + r["n3"]) > 0]
@@ -6420,8 +6460,9 @@ with tab_dash:
 
             sub_hdr("rupee", "This Month — Billing")
             month_1ph_count = m_1ph
-            billing = calculate_1ph_incentive_billing(m_1ph)
-            billing3 = calculate_3ph_billing(m_3ph)
+            # Slabs run on the month's total installs (1PH + 3PH together).
+            billing = calculate_1ph_incentive_billing(m_1ph, m_3ph)
+            billing3 = calculate_3ph_billing(m_3ph, m_1ph)
             # Cost per install by type, from the Expenses tab's site model — beside
             # the billed rate so the two can be compared at a glance.
             cost_model = site_cost_breakdown(load_expenses(), month_key(today))
@@ -6441,15 +6482,35 @@ with tab_dash:
             ])
             st.dataframe(bill_tbl, use_container_width=True, hide_index=True, height=dataframe_height(len(bill_tbl)))
             with st.expander("View slab breakdown"):
-                for _lbl, _b in (("1PH", billing), ("3PH", billing3)):
-                    st.markdown(f"**{_lbl}**")
-                    slab_df = pd.DataFrame(_b["slabs"])
-                    if not slab_df.empty:
-                        st.dataframe(slab_df, use_container_width=True, hide_index=True)
-                    cb1, cb2, cb3 = st.columns(3)
-                    cb1.metric(f"{_lbl} Base (Rs.)", f"{_b['base_cost']:,.0f}")
-                    cb2.metric(f"{_lbl} Tiered Incentive (Rs.)", f"{_b['tier_incentive']:,.0f}")
-                    cb3.metric(f"{_lbl} Survey (Rs.)", f"{_b['flat_addon']:,.0f}")
+                # One set of slabs on the month's total installs, whatever the
+                # type; each type then takes its share of that incentive.
+                st.markdown(f"**Tier slabs — {m_1ph + m_3ph:,} installs ({m_1ph:,} 1PH + {m_3ph:,} 3PH)**")
+                slab_df = pd.DataFrame(billing["slabs"])
+                if not slab_df.empty:
+                    slab_df["To"] = slab_df["To"].astype(str)
+                    slab_df = slab_df.rename(columns={"Installs": "Installs (1PH + 3PH)"})
+                    slab_df = pd.concat([slab_df, pd.DataFrame([{
+                        "From": "TOTAL", "To": "", "Rate (Rs.)": "",
+                        "Installs (1PH + 3PH)": int(slab_df["Installs (1PH + 3PH)"].sum()),
+                        "Amount (Rs.)": slab_df["Amount (Rs.)"].sum()}])], ignore_index=True)
+                    slab_df["From"] = slab_df["From"].astype(str)
+                    slab_df["Rate (Rs.)"] = slab_df["Rate (Rs.)"].astype(str)
+                    st.dataframe(slab_df, use_container_width=True, hide_index=True,
+                                 height=dataframe_height(len(slab_df)))
+                _tot_inc = billing["tier_incentive_combined"]
+                _avg_inc = (_tot_inc / (m_1ph + m_3ph)) if (m_1ph + m_3ph) else 0.0
+                st.caption(f"Incentive Rs. {_tot_inc:,.0f} on {m_1ph + m_3ph:,} installs = "
+                           f"Rs. {_avg_inc:,.2f} per install, shared by each type's installs.")
+                comp = pd.DataFrame([
+                    {"Type": _lbl, "Installs": _n, "Base (Rs.)": round(_b["base_cost"]),
+                     "Tier Incentive (Rs.)": round(_b["tier_incentive"]),
+                     "Survey (Rs.)": round(_b["flat_addon"]), "Total (Rs.)": round(_b["total_cost"])}
+                    for _lbl, _n, _b in (("1PH", m_1ph, billing), ("3PH", m_3ph, billing3))])
+                comp = pd.concat([comp, pd.DataFrame([{
+                    "Type": "TOTAL", **{c: int(comp[c].sum()) for c in comp.columns if c != "Type"}}])],
+                    ignore_index=True)
+                st.dataframe(comp, use_container_width=True, hide_index=True,
+                             height=dataframe_height(len(comp)))
 
             sub_hdr("pin", "This Month, By Site")
             if this_month.empty:
@@ -7774,8 +7835,8 @@ with tab_exp:
                 f'x {_all:,} installs ({_n1ph:,} 1PH + {_n3ph:,} 3PH) = <b>Rs. {fmt_rs((_cpi or 0) * _all)}</b>'
                 f' (month total cost Rs. {fmt_rs(summ["total_cost"])}).</div>', unsafe_allow_html=True)
 
-            bill = calculate_1ph_incentive_billing(_n1ph)
-            bill3 = calculate_3ph_billing(_n3ph)
+            bill = calculate_1ph_incentive_billing(_n1ph, _n3ph)
+            bill3 = calculate_3ph_billing(_n3ph, _n1ph)
             ps = profit_sharing_summary(_n1ph, _cpi or 0.0, _old_rate, INCENTIVE_UNIT_RATE_1PH,
                                         INCENTIVE_FLAT_ADDON_1PH, _ret, _gst, _split, installs_3ph=_n3ph)
             render_stat_tiles([
