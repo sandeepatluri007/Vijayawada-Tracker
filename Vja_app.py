@@ -26,6 +26,9 @@ the app creates and appends data automatically):
                            per-install costs use `rate_1ph` / `rate_3ph`)
   Vehicles              - reg_no, description, is_active
   Returns               - date, type, qty, location, dc_no, remarks
+  Transfers             - date, type, qty, from_location, to_location, dc_no, remarks
+                           (stock borrowed by one site from another; created by
+                           the app on the first borrow if the tab doesn't exist)
   Employees             - emp_id, name, salutation, designation, location, monthly_salary,
                            joining_date, bank, account_no, pan, pf_no, status, offer_ref
                            (HR tab: offer letters, payslips)
@@ -1918,7 +1921,7 @@ def _rate_limit_cooloff_active() -> bool:
 # the batch call fails, so this can never be worse than before.
 SHEET_TABS = ("Installations", "Inventory", "Technicians", "Locations", "Supervisors",
               "Settings", "UploadedInstallLog", "AnalyticsRaw",
-              "Expenses", "Vehicles", "Liaisoning", "Returns", "Employees", "Roles")
+              "Expenses", "Vehicles", "Liaisoning", "Returns", "Employees", "Roles", "Transfers")
 
 
 @st.cache_resource(show_spinner=False)
@@ -2973,6 +2976,45 @@ RETURN_COLS = ["date", "type", "qty", "location", "dc_no", "remarks"]
 METER_TYPES = ("1 PH", "3 PH")
 
 
+# Stock lent by one site to another when the customer's store at a site has
+# none (e.g. Payakapuram lends to Chittinagar). It moves pending stock between
+# sites; the overall totals don't change.
+#   Transfers sheet: date, type, qty, from_location, to_location, dc_no, remarks
+TRANSFER_COLS = ["date", "type", "qty", "from_location", "to_location", "dc_no", "remarks"]
+
+
+def load_transfers() -> pd.DataFrame:
+    df = get_data("Transfers")
+    if df.empty:
+        df = pd.DataFrame(columns=TRANSFER_COLS)
+    df = df.copy()
+    for c in TRANSFER_COLS:
+        if c not in df.columns:
+            df[c] = ""
+    df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
+    for c in ("type", "from_location", "to_location", "dc_no", "remarks", "date"):
+        df[c] = df[c].astype(str).str.strip()
+    return df
+
+
+def ensure_worksheet(name: str, header: list) -> bool:
+    """Create a tab with its header row if the Google Sheet doesn't have it."""
+    try:
+        _spreadsheet_handle().worksheet(name)
+        return True
+    except Exception:
+        pass
+    try:
+        ws = _spreadsheet_handle().add_worksheet(title=name, rows=1000, cols=max(8, len(header)))
+        ws.append_row(header)
+        _worksheet_handles().pop(name, None)
+        st.session_state.get("_missing_sheets", set()).discard(name)
+        _bump_sheet_version(name)
+        return True
+    except Exception:
+        return False
+
+
 def load_returns() -> pd.DataFrame:
     df = get_data("Returns")
     if df.empty:
@@ -2992,15 +3034,30 @@ def _loc_or_unspecified(series) -> pd.Series:
 
 
 def _loc_key(name) -> str:
-    """Location match key: capitals and spacing ignored. Installs arrive from the
-    MDM export as "CHITTINAGAR" while stock is received as "Chittinagar"; an
-    exact match made them two locations, with the installs at minus."""
-    return " ".join(str(name).strip().upper().split())
+    """Location match key: capitals, spacing and punctuation ignored. Installs
+    arrive from the MDM export as "CHITTINAGAR" or "MANGALAGIRI-D2" while stock
+    is received as "Chittinagar" / "Mangalagiri D2"; an exact match made them
+    two locations, with the installs at minus."""
+    return " ".join(_re.sub(r"[^A-Z0-9]+", " ", str(name).upper()).split())
+
+
+def load_location_aliases() -> dict:
+    """Spellings mapped to a location in the Store tab: {key of the spelling ->
+    location name}. Settings key "location_aliases" (JSON). A spelling mapped
+    to itself means "keep it as its own name"."""
+    import json as _json
+    raw = get_setting("location_aliases", "")
+    try:
+        data = _json.loads(raw) if raw else {}
+        return {_loc_key(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 
 def _canonical_locations(*series) -> dict:
     """{key -> one spelling} for every location seen. The Admin Locations list
-    wins, so the table shows the names set up there; otherwise the first
+    wins, so the table shows the names set up there; then spellings mapped in
+    the Store tab ("YENAMALAKUDURU" -> Yanamalakuduru); otherwise the first
     spelling met is used."""
     names = {}
     try:
@@ -3008,6 +3065,8 @@ def _canonical_locations(*series) -> dict:
             names.setdefault(_loc_key(l), str(l).strip())
     except NameError:
         pass
+    for k, target in load_location_aliases().items():
+        names[k] = names.get(_loc_key(target), target)
     for ser in series:
         for v in ser:
             k = _loc_key(v)
@@ -3037,10 +3096,13 @@ def stock_by_location() -> pd.DataFrame:
     were captured carry no location, so they show as Unspecified rather than
     being dropped or guessed at."""
     df_inv, df_inst, df_ret = get_data("Inventory"), get_data("Installations"), load_returns()
+    df_tr = load_transfers()
     rows = {}
     canon = _canonical_locations(
         _loc_or_unspecified(df_inv["location"]) if not df_inv.empty and "location" in df_inv.columns else [],
         _loc_or_unspecified(df_ret["location"]) if not df_ret.empty else [],
+        _loc_or_unspecified(df_tr["from_location"]) if not df_tr.empty else [],
+        _loc_or_unspecified(df_tr["to_location"]) if not df_tr.empty else [],
         _loc_or_unspecified(df_inst["location"]) if not df_inst.empty and "location" in df_inst.columns else [])
 
     def one_name(series):
@@ -3050,6 +3112,7 @@ def stock_by_location() -> pd.DataFrame:
 
     def cell(loc, t):
         return rows.setdefault((loc, t), {"Location": loc, "Type": t, "Received": 0,
+                                          "Borrowed In": 0, "Lent Out": 0,
                                           "Installed": 0, "Returned": 0})
 
     if not df_inv.empty and has_col(df_inv, "type", "qty"):
@@ -3069,6 +3132,16 @@ def stock_by_location() -> pd.DataFrame:
         for (loc, t), q in ret.groupby(["location", "type"])["qty"].sum().items():
             cell(loc, t)["Returned"] += int(q)
 
+    # Stock borrowed between sites, also before installs are allocated: what a
+    # site lent is no longer there for its own installs, and what it borrowed is.
+    if not df_tr.empty:
+        tr = df_tr[df_tr["qty"] > 0].copy()
+        tr["from_location"], tr["to_location"] = one_name(tr["from_location"]), one_name(tr["to_location"])
+        for (loc, t), q in tr.groupby(["from_location", "type"])["qty"].sum().items():
+            cell(loc, t)["Lent Out"] += int(q)
+        for (loc, t), q in tr.groupby(["to_location", "type"])["qty"].sum().items():
+            cell(loc, t)["Borrowed In"] += int(q)
+
     # Installs draw on the stock received BEFORE locations were recorded
     # ("Unspecified") first, and only once that is used up does a location
     # consume its own stock. Allocated in date order — the oldest installs
@@ -3083,7 +3156,7 @@ def stock_by_location() -> pd.DataFrame:
             ins[col] = safe_numeric_col(ins, col)
             pool = cell("Unspecified", t)
             # What the legacy pool still holds after any returns against it.
-            unspecified_left = max(0, pool["Received"] - pool["Returned"])
+            unspecified_left = max(0, pool["Received"] + pool["Borrowed In"] - pool["Lent Out"] - pool["Returned"])
             # One pass over the column instead of a Python loop over every row:
             # in date order, the running total draws on the pool until it is
             # used up; whatever each row needs beyond that is its own site's.
@@ -3099,12 +3172,50 @@ def stock_by_location() -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=["Location", "Type", "Received", "Installed", "Returned", "Pending"])
     out = pd.DataFrame(rows.values())
-    out["Pending"] = out["Received"] - out["Installed"] - out["Returned"]
+    out["Pending"] = (out["Received"] + out["Borrowed In"] - out["Lent Out"]
+                      - out["Installed"] - out["Returned"])
+    # Borrow columns only once there has been a borrow, so the table stays as
+    # it was until the feature is used.
+    if not (out["Borrowed In"].any() or out["Lent Out"].any()):
+        out = out.drop(columns=["Borrowed In", "Lent Out"])
     # Once the legacy pool is used up it has nothing left to say, so it drops
     # out of the table rather than sitting there at zero for ever.
     spent = (out["Location"] == "Unspecified") & (out["Pending"] <= 0)
     out = out[~spent]
     return out.sort_values(["Location", "Type"]).reset_index(drop=True)
+
+
+def unmatched_location_names() -> list:
+    """Location spellings in installs, inward or returns that match no Admin
+    location (capitals, spacing and punctuation already ignored) and haven't
+    been mapped yet. Each: {name, installs, received, suggest, new_default}.
+    `suggest` is the closest Admin location by spelling; `new_default` is True
+    when the name looks like a separate place built on it ("MANGALAGIRI-D2"
+    beside "Mangalagiri") rather than a misspelling ("YENAMALAKUDURU")."""
+    known = {_loc_key(l): l for l in active_locs}
+    aliases = load_location_aliases()
+    seen = {}
+    for sheet, qty_cols in (("Installations", ("qty_1ph", "qty_3ph")), ("Inventory", ("qty",)), ("Returns", ("qty",))):
+        df = get_data(sheet)
+        if df.empty or "location" not in df.columns:
+            continue
+        q = sum(safe_numeric_col(df, c) for c in qty_cols if c in df.columns)
+        for name, n in pd.Series(q.values, index=df["location"].astype(str).str.strip()).groupby(level=0).sum().items():
+            k = _loc_key(name)
+            if not k or k == "UNSPECIFIED" or k in known or k in aliases:
+                continue
+            e = seen.setdefault(k, {"name": name, "installs": 0, "received": 0})
+            e["installs" if sheet == "Installations" else "received"] += int(n)
+    out = []
+    flat = {k.replace(" ", ""): v for k, v in known.items()}
+    for k, e in seen.items():
+        best = _difflib.get_close_matches(k.replace(" ", ""), list(flat), n=1, cutoff=0.75)
+        sug = flat[best[0]] if best else None
+        words, sug_words = set(k.split()), set(_loc_key(sug).split()) if sug else set()
+        e["suggest"] = sug
+        e["new_default"] = bool(sug) and sug_words < words
+        out.append(e)
+    return sorted(out, key=lambda e: -(e["installs"] + e["received"]))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -8896,6 +9007,80 @@ with tab_inv:
         st.dataframe(stock_tbl, use_container_width=True, hide_index=True, height=dataframe_height(len(stock_tbl)))
 
         sub_hdr("pin", "Stock By Location")
+
+        # -- Location names that match no saved location ---------------------
+        # Installs come from the MDM export with its own spelling
+        # ("YENAMALAKUDURU", "MANGALAGIRI-D2"). Capitals, spaces and dashes are
+        # already ignored; anything still unmatched is a spelling difference
+        # or a location not set up yet, and is asked about here.
+        _unm = unmatched_location_names()
+        if _unm:
+            st.markdown(
+                f'<div class="warn-box"><b>{len(_unm)}</b> location name(s) in your data don\'t match a saved '
+                f'location: {", ".join(e["name"] for e in _unm)}. Map each to its location, or add it as a '
+                f'new one, so its installs use that location\'s stock.</div>', unsafe_allow_html=True)
+            with st.expander("📍 Check location names", expanded=True):
+                if "locmap_version" not in st.session_state:
+                    st.session_state["locmap_version"] = 0
+                _mv = st.session_state["locmap_version"]
+                _NEW, _KEEP = "➕ Add as a new location", "Leave as it is"
+                _choices = {}
+                for i, e in enumerate(_unm):
+                    _bits = [f"{e['installs']:,} installed" if e["installs"] else "",
+                             f"{e['received']:,} received / returned" if e["received"] else ""]
+                    st.markdown(f"**{e['name']}** · " + " · ".join(b for b in _bits if b))
+                    _opts = ([e["suggest"]] if e["suggest"] else []) + \
+                            [l for l in sorted(active_locs, key=str.upper) if l != e["suggest"]] + [_NEW, _KEEP]
+                    _idx = (_opts.index(_NEW) if (e["new_default"] or not e["suggest"]) else 0)
+                    mc1, mc2 = st.columns(2)
+                    with mc1:
+                        pick = st.selectbox("Is the same location as", _opts, index=_idx,
+                                            key=f"locmap_pick_{_mv}_{i}",
+                                            format_func=lambda o, e=e: (f"{o}  (closest spelling)" if o == e["suggest"] else o))
+                    new_name = ""
+                    with mc2:
+                        if pick == _NEW:
+                            _pretty = " ".join(w.capitalize() if w.isalpha() else w for w in _loc_key(e["name"]).split())
+                            new_name = " ".join(st.text_input("New location name", value=_pretty,
+                                                              key=f"locmap_new_{_mv}_{i}").split())
+                    _choices[e["name"]] = (pick, new_name)
+                    st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
+                _adds = sorted({nm for p_, nm in _choices.values() if p_ == _NEW and nm})
+                _maps = sum(1 for p_, _ in _choices.values() if p_ not in (_NEW, _KEEP))
+                _lbl = []
+                if _maps:
+                    _lbl.append(f"map {_maps}")
+                if _adds:
+                    _lbl.append(f"add {len(_adds)} location(s)")
+                if st.button("💾 Save" + (f" — {', '.join(_lbl)}" if _lbl else ""), type="primary",
+                             use_container_width=True, key="locmap_save"):
+                    import json as _json
+                    if any(p_ == _NEW and not nm for p_, nm in _choices.values()):
+                        st.error("❌ Enter a name for each new location.")
+                    else:
+                        ok = True
+                        if _adds:
+                            df_l_exist = get_data("Locations")
+                            have = {_loc_key(x) for x in df_l_exist["location_name"]} if (
+                                not df_l_exist.empty and "location_name" in df_l_exist.columns) else set()
+                            _rows = [{"location_name": nm} for nm in _adds if _loc_key(nm) not in have]
+                            if _rows:
+                                ok = safe_update("Locations", pd.concat([df_l_exist, pd.DataFrame(_rows)], ignore_index=True)
+                                                 if not df_l_exist.empty else pd.DataFrame(_rows))
+                        if ok:
+                            _al = {}
+                            try:
+                                _al = _json.loads(get_setting("location_aliases", "") or "{}")
+                            except Exception:
+                                _al = {}
+                            for nm_, (p_, new_) in _choices.items():
+                                _al[nm_] = new_ if p_ == _NEW else (nm_ if p_ == _KEEP else p_)
+                            ok = save_settings({"location_aliases": _json.dumps(_al)})
+                        if ok:
+                            st.session_state["locmap_version"] += 1
+                            st.success("✅ Location names saved — stock by location updated.")
+                            st.rerun()
+
         by_loc = stock_by_location()
         if by_loc.empty:
             st.info("No stock recorded yet.")
@@ -8906,6 +9091,124 @@ with tab_inv:
                 st.markdown('<div class="warn-box">Stock received before locations were recorded shows as '
                             '<b>Unspecified</b>. New inward entries carry their location.</div>',
                             unsafe_allow_html=True)
+            _neg = by_loc[by_loc["Pending"] < 0]
+            if not _neg.empty:
+                st.markdown(
+                    '<div class="danger-box">More installed than received at '
+                    + ", ".join(f'<b>{r["Location"]} {r["Type"]}</b> ({int(r["Pending"]):,})' for _, r in _neg.iterrows())
+                    + '. Check that every inward entry for these locations has been entered, with its location '
+                    '— or, if the material was borrowed from another site, record it below.</div>',
+                    unsafe_allow_html=True)
+
+            # -- Borrow stock from another site ------------------------------
+            # When a customer's store at a site has no material, it is borrowed
+            # from another site (often Payakapuram). Recording it moves the
+            # pending stock between the two sites.
+            sub_hdr("truck", "Borrow Stock From Another Site")
+            if "borrow_version" not in st.session_state:
+                st.session_state["borrow_version"] = 0
+            _bv = st.session_state["borrow_version"]
+            _sites = sorted({*by_loc["Location"], *active_locs} - {""}, key=str.upper)
+            _first_neg = _neg.iloc[0] if not _neg.empty else None
+            bc1, bc2 = st.columns(2)
+            with bc1:
+                b_to = st.selectbox("Site that borrowed", _sites,
+                                    index=(_sites.index(_first_neg["Location"]) if _first_neg is not None
+                                           and _first_neg["Location"] in _sites else 0),
+                                    key=f"borrow_to_{_bv}")
+            with bc2:
+                b_type = st.selectbox("Type", METER_TYPES,
+                                      index=(list(METER_TYPES).index(_first_neg["Type"]) if _first_neg is not None
+                                             and _first_neg["Location"] == b_to else 0),
+                                      key=f"borrow_type_{_bv}_{b_to}")
+            _pend = {(r["Location"], r["Type"]): int(r["Pending"]) for _, r in by_loc.iterrows()}
+            _short = max(0, -_pend.get((b_to, b_type), 0))
+            _lenders = [(l, _pend[(l, b_type)]) for l in _sites
+                        if l != b_to and _pend.get((l, b_type), 0) > 0]
+            _lenders.sort(key=lambda x: -x[1])
+            if not _lenders:
+                st.info(f"No other site has {b_type} stock pending to lend.")
+            else:
+                bc3, bc4 = st.columns(2)
+                with bc3:
+                    b_from = st.selectbox("Borrowed from", [l for l, _ in _lenders],
+                                          format_func=lambda l: f"{l}  ({dict(_lenders)[l]:,} available)",
+                                          key=f"borrow_from_{_bv}_{b_type}")
+                _avail_b = dict(_lenders)[b_from]
+                with bc4:
+                    b_qty = st.number_input("Quantity", min_value=1, max_value=int(_avail_b), step=1,
+                                            value=int(min(_short, _avail_b)) if _short else 1,
+                                            key=f"borrow_qty_{_bv}_{b_to}_{b_type}_{b_from}")
+                bc5, bc6, bc7 = st.columns(3)
+                with bc5:
+                    b_date = st.date_input("Date", today_ist(), key=f"borrow_date_{_bv}")
+                with bc6:
+                    b_dc = st.text_input("DC / Gate Pass No. (optional)", key=f"borrow_dc_{_bv}")
+                with bc7:
+                    b_rem = st.text_input("Remarks (optional)", key=f"borrow_rem_{_bv}")
+                if _short:
+                    st.caption(f"{b_to} is short by {_short:,} × {b_type}"
+                               + (f" — {b_from} can cover all of it." if _avail_b >= _short
+                                  else f" — {b_from} has only {_avail_b:,}; borrow the rest from another site."))
+                if st.button(f"🔁 Borrow {int(b_qty):,} × {b_type} from {b_from} to {b_to}", type="primary",
+                             use_container_width=True, key="borrow_save"):
+                    if not ensure_worksheet("Transfers", TRANSFER_COLS):
+                        st.error("❌ Couldn't create the Transfers tab in the Google Sheet — add a tab named "
+                                 "Transfers with the header: " + ", ".join(TRANSFER_COLS))
+                    else:
+                        _row = {"date": str(b_date), "type": str(b_type), "qty": str(int(b_qty)),
+                                "from_location": b_from, "to_location": b_to,
+                                "dc_no": b_dc.strip(), "remarks": b_rem.strip()}
+                        _tr_exist = load_transfers()
+                        if append_rows("Transfers", [_row], TRANSFER_COLS) or \
+                           safe_update("Transfers", pd.concat([_tr_exist[TRANSFER_COLS], pd.DataFrame([_row])],
+                                                              ignore_index=True)):
+                            st.session_state["borrow_version"] += 1
+                            st.success(f"✅ {int(b_qty):,} × {b_type} borrowed by {b_to} from {b_from}"
+                                       + (f" — DC {b_dc.strip()}." if b_dc.strip() else "."))
+                            st.rerun()
+
+        _tr_log = load_transfers()
+        if not _tr_log.empty:
+            with st.expander(f"Borrow log ({len(_tr_log)})"):
+                _tl = _tr_log.iloc[::-1].copy()
+                _tl.insert(0, "Delete", False)
+                _tl = _tl.rename(columns={"date": "Date", "type": "Type", "qty": "Qty",
+                                          "from_location": "From", "to_location": "To",
+                                          "dc_no": "DC No.", "remarks": "Remarks"})
+                _tld = st.data_editor(_tl, use_container_width=True, hide_index=True,
+                                      disabled=[c for c in _tl.columns if c != "Delete"],
+                                      key=f"borrow_log_{_sheet_version('Transfers')}",
+                                      height=dataframe_height(len(_tl), max_px=360))
+                _nd = int(_tld["Delete"].sum())
+                if _nd and st.button(f"🗑️ Delete {_nd} entr{'y' if _nd == 1 else 'ies'}",
+                                     use_container_width=True, key="borrow_log_delete"):
+                    _keep_idx = _tld.index[~_tld["Delete"]]
+                    if safe_update("Transfers", _tr_log.loc[sorted(_keep_idx), TRANSFER_COLS]):
+                        st.success("✅ Borrow log updated.")
+                        st.rerun()
+
+        _al_saved = load_location_aliases()
+        if _al_saved:
+            with st.expander(f"Location name mappings ({len(_al_saved)})"):
+                _raw_al = {}
+                try:
+                    import json as _json
+                    _raw_al = _json.loads(get_setting("location_aliases", "") or "{}")
+                except Exception:
+                    pass
+                _am = pd.DataFrame([{"Remove": False, "Name in data": k, "Counted as": v}
+                                    for k, v in _raw_al.items()])
+                _amd = st.data_editor(_am, use_container_width=True, hide_index=True,
+                                      disabled=["Name in data", "Counted as"],
+                                      key=f"locmap_editor_{_sheet_version('Settings')}",
+                                      height=dataframe_height(len(_am), max_px=300))
+                _nrem = int(_amd["Remove"].sum())
+                if _nrem and st.button(f"Remove {_nrem} mapping(s)", use_container_width=True, key="locmap_remove"):
+                    _keep = {r["Name in data"]: r["Counted as"] for _, r in _amd.iterrows() if not r["Remove"]}
+                    if save_settings({"location_aliases": _json.dumps(_keep)}):
+                        st.success("✅ Mappings removed — those names will be asked about again.")
+                        st.rerun()
 
         _ret_log = load_returns()
         if not _ret_log.empty:
