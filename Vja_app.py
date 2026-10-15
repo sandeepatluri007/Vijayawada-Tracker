@@ -2965,6 +2965,24 @@ EXPENSE_COLS = ["expense_id", "month", "cost_type", "category", "item", "vehicle
 # split equally across the sites active that month. Expenses entered before
 # sites existed have no site and are treated as shared.
 SHARED_SITE = "Shared"
+# Where a fixed expense belongs (the Expenses sheet's `site` column):
+#   a site name  -> that site's own cost
+#   "All sites"  -> chosen by you to be shared; split across sites by installs
+#   "General"    -> not assigned to anywhere yet. Entries saved before this
+#                   (blank, or the old automatic "Shared") start here, so every
+#                   shared cost is one you have assigned yourself.
+ALL_SITES = "All sites"
+GENERAL_SITE = "General"
+
+
+def expense_bucket(v) -> str:
+    """The Location an expense's stored `site` means: a site, All sites or General."""
+    t = str(v).strip()
+    if t in ("", "nan", "None", SHARED_SITE, GENERAL_SITE):
+        return GENERAL_SITE
+    if t == ALL_SITES:
+        return ALL_SITES
+    return t
 VEHICLE_COLS = ["reg_no", "description", "is_active"]
 
 # ── Stock: received, installed, returned ───────────────────────────────────
@@ -5273,9 +5291,9 @@ def site_cost_breakdown(df_exp: pd.DataFrame, mkey: str) -> dict:
     rows = df_exp[df_exp["month"].astype(str) == mkey].copy() if not df_exp.empty else df_exp.copy()
     if "site" not in rows.columns:
         rows["site"] = ""
-    rows["site"] = rows["site"].astype(str).str.strip().replace({"": SHARED_SITE, "nan": SHARED_SITE})
+    rows["site"] = rows["site"].map(expense_bucket)
     _canon = _canonical_locations(rows["site"], inst["site"] if not inst.empty else [])
-    rows["site"] = rows["site"].map(lambda v: v if v == SHARED_SITE else _canon.get(_loc_key(v), v))
+    rows["site"] = rows["site"].map(lambda v: v if v in (ALL_SITES, GENERAL_SITE) else _canon.get(_loc_key(v), v))
     fixed = rows[rows["cost_type"] == "Fixed"]
     var = rows[rows["cost_type"] == "Variable"]
     rate1, rate3 = float(var["rate_1ph"].sum()), float(var["rate_3ph"].sum())
@@ -5291,7 +5309,9 @@ def site_cost_breakdown(df_exp: pd.DataFrame, mkey: str) -> dict:
         else (RATE_3PH_NEW + SURVEY_3PH)
 
     active = [r["site"] for _, r in inst.iterrows() if (r["n1"] + r["n3"]) > 0]
-    shared_fixed = float(fixed.loc[fixed["site"] == SHARED_SITE, "amount"].sum())
+    shared_fixed = float(fixed.loc[fixed["site"] == ALL_SITES, "amount"].sum())
+    # General = not assigned yet: counted in the month's total, given to no site.
+    general_fixed = float(fixed.loc[fixed["site"] == GENERAL_SITE, "amount"].sum())
     # Shared costs are split BY INSTALLS: a site doing 40% of the month's
     # installs carries 40% of the shared cost.
     _site_n = {r["site"]: int(r["n1"] + r["n3"]) for _, r in inst.iterrows()}
@@ -5299,7 +5319,7 @@ def site_cost_breakdown(df_exp: pd.DataFrame, mkey: str) -> dict:
     shared_for = {a: (shared_fixed * _site_n.get(a, 0) / _active_n) if _active_n else 0.0 for a in active}
     shared_each = (shared_fixed / len(active)) if active else 0.0
 
-    sites = sorted(set(active) | set(fixed.loc[fixed["site"] != SHARED_SITE, "site"]))
+    sites = sorted(set(active) | set(fixed.loc[~fixed["site"].isin([ALL_SITES, GENERAL_SITE]), "site"]))
     per_site = []
     for site in sites:
         r = inst[inst["site"] == site]
@@ -5332,9 +5352,10 @@ def site_cost_breakdown(df_exp: pd.DataFrame, mkey: str) -> dict:
     stranded = sum(x["fixed"] for x in per_site if (x["n1"] + x["n3"]) == 0)
     # Shared costs with no active site at all (no installs anywhere yet).
     unallocated_shared = shared_fixed if not active else 0.0
-    total = sum(x["cost"] for x in per_site) + unallocated_shared
+    total = sum(x["cost"] for x in per_site) + unallocated_shared + general_fixed
     return {
         "sites": per_site, "active_sites": active, "shared_fixed": shared_fixed,
+        "general_fixed": general_fixed,
         "shared_each": shared_each, "rate1": rate1, "rate3": rate3, "v1": v1, "v3": v3,
         "n1": tot_n1, "n3": tot_n3, "cost1": tot_c1, "cost3": tot_c3, "total": total,
         "stranded": stranded, "unallocated_shared": unallocated_shared,
@@ -7742,7 +7763,7 @@ with tab_exp:
                 ("bolt", fmt_rs(site_cb["cpi1"], 1), "Per 1PH", "Rs./install", "normal"),
                 ("bolt", fmt_rs(site_cb["cpi3"], 1), "Per 3PH", "Rs./install", "normal"),
                 ("users", f"{len(site_cb['active_sites'])}", "Active", "sites", "normal"),
-                ("wallet", fmt_rs(site_cb["shared_fixed"]), "Shared", "Rs. month", "normal"),
+                ("wallet", fmt_rs(site_cb["shared_fixed"]), "All sites", "Rs. month", "normal"),
             ])
             sub_hdr("pin", "By Site")
             # One card per site: what it costs, its own vs its share of shared
@@ -7756,7 +7777,7 @@ with tab_exp:
                     f'<div style="font-size:13px;font-weight:700;color:var(--ink-900);">{x["site"]}</div>'
                     f'<div style="font-size:18px;font-weight:800;color:var(--ink-900);">Rs. {x["cost"]:,.0f}</div>'
                     f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">Own {x["own_fixed"]:,.0f} · '
-                    f'Shared {x["shared_fixed"]:,.0f}</div>'
+                    f'All sites {x["shared_fixed"]:,.0f}</div>'
                     f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">'
                     + (f'{_n:,} installs · Rs. {fmt_rs(x["cpi"], 1)} / install' if _n else 'No installs this month')
                     + '</div></div>')
@@ -7765,13 +7786,21 @@ with tab_exp:
                 _cards.append(
                     f'<div style="background:var(--surface-100);border-radius:var(--radius-md);padding:11px;'
                     f'display:flex;flex-direction:column;gap:4px;">'
-                    f'<div style="font-size:13px;font-weight:700;color:var(--brand-700);">Shared</div>'
+                    f'<div style="font-size:13px;font-weight:700;color:var(--brand-700);">All sites</div>'
                     f'<div style="font-size:18px;font-weight:800;color:var(--ink-900);">Rs. {site_cb["shared_fixed"]:,.0f}</div>'
                     f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">Split by installs across '
                     f'{len(site_cb["active_sites"])} site(s)</div>'
                     f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">'
                     + (f'Rs. {site_cb["shared_fixed"] / _sh_n:,.1f} per install' if _sh_n else 'Waiting for installs')
                     + '</div></div>')
+            if site_cb.get("general_fixed"):
+                _cards.append(
+                    f'<div style="background:var(--surface-100);border-radius:var(--radius-md);padding:11px;'
+                    f'display:flex;flex-direction:column;gap:4px;">'
+                    f'<div style="font-size:13px;font-weight:700;color:var(--danger-700);">General</div>'
+                    f'<div style="font-size:18px;font-weight:800;color:var(--ink-900);">Rs. {site_cb["general_fixed"]:,.0f}</div>'
+                    f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">Not assigned to a site yet</div>'
+                    f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">Assign or delete below</div></div>')
             st.markdown('<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;'
                         'margin-bottom:var(--space-5);">' + "".join(_cards) + '</div>', unsafe_allow_html=True)
             with st.expander("Site details — 1PH / 3PH split"):
@@ -7789,7 +7818,7 @@ with tab_exp:
                             f'with no installs this month. They are counted in the month\'s total but have no '
                             f'installs to fall on.</div>', unsafe_allow_html=True)
             if site_cb["unallocated_shared"]:
-                st.markdown(f'<div class="warn-box">Shared costs of Rs. {site_cb["unallocated_shared"]:,.0f} '
+                st.markdown(f'<div class="warn-box">“All sites” costs of Rs. {site_cb["unallocated_shared"]:,.0f} '
                             f'are waiting — no site has installs this month yet.</div>', unsafe_allow_html=True)
 
         if summ["by_category"]:
@@ -7817,136 +7846,162 @@ with tab_exp:
                     vt = vt.rename(columns={"vehicle_reg": "Vehicle"})
                     st.dataframe(vt, use_container_width=True, hide_index=True, height=dataframe_height(len(vt)))
 
-        # ══ Site cost sheet: every fixed cost of one site, in one go ══════════
+        # ══ Add an expense ═══════════════════════════════════════════════════
         st.divider()
-        sec_hdr("plus", f"Site Cost Sheet — {month_label(sel_month)}")
+        sec_hdr("plus", f"Add To {month_label(sel_month)}")
         if "exp_form_version" not in st.session_state:
             st.session_state["exp_form_version"] = 0
         ev = st.session_state["exp_form_version"]
-
-        def _site_of(v):
-            v = str(v).strip()
-            return SHARED_SITE if v in ("", "nan", SHARED_SITE) else v
-        _sheet_sites = list(active_locs) + [SHARED_SITE]
-        cs_site = st.segmented_control("Site", _sheet_sites, default=_sheet_sites[0], key="exp_sheet_site",
-                                       label_visibility="collapsed") or _sheet_sites[0]
+        _loc_opts = list(active_locs) + [ALL_SITES, GENERAL_SITE]
         _yy, _mm = int(sel_month[:4]), int(sel_month[5:])
         prev_month = f"{_yy - 1:04d}-12" if _mm == 1 else f"{_yy:04d}-{_mm - 1:02d}"
-        _fx = df_exp_all[df_exp_all["cost_type"] == "Fixed"].copy()
-        _fx["_site"] = _fx["site"].apply(_site_of)
-        _fx["_k"] = _fx["_site"].apply(lambda v: v if v == SHARED_SITE else _loc_key(v))
-        _sk = cs_site if cs_site == SHARED_SITE else _loc_key(cs_site)
-        cur_rows = _fx[(_fx["month"].astype(str) == sel_month) & (_fx["_k"] == _sk)]
-        prev_rows = _fx[(_fx["month"].astype(str) == prev_month) & (_fx["_k"] == _sk)]
 
-        # The sheet: this month's saved lines for the site; any cost head not
-        # saved yet comes pre-filled from last month (ticked if it was there),
-        # or blank and unticked.
-        _lines = []
-        for _, r in cur_rows.iterrows():
-            _lines.append({"Include": True, "Category": r["category"], "Description": str(r["item"]),
-                           "Vehicle": str(r["vehicle_reg"]), "Amount (Rs.)": float(r["amount"]),
-                           "Repeats": _truthy(r["recurring"]), "expense_id": r["expense_id"], "From": "Saved"})
-        _have_cat = set(cur_rows["category"])
-        for cat in EXPENSE_FIXED_CATEGORIES:
-            if cat in _have_cat:
-                continue
-            pr = prev_rows[prev_rows["category"] == cat]
-            if not pr.empty:
-                for _, r in pr.iterrows():
-                    _lines.append({"Include": True, "Category": cat, "Description": str(r["item"]),
-                                   "Vehicle": str(r["vehicle_reg"]), "Amount (Rs.)": float(r["amount"]),
-                                   "Repeats": _truthy(r["recurring"]), "expense_id": "",
-                                   "From": f"{month_label(prev_month)}"})
-            elif cat != "Salaries":
-                _lines.append({"Include": False, "Category": cat, "Description": "", "Vehicle": "",
-                               "Amount (Rs.)": 0.0, "Repeats": cat in EXPENSE_RECURRING_DEFAULT,
-                               "expense_id": "", "From": ""})
-        _order = {c: i for i, c in enumerate(EXPENSE_FIXED_CATEGORIES)}
-        # Amount right after the category, so it's on screen on a phone.
-        sheet_df = pd.DataFrame(_lines, columns=["Include", "Category", "Amount (Rs.)", "Description", "Vehicle",
-                                                 "Repeats", "From", "expense_id"])
-        sheet_df = sheet_df.sort_values("Category", key=lambda s_: s_.map(lambda c: _order.get(c, 99)),
-                                        kind="stable").reset_index(drop=True)
-        st.markdown(
-            f'<div class="info-box">Tick each cost <b>{cs_site}</b> has this month and enter the amount'
-            + (f' — {(sheet_df["From"] == month_label(prev_month)).sum()} line(s) are pre-filled from '
-               f'{month_label(prev_month)}, change only what\'s different' if (sheet_df["From"] == month_label(prev_month)).any() else '')
-            + '. Untick a saved line to remove it. Add a row at the bottom for a second vehicle or another cost.'
-            + (' Shared costs are split across sites by installs.' if cs_site == SHARED_SITE else '')
-            + '</div>', unsafe_allow_html=True)
-        sheet_ed = st.data_editor(
-            sheet_df, use_container_width=True, hide_index=True, num_rows="dynamic",
-            key=f"exp_sheet_{sel_month}_{_sk}_{_sheet_version('Expenses')}_{ev}",
-            disabled=["From"],
-            column_config={
-                "expense_id": None,
-                "Include": st.column_config.CheckboxColumn("✓", width="small"),
-                "Category": st.column_config.SelectboxColumn(options=EXPENSE_FIXED_CATEGORIES, required=True),
-                "Vehicle": st.column_config.SelectboxColumn(options=[""] + active_regs,
-                                                            help="For vehicle rent, EMI, maintenance, permits, diesel"),
-                "Amount (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=100.0, format="%.0f"),
-                "Repeats": st.column_config.CheckboxColumn("Repeats", width="small"),
-                "From": st.column_config.TextColumn("Pre-filled", width="small"),
-            },
-            height=dataframe_height(len(sheet_df) + 1, max_px=640))
+        ac1, ac2 = st.columns(2)
+        with ac1:
+            exp_cat = st.selectbox("Category", EXPENSE_FIXED_CATEGORIES, key=f"exp_cat_f_{ev}")
+        with ac2:
+            exp_site = st.selectbox("Location", _loc_opts, index=len(_loc_opts) - 1, key=f"exp_site_{ev}",
+                                    help="All sites: split across sites by installs. General: not assigned yet.")
+        ac3, ac4 = st.columns(2)
+        with ac3:
+            exp_amt = st.number_input("Amount (Rs.)", min_value=0.0, step=100.0, value=0.0, key=f"exp_amt_{ev}")
+        with ac4:
+            exp_reg = (st.selectbox("Vehicle", ["-- Select --"] + active_regs, key=f"exp_reg_{ev}")
+                       if exp_cat in EXPENSE_VEHICLE_CATEGORIES else "")
+        exp_item = st.text_input("Description (optional)", key=f"exp_item_{ev}",
+                                 placeholder=EXPENSE_ITEM_HINT.get(exp_cat, ""))
+        exp_rec = st.checkbox("Repeats monthly", value=exp_cat in EXPENSE_RECURRING_DEFAULT, key=f"exp_rec_{ev}_{exp_cat}")
+        if st.button("➕ Add Expense", type="primary", use_container_width=True, key="exp_add_fixed"):
+            if exp_amt <= 0:
+                st.error("❌ Enter an amount.")
+            elif exp_cat in EXPENSE_VEHICLE_CATEGORIES and exp_reg in ("", "-- Select --"):
+                st.error("❌ Pick the vehicle this cost belongs to" + ("" if active_regs else " — add it under Vehicles below first") + ".")
+            else:
+                new_row = {"expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Fixed",
+                           "category": exp_cat, "item": exp_item.strip(),
+                           "vehicle_reg": exp_reg if exp_cat in EXPENSE_VEHICLE_CATEGORIES else "",
+                           "amount": exp_amt, "rate_1ph": 0, "rate_3ph": 0, "recurring": "1" if exp_rec else "0",
+                           "site": exp_site}
+                if safe_update("Expenses", pd.concat([df_exp_all[EXPENSE_COLS], pd.DataFrame([new_row])], ignore_index=True)):
+                    st.session_state["exp_form_version"] += 1
+                    st.success(f"✅ Added {exp_cat}: Rs. {exp_amt:,.0f} — {exp_site}.")
+                    st.rerun()
 
-        # What saving will do — said before it happens.
-        _ed = sheet_ed.copy()
-        _ed["expense_id"] = _ed["expense_id"].fillna("").astype(str)
-        _ed["Include"] = _ed["Include"].fillna(False).astype(bool)
-        _ed["Amount (Rs.)"] = pd.to_numeric(_ed["Amount (Rs.)"], errors="coerce").fillna(0.0)
-        _take = _ed[_ed["Include"] & (_ed["Amount (Rs.)"] > 0) & _ed["Category"].notna()]
-        _saved_ids = set(cur_rows["expense_id"])
-        _keep_ids = set(_take.loc[_take["expense_id"] != "", "expense_id"])
-        _remove = _saved_ids - _keep_ids
-        _n_new = int((_take["expense_id"] == "").sum())
-        _n_upd = len(_keep_ids & _saved_ids)
-        _no_amt = _ed[_ed["Include"] & (_ed["Amount (Rs.)"] <= 0)]
-        _veh_missing = _take[_take["Category"].isin(EXPENSE_VEHICLE_CATEGORIES)
-                             & (_take["Vehicle"].fillna("").astype(str).str.strip() == "")]
-        st.markdown(f'<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;'
-                    f'padding:4px 2px 10px;"><span>{len(_take)} line(s) ticked</span>'
-                    f'<span style="font-size:16px;font-weight:800;">Rs. {_take["Amount (Rs.)"].sum():,.0f}</span></div>',
-                    unsafe_allow_html=True)
-        if not _no_amt.empty:
-            st.markdown(f'<div class="warn-box">Ticked with no amount, so not saved: '
-                        f'{", ".join(_no_amt["Category"].astype(str))}.</div>', unsafe_allow_html=True)
-        if not _veh_missing.empty:
-            st.markdown(f'<div class="warn-box">Pick the vehicle for: {", ".join(_veh_missing["Category"].astype(str))}'
-                        + ('' if active_regs else ' — add a vehicle under Vehicles below first') + '.</div>',
+        # -- Carry repeating costs forward (with their locations) -----------------
+        prev_rec = df_exp_all[(df_exp_all["month"].astype(str) == prev_month) & df_exp_all["recurring"].apply(_truthy)]
+        if not prev_rec.empty:
+            this_rows = df_exp_all[df_exp_all["month"].astype(str) == sel_month]
+            have = set(zip(this_rows["cost_type"], this_rows["category"], this_rows["item"].astype(str),
+                           this_rows["vehicle_reg"].astype(str), this_rows["site"].map(expense_bucket)))
+            have_var = set(this_rows.loc[this_rows["cost_type"] == "Variable", "category"])
+            to_copy = prev_rec[[
+                (r["category"] not in have_var) if r["cost_type"] == "Variable"
+                else ((r["cost_type"], r["category"], str(r["item"]), str(r["vehicle_reg"]), expense_bucket(r["site"])) not in have)
+                for _, r in prev_rec.iterrows()]]
+            if not to_copy.empty:
+                if st.button(f"📋 Copy {len(to_copy)} repeating cost(s) from {month_label(prev_month)}",
+                             use_container_width=True, key="exp_copy_prev"):
+                    copied = to_copy[EXPENSE_COLS].copy()
+                    copied["month"] = sel_month
+                    base = int(time.time() * 1000)
+                    copied["expense_id"] = [f"E{base + i}" for i in range(len(copied))]
+                    if safe_update("Expenses", pd.concat([df_exp_all[EXPENSE_COLS], copied], ignore_index=True)):
+                        st.success(f"✅ Copied {len(copied)} cost(s) into {month_label(sel_month)}.")
+                        st.rerun()
+
+        # ══ All expenses: assign each a location ════════════════════════════
+        month_fixed = df_exp_all[(df_exp_all["month"].astype(str) == sel_month)
+                                 & (df_exp_all["cost_type"] == "Fixed")].copy()
+        month_fixed["_loc"] = month_fixed["site"].map(expense_bucket)
+        _known = {_loc_key(l): l for l in active_locs}
+        month_fixed["_loc"] = month_fixed["_loc"].map(
+            lambda v: v if v in (ALL_SITES, GENERAL_SITE) else _known.get(_loc_key(v), v))
+
+        sec_hdr("list", f"Expenses — {month_label(sel_month)}")
+        assigned = month_fixed[month_fixed["_loc"] != GENERAL_SITE]
+        general = month_fixed[month_fixed["_loc"] == GENERAL_SITE]
+        if month_fixed.empty:
+            st.info("No expenses added for this month yet.")
+        else:
+            st.markdown('<div class="info-box">Pick a <b>Location</b> for each expense and tap Save. '
+                        'Anything left as <b>General</b> is listed separately below, where you can delete it.</div>',
                         unsafe_allow_html=True)
-        _act = [f"add {_n_new}" if _n_new else "", f"update {_n_upd}" if _n_upd else "",
-                f"remove {len(_remove)}" if _remove else ""]
-        _act = [a for a in _act if a]
-        if st.button(f"💾 Save {cs_site} costs for {month_label(sel_month)}"
-                     + (f" ({', '.join(_act)})" if _act else ""), type="primary", use_container_width=True,
-                     key="exp_sheet_save", disabled=not (_act) or not _veh_missing.empty):
-            out = df_exp_all[EXPENSE_COLS].copy()
-            out = out[~out["expense_id"].isin(_remove)]
-            base_id = int(time.time() * 1000)
-            new_rows = []
-            for i, (_, r) in enumerate(_take.iterrows()):
-                cat = str(r["Category"])
-                vals = {"month": sel_month, "cost_type": "Fixed", "category": cat,
-                        "item": str(r["Description"] if pd.notna(r["Description"]) else "").strip(),
-                        "vehicle_reg": (str(r["Vehicle"]).strip() if cat in EXPENSE_VEHICLE_CATEGORIES
-                                        and pd.notna(r["Vehicle"]) else ""),
-                        "amount": float(r["Amount (Rs.)"]), "rate_1ph": 0, "rate_3ph": 0,
-                        "recurring": "1" if bool(r["Repeats"]) else "0", "site": cs_site}
-                if r["expense_id"] and r["expense_id"] in set(out["expense_id"]):
-                    m_ = out["expense_id"] == r["expense_id"]
-                    for k_, v_ in vals.items():
-                        out.loc[m_, k_] = v_
-                else:
-                    new_rows.append({"expense_id": f"E{base_id + i}", **vals})
-            if new_rows:
-                out = pd.concat([out, pd.DataFrame(new_rows)], ignore_index=True)
-            if safe_update("Expenses", out[EXPENSE_COLS]):
-                st.session_state["exp_form_version"] += 1
-                st.success(f"✅ {cs_site} costs saved for {month_label(sel_month)}"
-                           + (f" — {', '.join(_act)}." if _act else "."))
-                st.rerun()
+            _opts_all = list(dict.fromkeys(_loc_opts + list(month_fixed["_loc"])))
+            ordered = pd.concat([general, assigned.sort_values(["_loc", "category"])])
+            view = pd.DataFrame({
+                "Location": ordered["_loc"].values,
+                "Category": ordered["category"].values,
+                "Amount (Rs.)": ordered["amount"].values,
+                "Description": ordered["item"].astype(str).values,
+                "Vehicle": ordered["vehicle_reg"].astype(str).values,
+                "Repeats": ordered["recurring"].apply(_truthy).values,
+                "expense_id": ordered["expense_id"].values,
+            })
+            all_ed = st.data_editor(
+                view, use_container_width=True, hide_index=True,
+                key=f"exp_all_{sel_month}_{_sheet_version('Expenses')}",
+                column_config={
+                    "expense_id": None,
+                    "Location": st.column_config.SelectboxColumn(options=_opts_all, required=True),
+                    "Category": st.column_config.SelectboxColumn(
+                        options=list(dict.fromkeys(EXPENSE_FIXED_CATEGORIES + list(view["Category"]))), required=True),
+                    "Amount (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=100.0, format="%.0f"),
+                    "Vehicle": st.column_config.SelectboxColumn(
+                        options=list(dict.fromkeys([""] + active_regs + list(view["Vehicle"])))),
+                },
+                height=dataframe_height(len(view), max_px=640))
+            _chg = int((all_ed.astype(str).values != view.astype(str).values).any(axis=1).sum())
+            if st.button(f"💾 Save{f' ({_chg} changed)' if _chg else ''}", type="primary", use_container_width=True,
+                         key="exp_all_save", disabled=_chg == 0):
+                out = df_exp_all[EXPENSE_COLS].copy().set_index("expense_id")
+                for _, r in all_ed.iterrows():
+                    eid = r["expense_id"]
+                    if eid not in out.index:
+                        continue
+                    out.at[eid, "site"] = str(r["Location"] or GENERAL_SITE)
+                    out.at[eid, "category"] = str(r["Category"])
+                    out.at[eid, "amount"] = float(r["Amount (Rs.)"] or 0)
+                    out.at[eid, "item"] = str(r["Description"] if pd.notna(r["Description"]) else "").strip()
+                    out.at[eid, "vehicle_reg"] = str(r["Vehicle"] if pd.notna(r["Vehicle"]) else "").strip()
+                    out.at[eid, "recurring"] = "1" if r["Repeats"] else "0"
+                if safe_update("Expenses", out.reset_index()[EXPENSE_COLS]):
+                    st.success("✅ Expenses saved.")
+                    st.rerun()
+
+        # -- General: not assigned — review and delete ---------------------------
+        if not general.empty:
+            sub_hdr("alert", f"General — Not Assigned ({len(general)} · Rs. {general['amount'].sum():,.0f})")
+            st.caption("Counted in the month's total cost, but not in any site. Assign a location above, or delete.")
+            gview = pd.DataFrame({
+                "Delete": False,
+                "Category": general["category"].values,
+                "Amount (Rs.)": general["amount"].round(0).astype(int).values,
+                "Description": general["item"].astype(str).values,
+                "expense_id": general["expense_id"].values,
+            })
+            gen_ed = st.data_editor(gview, use_container_width=True, hide_index=True,
+                                    key=f"exp_gen_{sel_month}_{_sheet_version('Expenses')}",
+                                    disabled=["Category", "Amount (Rs.)", "Description"],
+                                    column_config={"expense_id": None,
+                                                   "Delete": st.column_config.CheckboxColumn("🗑️", width="small")},
+                                    height=dataframe_height(len(gview), max_px=420))
+            _gd = gen_ed[gen_ed["Delete"]]
+            gc1, gc2 = st.columns(2)
+            with gc1:
+                if st.button(f"🗑️ Delete {len(_gd)} ticked", use_container_width=True, key="exp_gen_del",
+                             disabled=_gd.empty):
+                    out = df_exp_all[~df_exp_all["expense_id"].isin(set(_gd["expense_id"]))]
+                    if safe_update("Expenses", out[EXPENSE_COLS]):
+                        st.success(f"✅ Deleted {len(_gd)} expense(s).")
+                        st.rerun()
+            with gc2:
+                _sure = st.checkbox(f"Delete all {len(general)}", key=f"exp_gen_all_sure_{sel_month}")
+                if st.button(f"🗑️ Delete all General", use_container_width=True, key="exp_gen_del_all",
+                             disabled=not _sure):
+                    out = df_exp_all[~df_exp_all["expense_id"].isin(set(general["expense_id"]))]
+                    if safe_update("Expenses", out[EXPENSE_COLS]):
+                        st.success(f"✅ Deleted all {len(general)} General expense(s) for {month_label(sel_month)}.")
+                        st.rerun()
 
         # -- Variable rates (per install) ----------------------------------------
         with st.expander("Per-install rates — installer payment, liaisoning"):
@@ -7966,141 +8021,30 @@ with tab_exp:
                 st.markdown(f'<div class="info-box">At these rates: Rs. {r1 * n1 + r3 * n3:,.0f} for '
                             f'{month_label(sel_month)} ({n1:,} × {r1:,.0f} + {n3:,} × {r3:,.0f}).</div>',
                             unsafe_allow_html=True)
-            if st.button("💾 Save Rate", type="primary", use_container_width=True, key="exp_add_var"):
-                if r1 <= 0 and r3 <= 0:
-                    st.error("❌ Enter at least one rate.")
-                else:
-                    # One rate per variable category per month: saving again
-                    # UPDATES it. Two rows would silently add the rates together.
-                    df_new = df_exp_all[EXPENSE_COLS].copy()
-                    df_new = df_new[~((df_new["month"].astype(str) == sel_month) & (df_new["cost_type"] == "Variable")
-                                      & (df_new["category"] == exp_vcat))]
-                    df_new = pd.concat([df_new, pd.DataFrame([{
-                        "expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Variable",
-                        "category": exp_vcat, "item": "", "vehicle_reg": "", "amount": 0,
-                        "rate_1ph": r1, "rate_3ph": r3, "recurring": "1", "site": SHARED_SITE}])], ignore_index=True)
-                    if safe_update("Expenses", df_new):
-                        st.session_state["exp_form_version"] += 1
-                        st.success(f"✅ {exp_vcat} rate saved for {month_label(sel_month)}.")
+            vb1, vb2 = st.columns(2)
+            with vb1:
+                if st.button("💾 Save Rate", type="primary", use_container_width=True, key="exp_add_var"):
+                    if r1 <= 0 and r3 <= 0:
+                        st.error("❌ Enter at least one rate.")
+                    else:
+                        # One rate per variable category per month: saving again
+                        # UPDATES it. Two rows would silently add the rates together.
+                        df_new = df_exp_all[EXPENSE_COLS].copy()
+                        df_new = df_new[~((df_new["month"].astype(str) == sel_month) & (df_new["cost_type"] == "Variable")
+                                          & (df_new["category"] == exp_vcat))]
+                        df_new = pd.concat([df_new, pd.DataFrame([{
+                            "expense_id": f"E{int(time.time() * 1000)}", "month": sel_month, "cost_type": "Variable",
+                            "category": exp_vcat, "item": "", "vehicle_reg": "", "amount": 0,
+                            "rate_1ph": r1, "rate_3ph": r3, "recurring": "1", "site": ALL_SITES}])], ignore_index=True)
+                        if safe_update("Expenses", df_new):
+                            st.session_state["exp_form_version"] += 1
+                            st.success(f"✅ {exp_vcat} rate saved for {month_label(sel_month)}.")
+                            st.rerun()
+            with vb2:
+                if not cur.empty and st.button("🗑️ Remove rate", use_container_width=True, key="exp_del_var"):
+                    if safe_update("Expenses", df_exp_all[~df_exp_all["expense_id"].isin(set(cur["expense_id"]))][EXPENSE_COLS]):
+                        st.success(f"✅ {exp_vcat} rate removed for {month_label(sel_month)}.")
                         st.rerun()
-
-        # -- Carry repeating costs forward (all sites at once) --------------------
-        prev_rec = df_exp_all[(df_exp_all["month"].astype(str) == prev_month) & df_exp_all["recurring"].apply(_truthy)]
-        if not prev_rec.empty:
-            this_rows = df_exp_all[df_exp_all["month"].astype(str) == sel_month]
-            have = set(zip(this_rows["cost_type"], this_rows["category"], this_rows["item"].astype(str),
-                           this_rows["vehicle_reg"].astype(str), this_rows["site"].apply(_site_of)))
-            have_var = set(this_rows.loc[this_rows["cost_type"] == "Variable", "category"])
-            to_copy = prev_rec[[
-                (r["category"] not in have_var) if r["cost_type"] == "Variable"
-                else ((r["cost_type"], r["category"], str(r["item"]), str(r["vehicle_reg"]), _site_of(r["site"])) not in have)
-                for _, r in prev_rec.iterrows()]]
-            if not to_copy.empty:
-                if st.button(f"📋 Copy {len(to_copy)} repeating cost(s) from {month_label(prev_month)} — all sites",
-                             use_container_width=True, key="exp_copy_prev"):
-                    copied = to_copy[EXPENSE_COLS].copy()
-                    copied["month"] = sel_month
-                    base = int(time.time() * 1000)
-                    copied["expense_id"] = [f"E{base + i}" for i in range(len(copied))]
-                    if safe_update("Expenses", pd.concat([df_exp_all[EXPENSE_COLS], copied], ignore_index=True)):
-                        st.success(f"✅ Copied {len(copied)} cost(s) into {month_label(sel_month)} — adjust any that changed above.")
-                        st.rerun()
-
-        # ══ Organise entries: move between sites, change category, delete ══════
-        sec_hdr("list", "Organise Entries")
-        oc1, oc2 = st.columns(2)
-        with oc1:
-            org_site = st.selectbox("Show", ["All sites"] + _sheet_sites + ["Not a saved site"],
-                                    key="exp_org_site",
-                                    help="“Not a saved site” lists entries whose site isn't in Admin → Locations.")
-        with oc2:
-            org_all = st.toggle("All months", value=False, key="exp_org_all",
-                                help="Organise entries from every month, not just the one selected above.")
-        _org = df_exp_all.copy()
-        _org["site"] = _org["site"].apply(_site_of)
-        if not org_all:
-            _org = _org[_org["month"].astype(str) == sel_month]
-        _known_keys = {_loc_key(l) for l in active_locs}
-        if org_site == SHARED_SITE:
-            _org = _org[_org["site"] == SHARED_SITE]
-        elif org_site == "Not a saved site":
-            _org = _org[(_org["site"] != SHARED_SITE) & ~_org["site"].apply(_loc_key).isin(_known_keys)]
-        elif org_site != "All sites":
-            _org = _org[_org["site"].apply(_loc_key) == _loc_key(org_site)]
-        if _org.empty:
-            st.info("No entries here.")
-        else:
-            _site_choices = list(dict.fromkeys(list(active_locs) + [SHARED_SITE] + list(_org["site"])))
-            _cat_choices = list(dict.fromkeys(EXPENSE_FIXED_CATEGORIES + EXPENSE_VARIABLE_CATEGORIES + list(_org["category"])))
-            ov = _org.sort_values(["month", "site", "category"], ascending=[False, True, True]).copy()
-            ov.insert(0, "Select", False)
-            ov["Repeats"] = ov["recurring"].apply(_truthy)
-            ov["Month"] = ov["month"].astype(str).apply(month_label)
-            view = ov[["Select", "site", "category", "amount", "item", "vehicle_reg", "Month", "cost_type",
-                       "rate_1ph", "rate_3ph", "Repeats", "expense_id"]].rename(columns={
-                "cost_type": "Type", "site": "Site", "category": "Category", "item": "Description",
-                "vehicle_reg": "Vehicle", "amount": "Amount (Rs.)", "rate_1ph": "Rate 1PH", "rate_3ph": "Rate 3PH"})
-            org_ed = st.data_editor(
-                view, use_container_width=True, hide_index=True,
-                key=f"exp_org_{sel_month}_{org_site}_{org_all}_{_sheet_version('Expenses')}",
-                disabled=["Month", "Type", "expense_id"],
-                column_config={"expense_id": None,
-                               "Select": st.column_config.CheckboxColumn("✓", width="small"),
-                               "Site": st.column_config.SelectboxColumn(options=_site_choices, required=True),
-                               "Category": st.column_config.SelectboxColumn(options=_cat_choices, required=True),
-                               "Vehicle": st.column_config.SelectboxColumn(
-                                   options=list(dict.fromkeys([""] + active_regs + list(view["Vehicle"].astype(str))))),
-                               "Amount (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=100.0, format="%.0f"),
-                               "Rate 1PH": st.column_config.NumberColumn(min_value=0.0, step=5.0, format="%.2f"),
-                               "Rate 3PH": st.column_config.NumberColumn(min_value=0.0, step=5.0, format="%.2f")},
-                height=dataframe_height(len(view), max_px=520))
-            _sel = org_ed[org_ed["Select"]]
-            st.caption("Edit Site or Category in the table to move one entry, or tick several and use the bar below.")
-            bm1, bm2 = st.columns(2)
-            with bm1:
-                bulk_site = st.selectbox("Move ticked to", ["— keep site —"] + _site_choices, key="exp_bulk_site")
-            with bm2:
-                bulk_cat = st.selectbox("Change ticked category to", ["— keep category —"] + EXPENSE_FIXED_CATEGORIES,
-                                        key="exp_bulk_cat")
-            _changed = int((org_ed.drop(columns=["Select"]).astype(str).values
-                            != view.drop(columns=["Select"]).astype(str).values).any(axis=1).sum())
-            bb1, bb2, bb3 = st.columns(3)
-            with bb1:
-                do_bulk = st.button(f"Apply to {len(_sel)} ticked", use_container_width=True, key="exp_bulk_apply",
-                                    disabled=_sel.empty or (bulk_site.startswith("—") and bulk_cat.startswith("—")))
-            with bb2:
-                do_del = st.button(f"🗑️ Delete {len(_sel)} ticked", use_container_width=True, key="exp_bulk_del",
-                                   disabled=_sel.empty)
-            with bb3:
-                do_save = st.button(f"💾 Save edits ({_changed})", type="primary", use_container_width=True,
-                                    key="exp_org_save", disabled=_changed == 0)
-            if do_bulk or do_del or do_save:
-                out = df_exp_all[EXPENSE_COLS].copy().set_index("expense_id")
-                rows_ = org_ed.copy()
-                if do_bulk:
-                    if not bulk_site.startswith("—"):
-                        rows_.loc[rows_["Select"], "Site"] = bulk_site
-                    if not bulk_cat.startswith("—"):
-                        _fx_m = rows_["Select"] & (rows_["Type"] == "Fixed")
-                        rows_.loc[_fx_m, "Category"] = bulk_cat
-                for _, r in rows_.iterrows():
-                    eid = r["expense_id"]
-                    if eid not in out.index:
-                        continue
-                    if do_del and r["Select"]:
-                        out = out.drop(index=eid)
-                        continue
-                    out.at[eid, "site"] = str(r["Site"] or SHARED_SITE)
-                    out.at[eid, "category"] = str(r["Category"])
-                    out.at[eid, "item"] = str(r["Description"] if pd.notna(r["Description"]) else "").strip()
-                    out.at[eid, "vehicle_reg"] = str(r["Vehicle"] if pd.notna(r["Vehicle"]) else "").strip()
-                    out.at[eid, "amount"] = float(r["Amount (Rs.)"] or 0)
-                    out.at[eid, "rate_1ph"] = float(r["Rate 1PH"] or 0)
-                    out.at[eid, "rate_3ph"] = float(r["Rate 3PH"] or 0)
-                    out.at[eid, "recurring"] = "1" if r["Repeats"] else "0"
-                if safe_update("Expenses", out.reset_index()[EXPENSE_COLS]):
-                    st.success("✅ " + ("Deleted." if do_del else ("Moved." if do_bulk else "Edits saved.")))
-                    st.rerun()
 
         # -- 1PH incentive & profit sharing -------------------------------------
         st.divider()
