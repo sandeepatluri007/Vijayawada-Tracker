@@ -5586,7 +5586,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
         return
 
     detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
-    df_log_existing = get_data("UploadedInstallLog")
+    df_log_existing = get_data_fresh("UploadedInstallLog")
     if df_log_existing.empty:
         df_log_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "tech_name", "source"] + detail_cols)
     for col in detail_cols + ["source"]:
@@ -5682,7 +5682,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
     ).reset_index()
 
     # 3) merge deltas into Installations sheet
-    df_inst_existing = get_data("Installations")
+    df_inst_existing = get_data_fresh("Installations")
     if df_inst_existing.empty:
         df_inst_existing = pd.DataFrame(columns=["date", "tech_name", "installer_id", "location", "qty_1ph", "qty_3ph"])
     for col in ["qty_1ph", "qty_3ph"]:
@@ -5751,7 +5751,7 @@ def mirror_records_to_map(records) -> tuple:
     if not records:
         return 0, True
     map_cols = ["key", "date", "time", "installer_id", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
-    df_map_existing = get_data("MapRecords")
+    df_map_existing = get_data_fresh("MapRecords")
     if df_map_existing.empty:
         df_map_existing = pd.DataFrame(columns=map_cols)
     for col in map_cols:
@@ -5797,6 +5797,64 @@ def mirror_records_to_map(records) -> tuple:
     return len(new_map_rows) + filled, ok
 
 
+def get_data_fresh(worksheet: str) -> pd.DataFrame:
+    """The sheet as it is in Google right now, not this app's cached copy.
+    Two copies of the app write to the same install sheets — the PC
+    auto-loader and the Streamlit Cloud app — and each only knows its own
+    recent writes. Checking "already recorded?" against a cached copy let the
+    second one record the same installs again, so every write reads fresh."""
+    _bump_sheet_version(worksheet)
+    return get_data(worksheet)
+
+
+def install_log_duplicate_fix() -> dict:
+    """Plan the clean-up of installs recorded twice in UploadedInstallLog (same
+    date + time + installer key). Returns {} when there are none, else:
+      n_dups     — extra rows to remove
+      log_clean  — the log with every key kept once (first copy)
+      inst_new   — Installations with each upload-backed row on the affected
+                   dates set to what the cleaned log says
+      changes    — table of the Installations rows that change
+    Rows with no upload history (typed in by hand) are left as they are."""
+    log = get_data_fresh("UploadedInstallLog")
+    if log.empty or "key" not in log.columns:
+        return {}
+    dup = log["key"].duplicated(keep="first")
+    if not dup.any():
+        return {}
+    clean = log[~dup].copy()
+    dates = set(log.loc[dup, "date"].astype(str))
+    c = clean[clean["date"].astype(str).isin(dates)].copy()
+    c["_ph"] = meter_phases(c["meter_type"]) if "meter_type" in c.columns else ""
+    derived = c.groupby(["date", "tech_name", "location"]).agg(
+        n1=("_ph", lambda x: int((x == "1PH").sum())), n3=("_ph", lambda x: int((x == "3PH").sum())),
+        installer_id=("installer_id", "first")).reset_index()
+    inst = get_data_fresh("Installations").copy()
+    for col in ("qty_1ph", "qty_3ph"):
+        inst[col] = pd.to_numeric(inst[col], errors="coerce").fillna(0).astype(int) if col in inst.columns else 0
+    changes = []
+    for _, d in derived.iterrows():
+        m = ((inst["date"].astype(str) == str(d["date"])) & (inst["tech_name"] == d["tech_name"])
+             & (inst["location"] == d["location"])) if not inst.empty else pd.Series([], dtype=bool)
+        if not inst.empty and m.any():
+            first = inst.index[m][0]
+            was1, was3 = int(inst.loc[m, "qty_1ph"].sum()), int(inst.loc[m, "qty_3ph"].sum())
+            if (was1, was3) != (int(d["n1"]), int(d["n3"])):
+                inst.loc[m, ["qty_1ph", "qty_3ph"]] = 0
+                inst.at[first, "qty_1ph"], inst.at[first, "qty_3ph"] = int(d["n1"]), int(d["n3"])
+                changes.append({"Date": d["date"], "Technician": d["tech_name"], "Location": d["location"],
+                                "Was 1PH": was1, "Was 3PH": was3, "Now 1PH": int(d["n1"]), "Now 3PH": int(d["n3"])})
+        else:
+            inst = pd.concat([inst, pd.DataFrame([{"date": d["date"], "tech_name": d["tech_name"],
+                                                   "installer_id": d["installer_id"], "location": d["location"],
+                                                   "qty_1ph": int(d["n1"]), "qty_3ph": int(d["n3"])}])],
+                             ignore_index=True)
+            changes.append({"Date": d["date"], "Technician": d["tech_name"], "Location": d["location"],
+                            "Was 1PH": 0, "Was 3PH": 0, "Now 1PH": int(d["n1"]), "Now 3PH": int(d["n3"])})
+    return {"n_dups": int(dup.sum()), "dates": sorted(dates), "log_clean": clean,
+            "inst_new": inst, "changes": pd.DataFrame(changes)}
+
+
 def push_parsed_records_to_installations(parsed_records, source_label="install(s)"):
     """Entry point used by all upload paths (Installs bulk upload, Legacy Data
     upload, Analytics 'Update Installs'). Before writing anything, checks for
@@ -5818,7 +5876,7 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
         st.warning(f"⚠️ No {INSTALLER_ID_PREFIX} installer records to push.")
         return
 
-    df_log_existing = get_data("UploadedInstallLog")
+    df_log_existing = get_data_fresh("UploadedInstallLog")
     existing_keys = set(df_log_existing["key"].values) if not df_log_existing.empty and "key" in df_log_existing.columns else set()
     candidate_new = [rec for rec in valid_records if f"{rec['date']}||{rec['time']}||{rec['installer_id']}" not in existing_keys]
 
@@ -5832,7 +5890,7 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
             tmp_df["location"] = "Unspecified"
         grp = tmp_df.groupby(["date", "tech_name", "location"]).size().reset_index(name="new_count")
 
-        df_inst_existing = get_data("Installations")
+        df_inst_existing = get_data_fresh("Installations")
         log_has_cols = not df_log_existing.empty and has_col(df_log_existing, "date", "tech_name", "location")
         inst_has_cols = not df_inst_existing.empty and has_col(df_inst_existing, "date", "tech_name", "location", "qty_1ph", "qty_3ph")
 
@@ -7025,7 +7083,7 @@ def process_analytics_upload(analytics_file) -> dict:
         return {"ok": True, "wrote": False}
 
     araw_detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
-    df_araw_existing = get_data("AnalyticsRaw")
+    df_araw_existing = get_data_fresh("AnalyticsRaw")
     if df_araw_existing.empty:
         df_araw_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour"] + araw_detail_cols)
     for col in araw_detail_cols:
@@ -7242,6 +7300,90 @@ with tab_analytics:
                     st.caption(f"Projected to {effective_end[:5]} at the current team rate of {rate_per_hour:.0f} installs/hour{note}.")
                 else:
                     st.caption("Not enough data yet to project.")
+
+                # -- Analytics vs the install log (what the calendar counts) ------
+                # Analytics only knows what was uploaded here; an MDMS "Download"
+                # holds just the latest 100 rows per site, so installs from earlier
+                # in the day can reach the install log (via a full file uploaded in
+                # Installs) without ever reaching Analytics. Say so, and offer to
+                # copy them across, so both show the same day.
+                _log = install_log_prepared()
+                if not _log.empty and has_col(_log, "date", "key"):
+                    _log_day = _log[_log["date"].astype(str) == str(sel_date)]
+                    _a_keys = set(day_df_all["key"]) if "key" in day_df_all.columns else set()
+                    _l_keys = set(_log_day["key"])
+                    # The same install recorded twice (two copies of the app pushing
+                    # at once) — the calendar counts rows, so these inflate it.
+                    _dupkeys = int(_log_day["key"].duplicated().sum())
+                    _dup_all = int(_log["key"].duplicated().sum())
+                    _missing = _log_day[~_log_day["key"].isin(_a_keys)]
+                    _unpushed = len(_a_keys - _l_keys)
+                    # The same consumer recorded twice in the log (different times)
+                    # would be a real double count in installs and billing.
+                    _dups = 0
+                    if "sno" in _log_day.columns:
+                        _sn = _log_day["sno"].astype(str).str.strip()
+                        _sn = _sn[(_sn != "") & (_sn.str.lower() != "nan")]
+                        _dups = int(_sn.duplicated().sum())
+                    if len(_missing) or _unpushed or _dups or _dupkeys or _dup_all:
+                        _bits = [f"Install log (calendar): <b>{len(_log_day):,}</b> · Analytics: <b>{len(_a_keys):,}</b>."]
+                        if _dupkeys:
+                            _bits.append(f"<b>{_dupkeys:,} install(s) are recorded twice</b> in the install log for this day "
+                                         "— the same date, time and installer saved again.")
+                        if len(_missing):
+                            _bits.append(f"{len(_missing):,} install(s) are in the install log but not in Analytics "
+                                         "— usually earlier ones beyond the latest 100 rows an MDMS Download holds.")
+                        if _unpushed:
+                            _bits.append(f"{_unpushed:,} Analytics record(s) aren't in the install log yet "
+                                         "— the next Update Installs adds them.")
+                        if _dups and _dups > _dupkeys:
+                            _bits.append(f"<b>{_dups - _dupkeys} consumer number(s) appear twice</b> with different times "
+                                         "— check them in the Installs tab.")
+                        st.markdown('<div class="warn-box">' + " ".join(_bits) + '</div>', unsafe_allow_html=True)
+                        if _dup_all:
+                            with st.expander(f"🧹 Remove {_dup_all:,} duplicate install record(s)"
+                                             + (" (all dates)" if _dup_all != _dupkeys else ""), expanded=bool(_dupkeys)):
+                                if st.button("Check what will change", use_container_width=True, key="dup_fix_plan"):
+                                    st.session_state["_dup_fix"] = install_log_duplicate_fix()
+                                _plan = st.session_state.get("_dup_fix")
+                                if _plan == {}:
+                                    st.info("No duplicates found in the sheet now.")
+                                elif _plan:
+                                    st.caption(f"Removes {_plan['n_dups']:,} repeated row(s) from the install log "
+                                               f"({', '.join(_plan['dates'])}) and sets these Installations rows to "
+                                               "what the corrected log says:")
+                                    if not _plan["changes"].empty:
+                                        st.dataframe(_plan["changes"], use_container_width=True, hide_index=True,
+                                                     height=dataframe_height(len(_plan["changes"]), max_px=360))
+                                    if st.button(f"Remove duplicates and correct Installations", type="primary",
+                                                 use_container_width=True, key="dup_fix_apply"):
+                                        _ok = safe_update("UploadedInstallLog", _plan["log_clean"])
+                                        _ok = _ok and safe_update("Installations", _plan["inst_new"])
+                                        _mp = get_data_fresh("MapRecords")
+                                        if _ok and not _mp.empty and "key" in _mp.columns and _mp["key"].duplicated().any():
+                                            safe_update("MapRecords", _mp.drop_duplicates("key", keep="first"))
+                                        st.session_state.pop("_dup_fix", None)
+                                        if _ok:
+                                            st.success(f"✅ Removed {_plan['n_dups']:,} duplicate record(s) and corrected Installations.")
+                                            st.rerun()
+                        if len(_missing) and st.button(f"Sync {len(_missing):,} install(s) from the install log into Analytics",
+                                                       use_container_width=True, key=f"analytics_sync_{sel_date}"):
+                            _cols = ["key", "date", "time", "installer_id", "hour", "location", "meter_type",
+                                     "sno", "old_meter_no", "new_meter_no", "lat", "long"]
+                            _rows = []
+                            for _, r in _missing.iterrows():
+                                _t = str(r.get("time", ""))
+                                _rows.append({c: ("" if pd.isna(r.get(c, "")) else str(r.get(c, ""))) for c in _cols
+                                              if c != "hour"} | {"hour": _t.split(":")[0] if _t else ""})
+                            _ex = get_data_fresh("AnalyticsRaw")
+                            _cols_all = list(_ex.columns) if not _ex.empty else _cols
+                            for c in _cols:
+                                if c not in _cols_all:
+                                    _cols_all.append(c)
+                            if append_rows("AnalyticsRaw", _rows, _cols_all) or safe_update(
+                                    "AnalyticsRaw", pd.concat([_ex, pd.DataFrame(_rows)], ignore_index=True)):
+                                st.success(f"✅ Added {len(_rows):,} install(s) to Analytics for {sel_date}.")
+                                st.rerun()
 
             # -- Hourly table --------------------------------------------------
             # One header for every Analytics image export — the same figures as the
