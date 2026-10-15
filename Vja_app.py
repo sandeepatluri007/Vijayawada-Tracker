@@ -2518,7 +2518,7 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
         elif is_total:
             pdf.set_fill_color(242, 250, 247)
         else:
-            pdf.set_fill_color(255, 255, 255) if i % 2 == 0 else pdf.set_fill_color(246, 247, 249)
+            pdf.set_fill_color(*((255, 255, 255) if i % 2 == 0 else (246, 247, 249)))
         pdf.set_text_color(16, 21, 31)
         label = str(idx)
         pdf.cell(date_col_w, row_h, _fit(label, date_col_w, body_font), border=1, align="C", fill=True)
@@ -2670,7 +2670,7 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
                     serial = idx + b * rows_per_block + j + 1
                     pdf.set_xy(x, y)
                     pdf.set_font("Helvetica", "", font_sz)
-                    pdf.set_fill_color(255, 255, 255) if j % 2 == 0 else pdf.set_fill_color(246, 247, 249)
+                    pdf.set_fill_color(*((255, 255, 255) if j % 2 == 0 else (246, 247, 249)))
                     pdf.set_text_color(16, 21, 31)
                     pdf.cell(w_sl, lh, str(serial), border=1, align="C", fill=True)
                     pdf.cell(w_sno, lh, sno, border=1, align="C", fill=True)
