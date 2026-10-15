@@ -6921,6 +6921,29 @@ with tab_dash:
 #  ANALYTICS  (fully independent of Installations/Inventory/Technicians —
 #  purely for live installer-performance tracking on the phone while traveling)
 # ═══════════════════════════════════════════════════════════════════════════════
+ANALYTICS_REFRESH_SEC = 180   # Analytics auto-refresh interval
+
+
+@st.fragment(run_every=ANALYTICS_REFRESH_SEC)
+def _analytics_autorefresh():
+    """Keeps the Analytics tab current while it is open. Uploads from the PC
+    auto-loader go straight to Google Sheets, so this page can't know about
+    them: every few minutes it drops the cached copies of the install sheets
+    and redraws, without anyone pressing Refresh."""
+    started = st.session_state.get("_analytics_ar_at")
+    now_ = time.time()
+    # The fragment also runs as part of every normal page run — only a timer
+    # tick (a run at least one interval after the last refresh) refreshes.
+    if started is None or now_ - started < ANALYTICS_REFRESH_SEC - 10:
+        if started is None:
+            st.session_state["_analytics_ar_at"] = now_
+        return
+    st.session_state["_analytics_ar_at"] = now_
+    for _ws in ("AnalyticsRaw", "Installations", "UploadedInstallLog"):
+        _bump_sheet_version(_ws)
+    st.rerun()
+
+
 def process_analytics_upload(analytics_file) -> dict:
     """Parses and merges an uploaded Analytics file into AnalyticsRaw. Returns
     {'ok': bool, 'wrote': bool} — 'ok' is False only if the file couldn't be
@@ -7045,6 +7068,12 @@ def process_analytics_upload(analytics_file) -> dict:
 with tab_analytics:
     if tab_analytics.open:   # only the open tab runs (tabs are created with on_change="rerun")
         tab_action_bar("analytics", show_upload=True)
+        if st.toggle(f"Auto-refresh every {ANALYTICS_REFRESH_SEC // 60} min", value=True,
+                     key="analytics_autorefresh",
+                     help="Picks up files loaded by the PC auto-loader without pressing Refresh."):
+            _analytics_autorefresh()
+        else:
+            st.session_state.pop("_analytics_ar_at", None)
 
         sec_hdr("upload", "Upload Progress File")
         up_col, go_col = st.columns([6, 1], vertical_alignment="center")
