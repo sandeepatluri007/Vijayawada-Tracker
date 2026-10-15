@@ -2380,10 +2380,24 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     present_codes = list(pivot.columns)
     section_codes_sorted = sorted([s for s in present_codes if s != "Unclassified"]) + (["Unclassified"] if "Unclassified" in present_codes else [])
     pivot = pivot[section_codes_sorted]
-    pivot["Total"] = pivot.sum(axis=1)
+    # 1PH / 3PH breakup: a column each per date, and a row each per section code.
+    df["_phase"] = meter_phases(df["meter_type"])
+    _ph = df.groupby(["_date", "_phase"]).size().unstack(fill_value=0)
+    pivot["1PH"] = _ph.get("1PH", 0).reindex(pivot.index, fill_value=0) if "1PH" in _ph else 0
+    pivot["3PH"] = _ph.get("3PH", 0).reindex(pivot.index, fill_value=0) if "3PH" in _ph else 0
+    pivot["Total"] = pivot[section_codes_sorted].sum(axis=1)
     total_row = pivot.sum(axis=0)
     total_row.name = "TOTAL"
-    pivot_display = pd.concat([pivot, pd.DataFrame([total_row])])
+    phase_rows = []
+    for ph in ("1PH", "3PH"):
+        sub = df[df["_phase"] == ph]
+        r_ = sub.groupby("section_code").size().reindex(section_codes_sorted, fill_value=0)
+        r_["1PH"] = len(sub) if ph == "1PH" else 0
+        r_["3PH"] = len(sub) if ph == "3PH" else 0
+        r_["Total"] = len(sub)
+        r_.name = f"TOTAL {ph}"
+        phase_rows.append(r_)
+    pivot_display = pd.concat([pivot, pd.DataFrame([total_row] + phase_rows)])
 
     # Map snippet per section code, using only records with valid lat/long.
     df["_lat"] = pd.to_numeric(df["lat"], errors="coerce")
@@ -2461,14 +2475,14 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(16, 21, 31)
     pdf.cell(0, 6, "Installation Quantities By Date & Section Code", ln=1)
-    col_labels = ["Date"] + section_codes_sorted + ["Total"]
+    col_labels = ["Date"] + section_codes_sorted + ["1PH", "3PH", "Total"]
     avail_w = pdf.w - pdf.l_margin - pdf.r_margin
     row_h = 6.5
 
     # The Date column needs a fixed width ("2026-09-06" won't fit in an even
     # split once there are several sections); the rest share what's left.
     date_col_w = 24.0
-    n_code_cols = len(section_codes_sorted) + 1  # + Total
+    n_code_cols = len(section_codes_sorted) + 3  # + 1PH, 3PH, Total
     code_col_w = max(11.0, (avail_w - date_col_w) / n_code_cols)
     # If many sections push the table past the page, scale everything down
     # rather than letting cells clip their text.
@@ -2492,21 +2506,23 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     pdf.set_fill_color(16, 21, 31)
     pdf.set_text_color(255, 255, 255)
     pdf.cell(date_col_w, row_h, _fit("Date", date_col_w, body_font), border=1, align="C", fill=True)
-    for label in section_codes_sorted + ["Total"]:
+    for label in section_codes_sorted + ["1PH", "3PH", "Total"]:
         pdf.cell(code_col_w, row_h, _fit(label, code_col_w, body_font), border=1, align="C", fill=True)
     pdf.ln(row_h)
 
     for i, (idx, row) in enumerate(pivot_display.iterrows()):
-        is_total = (idx == "TOTAL")
+        is_total = str(idx).startswith("TOTAL")
         pdf.set_font("Helvetica", "B" if is_total else "", body_font)
-        if is_total:
+        if idx == "TOTAL":
             pdf.set_fill_color(230, 247, 240)
+        elif is_total:
+            pdf.set_fill_color(242, 250, 247)
         else:
             pdf.set_fill_color(255, 255, 255) if i % 2 == 0 else pdf.set_fill_color(246, 247, 249)
         pdf.set_text_color(16, 21, 31)
-        label = "TOTAL" if is_total else str(idx)
+        label = str(idx)
         pdf.cell(date_col_w, row_h, _fit(label, date_col_w, body_font), border=1, align="C", fill=True)
-        for sec in section_codes_sorted:
+        for sec in section_codes_sorted + ["1PH", "3PH"]:
             pdf.cell(code_col_w, row_h, str(int(row[sec])), border=1, align="C", fill=True)
         pdf.cell(code_col_w, row_h, str(int(row["Total"])), border=1, align="C", fill=True)
         pdf.ln(row_h)
@@ -2584,7 +2600,11 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     # Laid out in side-by-side column blocks so a long list stays compact:
     # three blocks per page fits roughly 3x the rows of a single full-width
     # table, which matters when a week can run to hundreds of installs.
-    listing = df.sort_values(["_date", "time"]) if "time" in df.columns else df.sort_values("_date")
+    # Grouped by installer (each installer's installs together, in date and
+    # time order), not mixed in the order they happened.
+    df["_inst"] = df["installer_id"].astype(str).str.strip() if "installer_id" in df.columns else ""
+    listing = df.sort_values(["_inst", "_date"] + (["time"] if "time" in df.columns else []),
+                             key=lambda c: c.str.upper() if c.name == "_inst" else c)
     records = [
         (clean_id_value(r.get("sno", "")), str(r.get("installer_id", "")).strip())
         for _, r in listing.iterrows()
