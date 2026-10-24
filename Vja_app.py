@@ -5917,7 +5917,21 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
                     })
 
     if risky:
-        st.session_state["pending_push"] = {"records": parsed_records, "source_label": source_label, "risky": risky}
+        # Hold back ONLY the technician/day/location rows at risk; everything
+        # else saves now. Holding the whole upload meant one manual entry
+        # stopped a master file entirely — and the PC auto-loader, with nobody
+        # to confirm, never saved anything.
+        def _tn(rec):
+            return tech_login_lookup.get(str(rec["installer_id"]).lower(), rec["installer_id"])
+        risky_combos = {(r_["Date"], r_["Technician"], r_["Location"]) for r_ in risky}
+        held = [rec for rec in parsed_records
+                if (rec["date"], _tn(rec), rec.get("location") or "Unspecified") in risky_combos]
+        safe = [rec for rec in parsed_records
+                if (rec["date"], _tn(rec), rec.get("location") or "Unspecified") not in risky_combos]
+        st.session_state["pending_push"] = {"records": held, "source_label": source_label, "risky": risky}
+        if safe:
+            _execute_push(safe, source_label)     # saves, then reruns to show the held rows
+            return
         st.rerun()
         return
 
@@ -6539,7 +6553,8 @@ if "pending_push" in st.session_state:
         <div class="danger-box">
         ⚠️ <b>Possible double-count risk.</b> The record(s) below already have a manually-entered
         quantity for that date/technician/location with no matching upload history — adding this
-        upload on top could count the same real installs twice. Review, then choose:
+        upload on top could count the same real installs twice. Everything else in the upload has been
+        saved; only these rows are waiting. Review, then choose:
         </div>
         """, unsafe_allow_html=True)
         st.dataframe(pd.DataFrame(pend["risky"]), use_container_width=True, hide_index=True)
@@ -7589,17 +7604,37 @@ with tab_analytics:
 
             # Triggered either from this button or the Update Installs action in the
             # tab's top bar, which sets the flag before this block runs.
-            _push_now = st.button(f"Update Installs For {sel_date}", type="primary", use_container_width=True)
+            # Pushes EVERY date with Analytics records that aren't in the install
+            # log yet — not just the date being viewed. A master file covering
+            # several days, or installs that reach MDMS a day late, used to stop
+            # in Analytics because only the viewed (latest) date was pushed.
+            # Already-recorded installs are skipped by key, so this is safe.
+            _logk = install_log_prepared()
+            _logk = set(_logk["key"]) if not _logk.empty and "key" in _logk.columns else set()
+            _valid = df_araw[df_araw["installer_id"].apply(is_valid_installer_id)] if "installer_id" in df_araw.columns else df_araw
+            _pending = _valid[~_valid["key"].isin(_logk)] if "key" in _valid.columns else _valid
+            _pdates = sorted(set(_pending["date"].astype(str))) if not _pending.empty else []
+            if _pdates:
+                st.caption(f"{len(_pending):,} install(s) not in the install log yet, on "
+                           + (", ".join(_pdates) if len(_pdates) <= 6 else f"{len(_pdates)} dates ({_pdates[0]} to {_pdates[-1]})")
+                           + ".")
+            _push_now = st.button("Update Installs" + (f" ({len(_pending):,} new)" if len(_pending) else ""),
+                                  type="primary", use_container_width=True)
             if st.session_state.pop("trigger_analytics_push", False):
                 _push_now = True
             if _push_now:
+                # The log is re-read fresh inside the push, so this list being
+                # built from a cached copy can't cause double counting.
                 push_records = []
-                for _, r in day_df_all.iterrows():
+                for _, r in _pending.iterrows():
                     rec = {"date": r["date"], "time": r["time"], "installer_id": r["installer_id"]}
                     for col in ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]:
-                        rec[col] = r[col] if col in day_df_all.columns else ""
+                        rec[col] = r[col] if col in _pending.columns else ""
                     push_records.append(rec)
-                push_parsed_records_to_installations(push_records, source_label="install(s) from Analytics")
+                if push_records:
+                    push_parsed_records_to_installations(push_records, source_label="install(s) from Analytics")
+                else:
+                    st.info("All Analytics installs are already in the install log.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
