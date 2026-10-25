@@ -1286,13 +1286,14 @@ def dataframe_height(n_rows: int, row_px: int = 38, header_px: int = 38, max_px:
     return min(header_px + row_px * max(n_rows, 1) + 3, max_px)
 
 
-def render_scroll_table(df: pd.DataFrame, color_grid=None, max_height: int = 520):
+def render_scroll_table(df: pd.DataFrame, color_grid=None, max_height: int = None):
     """A plain HTML table that scrolls sideways with the first column pinned.
 
     For wide tables read on a phone: st.dataframe treats a swipe across its
     header as dragging a column, so scrolling the hourly table sideways kept
     moving its columns. Here a swipe only scrolls. Colours come from the same
-    (bg, font) grid the image export uses."""
+    (bg, font) grid the image export uses. Every row is shown — the page
+    scrolls down, the table only sideways — unless max_height is given."""
     import html as _html
     head = "".join(f"<th>{_html.escape(str(c))}</th>" for c in df.columns)
     body = []
@@ -1304,9 +1305,10 @@ def render_scroll_table(df: pd.DataFrame, color_grid=None, max_height: int = 520
             style = (f"background:{bg};color:{fg};" if bg else "") + ("font-weight:700;" if fg or agg else "")
             cells.append(f'<td style="{style}">{_html.escape("" if pd.isna(v) else str(v))}</td>')
         body.append(f'<tr class="{"agg" if agg else ""}">' + "".join(cells) + "</tr>")
+    _cap = f' style="max-height:{max_height}px;overflow-y:auto;"' if max_height else ""
     st.markdown(
         '<style>'
-        '.tl-scroll{overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;'
+        '.tl-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;'
         'border:1px solid var(--hairline);border-radius:var(--radius-md);margin-bottom:var(--space-3);}'
         '.tl-scroll table{border-collapse:separate;border-spacing:0;font-size:13px;width:max-content;min-width:100%;}'
         '.tl-scroll th,.tl-scroll td{padding:7px 10px;text-align:center;white-space:nowrap;'
@@ -1317,7 +1319,7 @@ def render_scroll_table(df: pd.DataFrame, color_grid=None, max_height: int = 520
         '.tl-scroll th:first-child{z-index:3;background:var(--ink-900);}'
         '.tl-scroll tr.agg td{background-color:var(--surface-200);}'
         '</style>'
-        f'<div class="tl-scroll" style="max-height:{max_height}px;"><table><thead><tr>{head}</tr></thead>'
+        f'<div class="tl-scroll"{_cap}><table><thead><tr>{head}</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table></div>',
         unsafe_allow_html=True)
 
@@ -4901,7 +4903,7 @@ def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
     ps["B23"] = "Tier incentive on all installs (1PH share + 3PH share)"
     # Retention is held on the WHOLE invoice and comes out of what is paid
     # now: old-base part shared by all four, additional part by Sandeep & Raghu.
-    ps["A11"] = "Retention % (held 90 days on the whole invoice, 1PH + 3PH)"
+    ps["A11"] = "Retention % (held 90 days on the invoice value before GST, 1PH + 3PH)"
     ps["A20"] = "RETENTION Held on Old Base (90 days)"
     ps["A26"], ps["B26"], ps["C26"], ps["D26"] = (
         "RETENTION Held on Additional (90 days)", "15% x Additional Amount", "=B11*C24",
@@ -8515,16 +8517,16 @@ with tab_exp:
             _gst_total = _invoice * GST_INVOICE_PCT
             _gst_kept = _invoice * _gst
             sched = pd.DataFrame([
-                {"Paid on": _fmt_d(_net_on), "What": f"Net — invoice less {_ret * 100:.0f}% retention "
+                {"Paid on": _fmt_d(_net_on), "What": f"Net — invoice value (before GST) less {_ret * 100:.0f}% retention "
                                                      f"and {TDS_PCT * 100:.0f}% TDS",
                  "Amount (Rs.)": round(_invoice * (1 - _ret - TDS_PCT))},
-                {"Paid on": _fmt_d(_gst_on), "What": f"GST {GST_INVOICE_PCT * 100:.0f}% ({GST_PAY_DAYS} days after the invoice)",
+                {"Paid on": _fmt_d(_gst_on), "What": f"GST {GST_INVOICE_PCT * 100:.0f}% in full — no retention on GST ({GST_PAY_DAYS} days after the invoice)",
                  "Amount (Rs.)": round(_gst_total)},
                 {"Paid on": "", "What": f"  of which payable to government ({(GST_INVOICE_PCT - _gst) * 100:.0f}%)",
                  "Amount (Rs.)": round(_gst_total - _gst_kept)},
                 {"Paid on": "", "What": f"  of which kept as profit — ITC available ({_gst * 100:.0f}%)",
                  "Amount (Rs.)": round(_gst_kept)},
-                {"Paid on": _fmt_d(_ret_on), "What": f"Retention released ({_ret * 100:.0f}%)",
+                {"Paid on": _fmt_d(_ret_on), "What": f"Retention released ({_ret * 100:.0f}% of the invoice value before GST)",
                  "Amount (Rs.)": round(_invoice * _ret)},
             ])
             st.dataframe(sched, width="stretch", hide_index=True, height=dataframe_height(len(sched)))
