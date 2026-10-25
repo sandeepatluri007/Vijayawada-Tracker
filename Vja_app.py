@@ -5,8 +5,9 @@ Backend : streamlit-gsheets-connection  (Google Sheets)
 Theme   : Clean White & Light Greys (Field-Optimized)
 Security: PIN Protected (stays unlocked until the browser tab is closed)
 
-requirements.txt must include: streamlit, streamlit-gsheets-connection, pandas,
-openpyxl, python-docx (Word output in the HR tab), matplotlib (used for the "Download as Image" table exports, the
+requirements.txt must include: streamlit (1.64 or later), streamlit-gsheets-connection,
+pandas, openpyxl, fpdf2 (PDF reports), requests (map tiles), python-docx (Word
+output in the HR tab), matplotlib (used for the "Download as Image" table exports, the
 Hourly Count heatmap view, and the Map's PNG snapshot export). pydeck powers
 the Map tab's pin map — it ships bundled with streamlit, so it normally does
 not need to be listed separately; add it explicitly only if the Map tab
@@ -19,13 +20,16 @@ the app creates and appends data automatically):
   Technicians           - name, phone, aadhar, is_active, login_id, supervisor, site
   Locations             - location_name
   Supervisors           - supervisor_id, name, phone, is_active
-  Settings              - key, value   (holds monthly_install_target)
+                           (Technicians.supervisor holds the supervisor_id)
+  Settings              - key, value   (install targets, working days, holidays,
+                           location name mappings — all set in the app)
   Expenses              - expense_id, month, cost_type, category, item, vehicle_reg,
-                           amount, rate_1ph, rate_3ph, recurring
+                           amount, rate_1ph, rate_3ph, recurring, site
                            (Expenses tab: fixed monthly costs use `amount`; variable
                            per-install costs use `rate_1ph` / `rate_3ph`)
   Vehicles              - reg_no, description, is_active
   Returns               - date, type, qty, location, dc_no, remarks
+                           (ageing material sent back to store; comes off pending stock)
   Transfers             - date, type, qty, from_location, to_location, dc_no, remarks
                            (stock borrowed by one site from another; created by
                            the app on the first borrow if the tab doesn't exist)
@@ -33,12 +37,10 @@ the app creates and appends data automatically):
                            joining_date, bank, account_no, pan, pf_no, status, offer_ref
                            (HR tab: offer letters, payslips)
   Roles                 - designation, duties, schedule
+                           (HR tab: responsibilities offered per role in offer letters)
   Liaisoning            - location, section_code, lineman, rate, designation, phone
                            (older sheets without designation/phone are updated
                            automatically the first time the Liaisoning tab opens)
-                           (HR tab: responsibilities offered per role in offer letters)
-                           (ageing material sent back to store; comes off pending stock)
-                           (Technicians.supervisor holds the supervisor_id)
   UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type,
                            sno, old_meter_no, new_meter_no, lat, long, source
   AnalyticsRaw          - key, date, time, installer_id, hour, location, meter_type,
@@ -61,6 +63,13 @@ import io
 import base64
 from PIL import Image
 import hashlib
+import functools
+import calendar
+import difflib as _difflib
+import json as _json
+import re as _re
+import threading
+from datetime import timezone as _tz
 import openpyxl
 import matplotlib
 matplotlib.use("Agg")
@@ -216,22 +225,14 @@ def replay_carried_messages():
 LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAGsAAABgCAYAAAAaeIzPAAAs90lEQVR42u19eXxcxZXud07V7VWr5QXvxixmsdnkBQzEMgaDE7OEQWLmQUKA4AwkwJCQhVVSmBBmAnmByUYCA0mGQCSYQAKBYPKTgknCYoHBLPJuvMm2rH3r5Vad98e9t7slS7ZkyHvJPBW/Nm139+3uOnXO+c53vqoGDjJEhBYtWqQBaAx/6EWLFunKykrG6PjYBg31QE1NjaqoqDCZJxLBWstbt24d/+STT4497rjjPtnU1CREROFwOP3MM888dfPNN6fmz5/fxcw9IpJ5aWVlpaqqqjJEJKNT/jEaq7Kykqurqy0AFBQUYPXq1QWPPPLIlxobG8/at2/fCbFYbFwqlUJeXh6YOTAiUqkUjDEQkZSIrJo8efLTl1xyyW8qKiq2JRKJQRfA6PgIxqqsrNTV1dVuQUEBfvzjH19SV1d3+6ZNm453HEdPmTKlcdy4cb8sKytbv3Dhwrfz8/PzAOQBsAB6e3t7JzY0NOS9+eabJ27evHn52rVrpyul8iKRyJ8uvfTSX15++eU/I6Ke8vJyVVtbO2qwj2gsBmAbGhqOvP32278XDoc/NXbs2M1Lly69s7y8/NW1a9eOv/POO482xly+adOm8LHHHntmJBIBAHR0dPStW7fu9eOPP96Nx+Mv3XjjjW/Pmzfv7eeee+6Empqab3Z2ds4jonW33HLLVfPnz//zokWL9B//+Ed3dPoPwViVlZV8zz332EceeeSa73znO/dOmDAhffvtt994+umnP3/XXXfdtHLlys9Fo9EpRJSeMGHCxjlz5tCWLVseI6K9SiluampS1trDS0pKPrV+/fqxjuOMBdA7e/bsf/vud7/7w3Xr1i352te+dndra+vMpUuX/sOdd97536MedgijsrJSA8BTTz11zic/+Un54he/+HpJSQmeeuqpU5cuXdp6/vnny0033fTEq6++epGIFEUiEYRCoUGvFYlEICLqrbfeOv2666770QUXXCBnnnlm509/+tPzRERfd911vznhhBPkvvvu+zQRYRQtHoJ3iciYM888c2dFRcWbIhK57bbbzj711FPlnHPO+XVfX98RzP3mlAGwD80zNx/a8wDYf8Lll1/+wpIlS+QXv/jFjVprXHTRRa8sWbIkJSL5QWkwaoIRjNtuu+3apUuXyiuvvDJXRPIuuOACe+65576Un5+fqZtqamrUcCZWREhEuLy8POT/fer111//2rJlyxKbNm2asGrVqpmzZ8/uuvXWW78NAH4NNzqGOwoKCu5cvnz53vz8fNx1111Xnn322fLOO++UAsCDDz7oHOp1a2pqQgCwY8eOWQsWLEh//etfv5aZsXz58qZly5bVExFGWGz/fz0YABzHiWzYsGFdV1eX+vDDDwu11mbOnDm7y8vL1YoVKw4ZBLz33ntueXm5mjx58sZkMpnSWs82xnBJSYlqb2/v9Y01OkZirI6Ojq6JEyeekpeXZ84666y/dHd3q6qqqstqa2sNER0SbVRZWcmvvfaaU1tbax5++OHblVKxlpaWh6LRqN2wYQOi0SjlsByjY7ijsLDwy8XFxfK9733vahEJl5eXP3fiiSfKI488cl44HA6epiorK3VdXZ3281K/GwCqqalRPthQAMDMePnll887/fTT5ZJLLnmFiPDAAw9cXFJSYpctW1Yb5MNRC4xgFBcXf3nq1Kkyf/781K9//etSEclfvnz5cyeddJJccsklP+rt7Z0WFMDDGVpriMika6+99rsLFy6U888//y0R0du2bVu0aNGi3smTJ8sFF1zw5KixDqEojsfj35w/f/5yrXX7+++/P+eLX/ziFbfccsvq++67767nn39+hYiAiP57/PjxtV/60pfchQsXvgAgFQDA4DobNmwoe+yxx8Y2NjZetnv37k9qrTFlypQ7H3300XueffbZim9961v/NWPGjJ35+flt69at27Fq1aplIqIBjLIZwzXW+PHjvx2NRudt3bp1+dVXX71648aNxx922GErf/WrX30OgHz729/+5zfffPOqRCIxJRaLYd++fQiFQigqKgIRobOzE93d3Rg3bhySySRCoVBbaWlpzS233PJdAHT55Zff3dTUdHFRUdH7Tz31VPk111zzm02bNm2pr68/Z9RYwx8aAIwxNh6Px4koISIL77777iufffbZO+bMmbOzoKDghXPPPfeh2traBQBmNjY2Hv3WW28d0dDQgL1796p0Oo0jjjjCHn/88XTyySe3zJs37xUAiccff3z2woUL74hGo5cbY7B8+fJ7b7755lsdx0l//vOfjxtjRqmmQ/GskpKSb40dO3ZRY2PjmT6cFhEp+MY3vnHDtm3bvtrZ2VnQ0dGB/Pz81paWlmdOPfXU9IIFC6i9vf293t7e7unTp8999dVXafXq1TocDi+y1h4ZDofhOE7T3Llzf3X77bffT0Rb/Qvztddeu/39999fu2rVqvNGPWuEngUARETMLKWlpU5eXp4QUSeAfxWR7zU1NZ359NNPn/7GG2+cdNhhh13y7rvvyuuvv84TJ07M27VrVzIWi4UjkUhq5syZycLCwnUTJ0781wsuuOC5Y4899g0iMnfccQfKy8vVk08+aQoKCuxll10Ga+3o7B/KGDt27N0zZ86syzWgiFB5ebnKfV44HEZxcTFisViA+GaLSFhECkUkXFxcjLy8vH7XLi8vV7l1mojQF77whZ2nn37686MMxiGMvLy8O88777ydIhLxC2XKndyamhq1YsUKBwOI2qFC64oVK5yhuMRwOIyLL754+5IlS14cNdYhjCuuuOL6JUuWiIjMBcB1dXXDmkAR4QGF8QEZDXgM/6TZs2e333PPPU8Do0TuiEGGiEyYP39+X3l5+e8dxwEA/jh7Tf61nHA4jM9+9rPPzps3z4jItJzHRscwJ1IDwAMPPPC12bNny2mnnbaioKAAAFBaWuoE3vMRjKSD8Hf99df/+9y5c+WrX/3qiiCfjVpghKOmpkY5joNvfvObd51xxhly0UUXvdDc3DxrEKCgfU/sF/ZyQ6EfQlWQ35gZIjK5oqLixaOPPlruvffeH4kIA+DRxuOhD9Za46GHHrrqE5/4RGru3Lly6aWX3tve3j6vpKRkyNf4htlvxONxvPPOO8dceOGFd5eWlpqzzjor+dBDD30u53Wj41CK4gGTb0Vk+g033HBLY2PjF5gZJSUlWwsLC5+YP3/+28cee+zvFixYYAFQXl5eV19fH4wx+QCwdu3aWGNj4ycbGhpO27x58xktLS3HFhQU4KSTTnq+srLyOiLaumLFCufBBx90RwWfH91YGe0gM8MYc+Sjjz5608qVK0/r7Ow82RiDtrY2FBYWYsKECVizZs3LbW1tXYsXL/7Uvn370NbWhpKSEqRSKYwbN271WWed9eJVV131TCQSeT2ZTGJU0fQxGysABtXV1QTA+HUYurq6jli5cuUpTU1N81988UW7ffv2+Lx58y7Zs2fP5g0bNrx61FFHuUuXLkVBQcGLF1544bpIJLI9mUxmPFZEZNSb/rpIkX3ENqhRx4wZgwP0ubi8vFzV1NSMIr6/pmcNVQDX1tbSSy+9xBMnTpTq6mrAI2B50aJFPGvWLAKAs88+25aXlwsRjZJ/f0tjFHqPjtHxUcPg/2WPHXYdRkTWwy77gxcRUfBkB8O6zuhy+Bsy7MHA1KhnHVoePMb/bHKQz54mog0dIiUFQDsRGRAgVggeJ7kEQCuArgNcL3Odv3Vj/c20J2pEVAWR2djXXf5qb8+v1nW1IKIUBOzNMgUyKgJY4FqD8aGIXdPXcY0CfrfB+y6mzoomIrfVTa14A+b7b7TvgaMZVgjE3kXEv5LAQNIWU3Xcru/rvuboaN5/Bp9j1FgHGON8L08AZ/1o5zb8ec/2NLR2AAICmTURwBQ4g3t0YaE+uXD8Z/KI/rPSD4dlvveIcjb+bNsG+9u+FilQjhLxttSK571eIQhBL+DOzS/Ss53Y8bmfY9RYwwmDSvUhEgWHC4kdwGaMI76xGEQalkAcjokh3SkiVOtPcn19PYkItQL/6Iwp5PC+lBtVCukcZxErEAJCVgGiKBEOCYVDkwCgeZiA5P/FGHZSHUwyPdQtB4mN/ANZy4QUrKQgRrI3IYgFxLUQm4K4KTiuIbJG5SLB5uZmAQAD7O1NdAM2TSmbBqUtKG3BroBcC04ZuNZFWpKASRCLnfC3nrNGApFluDf/+YcU9wWAMgTA+r7iS0IkCw+0sYARL5wN2NzgsyciwE9SfUk4KTAZgmu9W9rCuw+GsQC7kLjVaEslH/0fEwZ9iBxDjlx6iLkmTdzdLF2fsoivGutJ2oY9LBgQBVgFgUW/nSbkhcQ0EUCMFDPsEJ8klQS7QuhjBcsCsllpovipz4CRJEVJa1Gsw4sA/PxvOQzqYdJJ8ed2bVn5zKbNR/WE2aaUy9oNAVD+wvcmzxKbfIF6YM1bvy+Grmk/hCYjAyBrfU/i/VB28J9YgXYFWuygC6vV4soQM8SmxRVFylDGCsQEYwFDAksujDVwCEf/3UN3IhIRie1IpRb8dN8OQjjmhx4GlPUN5RkLAOAQwuMnnUEUuewjVX/7hTjyoqGI79be5NtBPzKZZpHXDVnAWIRSCmnyjU0ArPdaxwLKteLmA7vdxBMA8N7/gDBomKSDQ6pQMQtEyCiVTXnEnsEUW2JmuKH2EIDkEDTQgeOtH/oGmTLKDcBDXLWhoYE9fIFSisVNd1uf6wirNFzPUJKtBAwIlh2bUtq0Kdr+dw8w/PqlrzeR2hhyQmTEiiWXLBmyAFkRshCyAAmBpS8lk/ILpyZFjvK98tBpHAnczA99klMdQ3CgnZMWsMXkqKgj4WheSBfG47ogFtMFsZjOj0Z1fjSqY1FHi+0NFZNSk0SX/l2HQSKSRXV1ihYv7q1c/fqWiM6bm5CUEBRgGcQCIfbnkwAhWABWkwYQ+oi8k2cY35UkB2DIATBAaWmpKyK8G/j3C93QMacWTwqniHqUCw68XESIAFIKoYL4+GM182Ynmf65n6NN9d8pwGAickVk1mPbNp3Xs61RkBdXAkEWhmVXPsDCOsRdXd3NADYfGpvNIOt5EOUSehLcF3DGuWTQBea/pEcDl7oH/n4lAA5XRKv/Hij3g+UsKffa8h17Er1/icaj57iwFsSKBLAB0AgwuxWCtaKZNIAwgD4ZYd4iACQMCGAhPpZhz0yZfKU8Qx1gt7//vkBNDS8aN46GiBytAFog4qXDj0kjUinCVQA1+JPTBUg9YKs/YhsmY6yamhpVO+DBitpadJ2Up4lo982v1zdxKEySSApYIBkcFoQrgRAE2uHOpNsdZdVeXlOjKmprUV5Ts98bl5eXoxywB58g8g2zXzI7KIqtE9HNgJR7k7WfwcqyLIuMpIgPSho/J1N9fb1qLiuTWtSithaoJgpCaf9r+nqU8vJy1GTf147YWAc4B9CIiPPI1o3LupuaQDqkBK4fkzgHavt2g0VIMaxY1B7gbMHa4QKMAAIOVorLwUP4XyMcBQus0nsPi5zNgATAikwGcBSAT/j/vBvA7xTRDut/d9rfEw+aMnRlZSVXVVXJCxs3LuqOh27QlqMagGFLZL1P8creptCuRHI8UgA77KWUIGdQNneQgJBIoQup6b/f3fTCbjGIkcB4+cwPmGwj1nJeiDedXjLh1q1bkTz8cErsBy6CdohwFlxYZJhz72l2SIP5HeRzAEwAcBKA17F/T0vgzXSZBm4iotSBwnbgUbu6uko6pFOOI2oRkTFp4MoNqeQ5q9tb7Nq+Nr5j+7ozXFFxJxKDASEEQTrR03vd1ndXHRmJycnxEpwYie0q1PqBMPHb/4LENKLoVskaf3BjVVdXS1VV1cQWprqbX68Dh/OghWG1AJZhtELY9KE50Qc3lu9XJwS2tD/VYy1JKIrHmvbE61raz+3jGBT6AGK4CmCxYEQhiU5cOX48Ti+Z8JMxY7BDRJINA/1GfGfNARb9clQALmhQWkz2Al/5fuuH3/nLtiYUlEwANGUKa2TKagKl+jCjIIrzYyUJAF+p9fLMUBGBK2prUVtRsU9EPtWYTH3uf+/eunitpErW9iSw06bRqgXJngSQhsAoA2JAgRBCLBKPnhvvbcdh3T2YFQphFvCZZ9taVhch8pSI/IGI1qwWcUqBQRXL2l9d2rXi7u7oJuQrgRBBE2AZcCLexDgRpdMMow2ECWTJD1Hox7mRsUiQkU3pHgthgJIgCwgHrIcWpFPUJpICsLuwkFoqRbhsMB+RTCwEBamxn3vsjxvq6+u5rKzMEDDn6ZZW+4e2VoueJAEJyfTGyM+DKgQY151dFHfOOHzsngMRuf6qNxrABle+9K0t6+7+te3Ob+juBdLaRUgTmMEJgkMRhhaSEGkhgSMEx7KYLmM7CGiVNN7rSwAwzhO9PactbGs67crDpsEVuVVt2/Zjmj69bTAPD3KWGEkTU0iBlIBcEqs9Y5hUhj2wnIYIAcb3KlLZcEXK/5perCJRCkh46I456xmUEBEQgxUALSJUNaiNVP+1QJlJ89a+EMjyfiYuKyuzRCS7RP5NJfVnORyB0oot/JNyOGtxIgfCDuKhPNXluhsAoH4QQ9WIKCIyIrLoqbbmW2/48P2lz7c2A5qNZs0ScjQoDbECiOMlMBEo10JB4DLBZSESUQRAMUMpBkHJbiH5ZU8XntnYgK9NPOLua6ZNExH5QS3QKyL9AJjOnQzrV0sBc+ABWuuvZMrGJiJ/cXoGEPT/e7CxhPzHBDk1mQShjQI0JJW524dgs/FPJIMrxF8Hfgb34TsNScIQwMZaWHEJon3s6teHgbHFQqzAiIUmGxnCowJD/eOTknz8Kzvfx7YkXArlK7Ip5SLtL0LxbmIyaMuFBUF7QMwSCApkCUQKhtMAuxSCplgohj4dkTt3bkw358W+fX2oaFaFUlcOPMlA71/l5Mb0YOFKpvgNplQys0jZFZ9DC2VPPKP+cRK5lNEQDFhA4loCE2UWCvkMBsR6DiwHBPxMuTyiIJvzhHNTV9ChHkzKxvXefrSjf9vdee+NH7xtdwmbkIo7krRwtfGNTiC/70bZhQhh7ZHd4kIMeV1v8vassRCUJbjago1BQa8mCk/Q//H+ulR06tQr0iJPEtFzwWLZ31gi3qrNzAL5iQhe+AtCmV+0gn0CN6i1KKtv8GKd6tfcgBDkIEcqEHIZd8/wGYFLZiIoAzB4CJKcgT6xA/E+Zb8n5YZDGqq8oAoi991k7wPf3b1l8i6XXRVRTsomQNpbAex6hLaChWEBlIJrxcJa8dzWEoQAraCYlBUBpS0sO3CIkLZppJwUrFg4lknnF+if7Gmio9n5oYicXAW0B/mLs2uerFIKzApMDCYCEfn3dc6q5pxGIDAYJCMQmL3XEJF/Te39n7X3mNDQzHLgCdZCxHprJwiLYv37QX9EBrW3A8wOhUO+Lo1AQQsnqAflwB4uIvweIGmR7/yyaefC+pa9rgo5ytoUlKQBsWDDUJZglYHLgFUWpq/Fjk33cFksoirGTdDLxoxVC6JxNYmgTHe3EQtLiMCKQkoEyhDYZVgBUuSCJc3tYPvzrpZpG42prcpUSUKBZylhdkxHtxdwJU2ADg6i875dyFEIR7OhLNcb+52hqyDGQBK9xuNciTK9LrAnKerrQyKdMkN1nL1U6c+i9XMnczZnsWQn2g7eImFgcTQaA6y1JGCinNyZyymK7E8MeyvZKgDLezo/+3TLvnxIzFpJEQlDGyDtKBhmiLUgcSGkEOrsMldMmakuKizeMStW8Pux4fAasihvTidlTVdHdA2Z+T/bthnbbVJUJI/EGKSZAVeBrYJVgBgD5Si81t5pni1om/8vY8YWElG7iLD2WyDt+Rx696YFC2cnlCCtvWaiFkKKgag1WNvcipe7u7ycBOP1sERA4ExUISFYSzg5kienzhij0o4DbQECI60BFgZBYDs7UX7McdoAZQAeK8tFCdb63qsyZK4HLvyCi+GVFGAI7d98LC0tNQCQAJ7o6uy8HqKUzcm6kv3Dv5jrocqcyqoSoGpAXJEj7925jT9IdlhScYL1ZAQpFZjXwqtgFLiv29530gL1pbyiHwK4jYja/ct9HwDCICTEfqEsWnD9bTs2HP9ae7dV4Tw21gLkIsUugBCUAGQNJy3cNxJ98XbgKwDuqAdYo6oKVF3dISKLy2fMOM1fqwMhVsEvtm1/6M9/WRWxsZgATH7t6XmCFa/2Ygb6uuwVJxzDN06e/ooLfE8D6cFYA79w/SMALAZMXc7e5AxvLtbzhgy+8RM4iQ+Th+7IMdBqbeC87KNMyRbGQa6F3Y+8r/KMBQAzPzTpsWJgKAT2cJn1F4/XJWci2FTaXjxxqr0ir+j7RHQjAFTW1emysjKUAbaqvp7rAbRseO3xJUctaCw8+qSnL1nzl7xtlKKQdcho5XUTrIVlAlsFDjPWpDvp/VTvAr9+hK6urg6E/fsA/HaI+O30mZ4fuzoNwEC5DCGCVdko6YMHQdjB7p6eZgAXOERtwyTbJHfGAipLhDKRNMhTHrvvT5aVIbunBnD6KaMyIRA5/+bVcyL9KYsq/8mNMPPX9nYLKO4hSLH70ZRWRBylaHEsvykfuH1T66bCnxfP7KoCTE7/DAAkleqesW/flt1zxx5efuvRJ678wpo/pVORPCCpCMrAGi9EWQtAO+5GTmBVy57uoP7TA9njsrIyqa+vJwDIz8+nrq4uATAmZBVpV8E6BMvGzxl+HCLlexeEnDC3tnc0aaK2Om91Za43oHgVDMG6Sw7Ss5KjxvURZwZsWMEBwCXlGokyteMgJQpx/yMH6r3SuK2vb14rhEAhgRjfo7kfZQUiiBFMiuZHAcwvLi7eUOVp6/vxlP7dd0QkTETr1rR133/HrBNu3JFKIQ9hJLSFFkBI4JLAtayLlMLkvp4xgJcv9AAm2R2kJyQiYqwwyCov4atsa0Ssn/AJIGGivpSMm5RX4oqMI6JmEaHFixePvE8k4tskN9YFTU/xTSlgDG6tCJD9WSjJocYynCJlyOGhIGEqkUhJ2s0sDptTr4lf4TATGWPtq92deZ8uKDx8DI35Q6WILvPmz+YSs/58JgHQScV5/yIifzZAXtorpSkIVGmADGAKgCN6Me6NzwCoKiuzw5dPk4XLfsXjel/Ua44DORUyxFoJOeEYgCIAzTj4bpAhtBc5ZZ1YZHg98ZuQVgaFkvX19ewHyTOi0QjQAeuhFV8OIBjwmYP3219AXBKJdcUgApMCNHm1JmVZnCB3iXbo0Q83R8rieQ+KyFYieqk6h6oaB1CZtyyyDQPPcDUjaMuMwFj9CxQfhkjOpDKgIAhFeHdr266Qv4Xm0Dap+R4kuZ3iLKQj8WmsQegmP7xCgL2uaz0yUAiUIZwop8YLDNbfUFVlZVINYGY09syEWOxKtCZJWQfWpHxOlLLFNAGkmPYS5Oq3G+grM49d+WZv8tcnR0OPAnifiDYO7CIf7y+X1SK61GuMDjmaAakYlME4oGMRWABD7AFG6c+EBzFCmKCVo1OHIkPL7X7k1lrI0SdKtozPIMLBRyER+6VAztOofz03iAIbQSEaA9bO5lDXsyaVB+uI1Ybg6kzLJsP8GwtyNDWF4/jqpkYc1b3r0+cUFX96oQn3rmpv/eXxhcX7ioHfAHh9QEfa+pICrgLkYG3/4Rsr8CYrOXwhMsIZYcloJwBIXOuPrmfIYUmIaID0TA6oG1TA/EgkCljxGzSSTVs5eAWyP/qvJrKVIqyINr/QvPut/4rTGbuSxipS2vphMHfdQABOGpDSsPFCrO9Im/XNO/ATUOzY4vGfn9Xag6PJfGO8g3dWd3e0HhfNWxdlvh/ALiLqIB+M+ps5hpQ6jMBYnO0viQxQNgUiXe8b2I/jlxCs9OsMi5EMF0k0tEcFRXEK+EVXe8dNIFIeYqVsLewDRQq40JzPWwagGkBZfT1Xe63mu68W80LV6vdsqKAIVryWkdig9RNcW7x1YRQcE1bsROHCyjs9feadzk5AkioSDZ8wpXkfjosVlk215nPnjC3p/aCv55FjIrEnfcN9mAvsRizy3J8EZb8bkF1aXh7g/b74R/OqbD3ExJkyIaOqOsj7uEAyYOczXGOgQ/QXQpaD3P/1ixcvdmtqaxnAyksLxv/goulTdSrVnlbMObUa5dRs7IdGFy6nkKQEjJMk0gnN2modilDSZbsxYc1v9raYH7S0hv9p3friz6zf+OVv7Nj+55VdHa+5Iv9LRCbl6hsrc0SyIwyDQTtkIMALWhjst6I+mgpPJOs5TOQZh7LlAhPhYFKksDd7mU5cJjkRBnCZGEyHFCiwvEIhrG/72uSJhQmTvPyF3fvSKh53MpyiwCMIIIARj47zPV8lAMvaK+5FoFlYWACHIFDSRxqru42sbt+On4TthGVFYx67ZuLkZFLk0QjRP1cBlJvHhu9ZktuTomxRHAANEdggdH1Ur8ophaz1ZNIB6y8iWWMOx4kznzF7y3oVZSLFkComIlmzdSudVlh4xTePPO6nK446xjEdrcaAXHDU4zslDTIMWAciyr8m+2/jQsggrRhpKLhQcAEYMLEVYjLM0Qi3SVR+ubfHXNDwZuj+7q4v7BW5uQqQNpEl7SLFI/KsjJop01PinI3U6F+/yMcQASXbdgq8lYizSPGADcxc1Y3PIzINwCV+dLDsR4qhffXkww9v9z3+hlkzJk9dSPa87+9txuq2DgsnZCmilbYGlgxZP2+zZQAOrPW8iiEw7EJ8jo4kwzICroAIxGGlup1C+dobDakdxxz5ndvGT+TxSj0wYs+SoObxV3Z216H078Z+zCND5AplWadckEMjCK0D6wPJFeV4xqo/kMK3qipVSLTsiulTFz8+57j7HzhuBi8sietQQiidTJNxrSuGjbKOZVIQ5fXzvOXsguCCRKCM9jsH0k++YKxAW0uqsNB5YOsOc9+OpjsATCOiRI2I0occpvz4T37r4q+yXVDY13V4KDBLZGTfkA75C1BmsQ0HEwUael/YWQ+gXkSe/fQE99IX9zZ/8o9tHRO3mKRel+7F3lQKSBgBwgZOCggxkwozpUPenmZOea0lm8N7+t/NQAFpEHMcD+/bkzdvfNHPROT6itrat/RIQlOQqMlfCR714zfaA68DfTyGy1BZ6CckDTbECR1UlJvjTX7YFvQvtJgB62IkP7pW7YlHVa1nwJcAvCQi0asmTzx2Z1/f8tUdbae93dVzeEfanbWdWW9JWGxo60RHKmkEGggBHE8r62qQDQPkdRfAgXKDYSUNzaJauhOpPyXNqRdGsaS2omL1iD0r6DVlNt5kdiNSjtz540PvuQrcDIvh36eg4BkJQMoKLzL9MCIClBo89A1S7wzUxRNRH4A3/RtEJApgQRew6O2uHtPTm/hsF+Go5zvb8XJrDza29FqKhxhs99OFWOV6qdQSKBLnZ7Zut+dNwTEjAhiZyl1ypWXIUk4STCRDPpbjNQZoPMhfEMGWWKFh4YvsHq9BclawZVUADPKjQ8HmhoH/ng/QbwFzXU/P+Gjcmnzkt/oCG1TU1gbGqw9SoIjUAJh+yfiS6Ws6ui9+eG/Tsh9v2SFutICYXACOH6kM4FoQe/I1UqK3dnTKjknuZSJy//CN5WMX8vtXNlDYBqolkKc0sgRxjXykH4YJmpmSXREU7Cn232k4CYsC2J7ZiTLIzgYhkNX7ke6+Zo+JKDVkSPQ2HAzqkQC4PijtidYDWO8//JCI3KN09Ov3b9hmKI+VV5f6zU14YiJhAzBDUoIdbtoBME6PIIVIsEdKcnNJfzqE3WSvLSzJP7zP2rkAGrzPOjLmnYJwx5TRI0rQhrcA1MhghUhuHMzq3LMKnOy4DFDVgLs13bXCulz+p7aOZ62Y4LBfccAwsIiGnLM70/aVIqV7j4hyY97e1tdo8uTenNBpcpVSAKgeoMcbGoiIvvGHjs5TftdadM6Gnh6XHdEwXnEtZCD+ylGWYIiwJ9ErANLDNRZHSIVhJbsZQdBPJ5jdVc2SSoUjACJEJOtFQnUipsz78JQjBBiSsJSh3C0AHYfiqoGHZc5vAniQUHpvQ4NlAH/Z237Vf2zdWtqhCsqUVmCkYYjANoywTaFDDJQKXzQlblA1eeoHCydNOnV3MjmHiNYO1osK7teJ6AdFCjf2ddWP03TOBqNInDSUdWA8tYxPmMM/GIzg+tN0cGN55/B1J4xdGwtHT+kO4gmhX2jx9yUBYYde3r4FjSdMu1VEVhDRjgF2OLiXSc6Gr+BwrYDFoIG0IB+8xAi4O6GsrTOVt/9wTs4SABPyCtTOvrTdlupyAcXglE9TdQLGBWyY4Bj7QXMLFkp00sLC4siulg93J6X7xBB+9y5QPuhiLN69O9x7WEFeW8qd2W0C/SNnpVdBjyzowFmDiaEoAXD4YLXForIyJqLehMHavEgUEA9rcO5pZZBM0UwhcEN3s7234e1lb3d13CAiFSJyqYjEReQI/++fEpHoTpHYgTsjPqQlyrDmMkj7ZDiORZmaSjLKYxkklJeWlkIAHBmNJqZEImAxOsRWM5MmUpqV0eworRSUQ9YhJ1/9Ynd74cqe1G9PnnjUmN3bNm8jqjBUVUWVIlwnoutEdF2d6EV1dfqkiRN7YojN+UtSzl/X1m5Yu0yWM5sZIATt9w4tWdGaMc2qbgC7DupZZQBeBjA5Px8xVtk4L5xTfGV30bMLsDOGH163XV7f1/bVcyZPw5RCB92tnXvDWuVPGDs22tPdjVkhZ9eS6VM/DeD1gceJB3kKzDkOTN7JAPDJ0hzoc/CEZTP8ouTAZM9o6OeqwfkK00Khz80Mx977M+1WhmICw8RWIOyAoeAqgaE+aCje7PaZr7y3Zn7VEUf+7uJpc74pIr8not3V1dWozvmAjvfdrv5V675/va9x/fgkO1bBeDt2Aqm9Ze+mLIC0HVsY5wk69AYRvXdwY5WVoRrAccVFzdOjYWzubgersLe3pJ8Oz+8+EANIgWNRWtudNGvfec/7FJHIeK9ruz2Nvl71peOmT1wyfepWAHivvFzKMmuc/eMayG9I+4c6IqedP1zvEgWIzv3ltn66JhKGsV6RH6yWLkBqvCZg6+KSkq1PteyZmSBHAEXEKVgmWFhfDufAMMCOUmtbe+3Ve96a+fy0wx6dNyZ/T0NX54djnVBbLBx+GmlgV09n/gep3orrGzfNfWJ7E/aBLDnExmpfYexrL0FwFYGZgGSPXThprDplfPHTufLpA2oAAOCovFjDEbFwoi6lHA6FYZxUdoVLTkgMxCTepn7FeXkgYlhYERAUhbRVirQTSvqLbb8iITjvAtR/s0NW+jtyDU5up7lf19nnOYOM9UNA/n3rVgczxvKy6VPvPbe970dPb9lhnLjitDKADQ3QBhCsK9BUyO2htDy0bbf8rGnPhKmx+ITx4SjGFRWdqxJptCV6sTbRhdZE0pIqIM3ErphMfgpUx6LSIKThuBFr0zF9BoXaJyk8ScMBGBVExtd+P/HDt965NT8cndNNbAhGIdh7lLFS9scVAjrIWvGEVSQEKFixYq2BtXaIGefcyJqd3H6tExpy5+NwDJZhXEhyoL03jgNoxowZSSLaIyK/v2Ly+OaVOz4ck7DaOghzOmfXEvngjSCw1AsmEMfi5BqRzX3Wbu7tAfa1C7QvB9eaVDikDLlwhbJniUjQBwPYJYQQQSKdMMsOG+f8w+GTa4loV2Wd6GGx7nX19UpE+MJjZt1/6pgYxO0UhsohIgdrWVCmGZnh5mgE8yuD3M1RFg1H4ZZ7INdA/k9yCNyB0ZSIZLWIQ0RbLppQdMvtpccr09HrWmjhDFjxhVMZztlCWGCsCyJLSolSDlQorLWjtSZHaRZSMAIKNtzllEFiLcgKlISQSGl3SkHUuXZi8avTGF8UEa4qgxlWneXv0YVEQr+99tgZqdUffqjbVdSyBnukO/ff3ZgzSZ4dFYhsZvMCZARhrB8f6H83m1M3DW0oGgg0ZDAWQwZn3ecSpevqRBPRw90ipe5pdG3Vm2/COnHROkTGO1Il22MzGiDOFO/eY0BKfHqMGMTBwnH6CW6yZ/Qw0qlud7Jife+MY/acP6boKiJK+/uZh3cIFhFJpcdENH/68Jnzb1m40DiJNNuU62rWwlD9Jy4ACPvVQRbihcQh2xI28+dAXC39Syu2sAcgRixgJNg6CulvdPR3cRmCfF68mFwR4Thw21dnTLzxOyfMaZ3IDrm93UYIwqSERCBsQWQAcT0xj98WINdDoGwFyrgQSsEiCRbjn6koYD/cWFhrenrceWMK9fdOmPXupeOKTiGiD3KPWxg23VSd/WWCt1MiX4476tZHt+6c+MauXUCkwECFAG3ByjJE+yqkYL8xgUWDxUIcESiHHFIyJIYjI8whYWjxFN3UD1goaLLstSVpf4sFh7Ue4TghYdGW2TCMk9337C8EJYAhBwRGJOV9nrJ6T900gH1oA/CAiLzxiUkTfvfw+x8UPdncguYUATrswmFikAJ5R5JnFE/QgBi/vGd/263PdSqBSpM1rrJAgidolysOn8RXzzpi5YmMy4lo78BzMfQIE7RUirBTW/uj68rL/3Da1HE3P70+77I/tfeGGzsTaBNBb28fQG6moPUmWcFCA6QBYwjtvUZSbngw+oENwqlkmmyyV1nrUFbgmc1ZNm0B46ZdG4oYUH5/3aB3jgUBp2pxyHalYUEEkxjAkwEWBnCBRE/IkOhQprDcj8Sp5KqqKm5oaHi7tHTOJ0rnnnTale0dtz6+cduU1WnRb3f2obO314VieDcIFJFoMFzHA2FMXrlnUxbpNMGQ6FjYmVPMfGa0CJdMnbJ+cVH+DUT0+4BPHMipfnRti8jxba4787dbtpzWkUyf3JHE4j7rKmslu2OD/I3hbAESKY4UOLM0fXjR0TNO8VctagGuIDIfdPRcUL9r51Mbu3ttmLTnP+wLcjw3lYijdHFhEXSiG6cUF//T6eNLnqipqVEVFRUmOLSkDTjzya3b/rClpZOgYUWYcjsjfpsPFqKOmDKNTiW1eM64/PrhHsLvs/In7HDd61/YteuYdome2tjdgw3JXuxMp9CTFiQSBkLecSAKhHzFmBTPw7hICAviech3+xoXTxu/bk4oshnAVxp27YoWT5rkzAQ6B+2jHaKBCABV1NZS7vlMPj846SDXJXhnGr1ARK0DG3w5Zx8N9VoBMA3AQgBriejFgdfI2f1yIYD3AfQe4FpjAZxBRD8Y5nfngeRsXGt0p9PXpoHo+r4kbepsR9I60wqtLOqgtAUDY7XDWuutYVarji7IQ5H30v+knD1srdJaWIziJNGA45E+NpmECNfV1elFdXUaI/zdYfqY3n8k//4xfm8Sn/sb6jkhv+p3Bq/+vRAromtE1HB+i+z/AFiiwS595PMEAAAAAElFTkSuQmCC"
 LOGO_PRINT_B64 = "iVBORw0KGgoAAAANSUhEUgAAAIYAAAB4CAIAAAC4gx2vAAArdElEQVR42u29eZRe1XUn+tv73PtNNUtVmifEJAZj4xXAxoBjOs96jbGxeW0nuLPS0DybZy/n5dl+HWd18kzyPHstzyFuY6eh4yQPkhA7dJzGgY4xbQYDjQ0CmUFIQkhIKpVKNX/DvWf/3h/n3ltflWqSRF7jt+qsWlqlr747nX329Nu/fa6QxBIG2wYAERGR9j9J28DyOIUhC4uEpJmJiKou8YwkvfequvRDlseSRGJmJJ1z4b+Tk5N79ux58sknDx48ODg4ODw83Gq1zMw5t3LlylWrVq1ateq8884766yz+vr62sWpqst6c6oiCWoR5vHgwYN333333//93+/YsaPValUqlfXr169bt663t7ezszOO44mJiaGhocHBwX379tXrdVU988wzr7zyyve9731nnXVWccJljTl5kXjvg2bcf//9t9xyy8MPP9zX13fZZZdt3779kksuWbt27QLnGhkZeeyxx+699977779/375955577k033fTe975XVdvFvDyWKpLCbz/99NO/+7u/+8QTT2zfvv0DH/jAZZddFr6wa9euhx56aMeOHUNDQ0ePHm02m0mSdHZ2rlixoru7e9u2bW9+85svvPDC8OVnnnnmO9/5zp133jkwMPC5z33uqquuCpdYlspSRRKiJlX90pe+dPPNN1999dWf+tSnzjzzTACPPvrot771rfvvv39kZGTVqlVr1qw5/fTTV61a1dnZKSITExPDw8N79+7dt2/fkSNH4jh+05vedOONNwYZHDly5FOf+tR3vvOdG2644Wtf+1oURctSWVKAZGZpmpL84Ac/WKlU/vIv/zJI6KGHHrryyisHBgauuuqqW2+99dlnn/Xec/7x0ksv3Xnnndddd93q1asvvPDCv/3bvw2fP/DAA/39/VdffXWj0fDeh8Bhecw3spiV5Cc/+clyufz444+HP/zhH/5hrVa76aabnn/++fYDvPfe+/S40f6dwcHB3/u93+vu7r7hhhvq9XqQ1qpVq6677rricstjXpGE2Xz00UcBfP/73w9K87GPfaxcLv/gBz8oxJCm6cIL3MwKUYVPHnvssYGBgWuvvTZJEpI//elPAdxxxx3LUllEJGF23v3ud19xxRVhsu66664QcZFMkuQkps/Mghh27dpVrVa//OUvh8+vv/76Cy64IE3TZdu1iOEaGxvr6+u79dZbw0q/6KKLbrzxRpKtVutUTh0O//znP79hw4apqSkzu//++6vV6rPPPrusKAsMBVCv1+v1+tatW0VkbGxsz54973jHO049vwvpyNve9rbh4eH9+/eLyJYtW5xzQ0NDy1HVQvMWchFVDcs2iqIoio4dO6aqS0QkF4jlRGR0dNR7Xy6XAQS9ieN4ed4XEYmq1uv1HTt2iEhnZ+dll112yy23FMv8VOQhIl//+te3bdu2bt06kjt37pyamipws+Ux79wNDQ1FUXTBBReEvOGpp56KougjH/lI4RJOyO4Xvp3k1772NQA//OEPgz9/xzveAeCJJ55Y9iWLuPfDhw8H+PYP/uAPwqd/93d/JyLvfe97Dx48GD4J0W1ISmyuMSsCbjQaH/3oRwH8yZ/8Sfjk29/+NoBKpfLYY48ti2QRkRw8eHDVqlUf/vCHReQLX/hCkbqfe+65fX19f/RHf7Rv376ln3FkZOTWW2/dtGnTwMDA3/zN34QP77rrLhH56Ec/umXLlgcffHBZJIuIZHBwsFKpPPzww7fffjuAD33oQ+Pj4yTr9frnPve5zZs39/T0XHXVVV/60pfuu+++l19+eXJystAGM2s0GkNDQ48//vhtt932m7/5m6tXr+7r6/vQhz50+PDhkNl8+tOfBvD7v//74+PjAwMDDz/88LJIFhdJtVr94Q9/SPLuu+/u7+/ftGnTn/3ZnxVf+v73v3/DDTecc84569evX7t27caNG88555xLLrnk0ksvPf/887ds2bJ27dq1a9du3rz53e9+97e//e3h4eFw4D333HPRRRfVarVvfvObQR37+/uXRbLwiKYxYREze+c73/ncc8/dfPPNN91002c+85nrr7/+uuuuu+aaa6655hoAR48effbZZw8cOHDs2LGxsTHvfa1WGxgYWLly5ZlnnnnaaaeFU42Ojt5222233nrrE088cc0119xxxx1bt24tYrDlkGrxiCtoyb333kuy2WwGWe3atesjH/nI6tWru7q6Lrvssk984hPf+9739uzZU3xhFhZ56NChH/3oR5/97Ge3b9/e39/f39///ve//6GHHgpfCDHYwYMHBwYGwofLWrK4loTE0DkXPMTpp5/+jW9847Of/eyPf/zje+6557777vvud787MTFRq9VWrFhRq9VCvWRycjL4kqmpqWq1unLlyosuuui3fuu33v72t/f394cqbzhtUMSC47I85hvRHFUtEedcyCS6urquvvrqq6++GsDg4ODevXtffvnlAwcOjI+PT05OqmoURT09PRs2bNi4ceOGDRs2bNjQXsMP+WYh73Dy5Uk/YZEUCFVR4ArLPNBQLr744oXP6L0Phx8PkYW0ZlkqSxVJMO5zakyxzAuzE3x1Ua5v/3dOvCR8v16vt1qtZbbK4hhXd3f3ypUrH3rooQXWbwiWVNU555yLoij8G35xzgW1mO8MwQw+8sgjzrnNmzcvz/tCIgkw7bXXXnv77bc3Go1i7b+6QV2Q6Fe/+tUrrrhizZo1y8yuRUy/mR08eLCrq+t3fud3Apz1Klb9ChTyi1/8IoCnnnoqAGLLwe7idIi//uu/BlBgXKcumIL4QvK2224DEHL4ZXksLpJimgLGdeONN05MTBSCObnaeyHRVqv18Y9/HMBXvvKVZXmcgEjC7JO877771q1bt2bNmu9+97vt2GIBzgcofpYA2sH59r/eddddZ5111ooVK773ve8ty+OERVJI5dixY7/9279dqVS2bdv2la985aWXXppTD4IM5jRur7zyyi233PLGN76xUqlcf/31ARKexfVaHvON2fFVEQvt3r37m9/85p133jkxMXHeeee95S1vufTSS88+++yBgYHu7u4omoHEjIyMHDlyZPfu3Q8++OCDDz741FNPdXZ2vutd77rpppvOO+88tLG/l8dSOcHHU1LDDE5OTj7wwAP/8A//8JOf/OTw4cPj4+NdXV1dXV29vb21Wi1UDycnJ4eHh0dHR7u6ulavXn355Zdv3779yiuvrNVqmNkasTxOUiTtyV370j506NDevXv37t27f//+oaGhsbGxQJ/o7+/fsGHD1q1bN27cuG7dujkxruXxKoikXWPCzC5xpRcY17Jm/LOIZJbetGO6xyMumNlWujz+2UWyPP6/gx2Xx7JIlseySJZFsjxOZUSvnVvJ6pXA4hHbAlHdksOV12xk+MsacYWblmUt+WcdPzk29OTUlIs8LEtxCFCmZSACU5RTf/WK9atLZQNdLpSgW6NM7xs9coTQiEYQoiKBKpClVgI1uhRnxeUrulfKskgWslkif/vS7j/ev0c6InhlnngWvziB0Cxi98TkaZddtaZUljmAA/zFvhcf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"
 COMPANY_NAME = "Touchlight Infra Services"
-APP_VERSION = "2026.09.18"  # bump on each deploy; shown in the header to confirm which build is live
+APP_VERSION = "2026.10.25"  # bump on each deploy; shown in Admin to confirm which build is live
 
 PIN_CODE = "1323"
 
-# ── 1PH Incentive Billing (from '1Ph Incentive Tier Calculator.xlsx') ───────
-# Progressive slab structure, like a tax bracket: each slab's rate applies
-# only to the installs that fall within that band, not the whole total.
-# Scoped to 1PH only — the uploaded calculator doesn't cover 3PH, so the
-# Dashboard tile is explicitly labeled "1PH Billing" rather than guessing at
-# a 3PH rate. Update these constants (and INCENTIVE_TIER_SLABS_1PH) if the
-# approved rates change.
 # ── Local date ──────────────────────────────────────────────────────────────
 # Streamlit Community Cloud runs in UTC, so date.today() on the server lags
 # India by 5h30m: from midnight to 05:30 IST it still returns YESTERDAY. That
 # made the Map default to a day with no pins, and skewed working-days-left.
-from datetime import timezone as _tz
 IST = _tz(timedelta(hours=5, minutes=30))
 
 
@@ -264,7 +265,6 @@ def is_working_day(d) -> bool:
 
 
 def working_days_in_month(year: int, month: int) -> int:
-    import calendar
     last = calendar.monthrange(year, month)[1]
     return sum(1 for dd in range(WORK_DAY_START, min(WORK_DAY_END, last) + 1)
                if not is_holiday(date(year, month, dd)))
@@ -278,7 +278,6 @@ def working_days_remaining(today: date, last_install_date=None) -> int:
     would pair work already done with time still to come and understate the
     per-day rate needed. Falls back to counting today inclusive when the month
     has no installs recorded yet."""
-    import calendar
     last = calendar.monthrange(today.year, today.month)[1]
     end = min(WORK_DAY_END, last)
 
@@ -331,7 +330,6 @@ def month_end_forecast(daily: dict, today: date, now_time: str = None,
                        prev_daily: dict = None, day_end: str = "18:00:00") -> dict:
     """daily = {date -> installs} for this month (all types). prev_daily = the
     same for last month, used only while this month has under 3 worked days."""
-    import calendar
     last = calendar.monthrange(today.year, today.month)[1]
     w_start, w_end = WORK_DAY_START, min(WORK_DAY_END, last)
     done = int(sum(daily.values()))
@@ -342,7 +340,6 @@ def month_end_forecast(daily: dict, today: date, now_time: str = None,
     window_days = [d for d in range(w_start, min(w_end, final_upto) + 1)
                    if not is_holiday(date(today.year, today.month, d))]
     worked = [(d, final[d]) for d in window_days if final.get(d, 0) > 0]
-    idle = len(window_days) - len(worked)
 
     # Days still to come in the window. Today is still to come until it's over
     # unless installs were already uploaded for it — then it's counted as done
@@ -381,19 +378,19 @@ def month_end_forecast(daily: dict, today: date, now_time: str = None,
         return sample[lo] + (sample[hi] - sample[lo]) * (i - lo)
     slow, fast = min(q(0.25), pace), max(q(0.75), pace)
 
-    elapsed = len(window_days)
-    idle_share = 0.0
-    exp_days = days_left
     return {
-        "done": done, "forecast": int(round(done + pace * exp_days)),
-        "low": int(round(done + slow * exp_days)), "high": int(round(done + fast * exp_days)),
-        "pace": pace, "days_left": days_left, "expected_days": exp_days,
-        "idle_days": idle, "elapsed_days": elapsed, "worked_days": len(worked),
-        "idle_share": idle_share, "basis": basis, "today_final": day_over,
-        "holidays_left": holidays_left,
+        "done": done, "forecast": int(round(done + pace * days_left)),
+        "low": int(round(done + slow * days_left)), "high": int(round(done + fast * days_left)),
+        "pace": pace, "days_left": days_left, "worked_days": len(worked),
+        "basis": basis, "today_final": day_over, "holidays_left": holidays_left,
     }
 
 
+# ── Incentive billing (from '1Ph Incentive Tier Calculator.xlsx') ──────────
+# Progressive slab structure, like a tax bracket: each slab's rate applies
+# only to the installs that fall within that band, not the whole total. The
+# slabs run on the month's TOTAL installs (1PH + 3PH). Update these constants
+# (and INCENTIVE_TIER_SLABS_1PH) if the approved rates change.
 INCENTIVE_UNIT_RATE_1PH = 165.0     # Rs./install — proposed unit rate
 INCENTIVE_FLAT_ADDON_1PH = 15.0     # Rs./install — flat add-on
 INCENTIVE_TIER_SLABS_1PH = [
@@ -457,6 +454,8 @@ def calculate_billing(total_installs: int, unit_rate: float, addon: float, slab_
         "total_cost": total_cost, "blended_per_install": total_cost / total_installs,
         "slabs": slab_breakdown, "slab_total": slab_total, "tier_incentive_combined": combined,
     }
+
+
 # A stable per-PIN token, remembered in the browser (localStorage) after a
 # successful login, so Streamlit Community Cloud's app-sleep / session-reset
 # behavior doesn't force a fresh PIN entry on a device that already unlocked
@@ -524,9 +523,14 @@ def tier_colors(v, red_max, yellow_min, yellow_max):
     return (CF_GREEN_BG, CF_GREEN_FONT)
 
 
-def tier_style(v, red_max, yellow_min, yellow_max):
-    bg, fg = tier_colors(v, red_max, yellow_min, yellow_max)
+def _css(colors) -> str:
+    """(bg, font) pair -> inline CSS for pandas Styler; '' when uncoloured."""
+    bg, fg = colors
     return f"background-color:{bg};color:{fg}" if bg else ""
+
+
+def tier_style(v, red_max, yellow_min, yellow_max):
+    return _css(tier_colors(v, red_max, yellow_min, yellow_max))
 
 
 def _style_map(styler, func, subset=None):
@@ -554,8 +558,7 @@ def cell_colors_3tier(v, mid):
 
 
 def cell_style_3tier(v, mid):
-    bg, fg = cell_colors_3tier(v, mid)
-    return f"background-color:{bg};color:{fg}" if bg else ""
+    return _css(cell_colors_3tier(v, mid))
 
 
 def avg_time_colors(v):
@@ -574,8 +577,7 @@ def avg_time_colors(v):
 
 
 def avg_time_style(v):
-    bg, fg = avg_time_colors(v)
-    return f"background-color:{bg};color:{fg}" if bg else ""
+    return _css(avg_time_colors(v))
 
 
 def _is_aggregate_row(label) -> bool:
@@ -663,12 +665,41 @@ def _img_font(size: int, bold: bool = False):
     """DejaVu ships inside matplotlib, which is already a dependency — so the
     same font is available everywhere the app runs, including Streamlit Cloud."""
     from PIL import ImageFont
-    import matplotlib, os
+    import os
     name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
     try:
         return ImageFont.truetype(os.path.join(matplotlib.get_data_path(), "fonts", "ttf", name), size)
     except Exception:
         return ImageFont.load_default(size=size)
+
+
+@functools.lru_cache(maxsize=1)
+def _logo_print_bytes() -> bytes:
+    """The print logo, decoded once. A plain cache rather than st.cache_resource:
+    image exports are built on a download thread with no Streamlit context."""
+    return base64.b64decode(LOGO_PRINT_B64)
+
+
+def _draw_image_header(img, d, fs: int, heading: str, meta) -> int:
+    """Heading, logo top-right, header lines and the brand rule — identical on
+    every exported image (tables and the map). Returns the y below it."""
+    f_title, f_meta = _img_font(int(fs * 1.25), True), _img_font(int(fs * 0.9))
+    y = IMG_MARGIN
+    d.text((IMG_MARGIN, y), heading, font=f_title, fill=IMG_INK)
+    try:
+        logo = Image.open(io.BytesIO(_logo_print_bytes())).convert("RGB")
+        lh = int(fs * 2.4)
+        logo = logo.resize((int(logo.width * lh / logo.height), lh))
+        img.paste(logo, (IMG_W - IMG_MARGIN - logo.width, IMG_MARGIN - int(fs * 0.3)))
+    except Exception:
+        pass    # the logo is decoration — never fail an export over it
+    y += int(fs * 1.9)
+    for m in meta:
+        d.text((IMG_MARGIN, y), m, font=f_meta, fill=IMG_INK_SOFT)
+        y += int(fs * 1.35)
+    y += int(fs * 0.4)
+    d.line([(IMG_MARGIN, y), (IMG_W - IMG_MARGIN, y)], fill=IMG_BRAND, width=max(2, fs // 8))
+    return y + int(fs * 0.6)
 
 
 def _hex_to_rgb(h):
@@ -739,27 +770,8 @@ def dataframe_to_png_bytes(df: pd.DataFrame, color_grid=None, title: str = None)
 
     img = Image.new("RGB", (IMG_W, canvas_h), (255, 255, 255))
     d = ImageDraw.Draw(img)
-    f_title, f_meta = _img_font(int(fs * 1.25), True), _img_font(int(fs * 0.9))
     f_head, f_cell, f_cell_b = _img_font(fs, True), _img_font(fs), _img_font(fs, True)
-
-    # -- Header block --
-    y = IMG_MARGIN
-    d.text((IMG_MARGIN, y), heading, font=f_title, fill=IMG_INK)
-    # Brand logo, top-right, sized to the heading
-    try:
-        logo = Image.open(io.BytesIO(base64.b64decode(LOGO_PRINT_B64))).convert("RGB")
-        lh = int(fs * 2.4)
-        logo = logo.resize((int(logo.width * lh / logo.height), lh))
-        img.paste(logo, (IMG_W - IMG_MARGIN - logo.width, IMG_MARGIN - int(fs * 0.3)))
-    except Exception:
-        pass
-    y += int(fs * 1.9)
-    for m in meta:
-        d.text((IMG_MARGIN, y), m, font=f_meta, fill=IMG_INK_SOFT)
-        y += int(fs * 1.35)
-    y += int(fs * 0.4)
-    d.line([(IMG_MARGIN, y), (IMG_W - IMG_MARGIN, y)], fill=IMG_BRAND, width=max(2, fs // 8))
-    y += int(fs * 0.6)
+    y = _draw_image_header(img, d, fs, heading, meta)
 
     # -- Table --
     x0 = IMG_MARGIN
@@ -810,7 +822,6 @@ def dataframe_to_png_bytes(df: pd.DataFrame, color_grid=None, title: str = None)
     return buf.getvalue()
 
 
-import threading
 _RENDER_LOCK = threading.Lock()   # the Map PNG still uses matplotlib, whose pyplot state isn't thread-safe
 
 
@@ -826,7 +837,7 @@ def lazy_download_button(label: str, make_bytes, file_name: str, mime: str, key:
         with _RENDER_LOCK:
             return make_bytes()
     st.download_button(label, data=_build, file_name=file_name, mime=mime,
-                       use_container_width=True, key=key, on_click="ignore")
+                       width="stretch", key=key, on_click="ignore")
 
 
 def download_image_button(df: pd.DataFrame, file_name: str, key: str, color_grid=None, title: str = None, label: str = "📷 Download as Image"):
@@ -940,7 +951,6 @@ def build_basemap_snapshot_png(lats, lons, title: str = None, point_labels=None)
     — a static equivalent of what the interactive Map tab shows live. Falls
     back to the plain scatter-only style (build_map_snapshot_png) if tiles
     can't be fetched (e.g. no internet access from wherever this runs)."""
-    import requests
     from PIL import Image, ImageDraw, ImageFont
 
     lats = list(lats)
@@ -1001,14 +1011,9 @@ def build_basemap_snapshot_png(lats, lons, title: str = None, point_labels=None)
 
         for tx in range(tile_x1, tile_x2 + 1):
             for ty in range(tile_y1, tile_y2 + 1):
-                try:
-                    resp = requests.get(TILE_URL_TEMPLATE.format(z=zoom, x=tx, y=ty), timeout=6,
-                                         headers={"User-Agent": "SmartMeterFieldTracker/1.0"})
-                    if resp.status_code == 200:
-                        tile_img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-                        composite.paste(tile_img, ((tx - tile_x1) * TILE_SIZE, (ty - tile_y1) * TILE_SIZE))
-                except Exception:
-                    continue  # leave that tile blank rather than failing the whole snapshot
+                tile_img = _fetch_tile(zoom, tx, ty)   # None: that tile stays blank
+                if tile_img is not None:
+                    composite.paste(tile_img, ((tx - tile_x1) * TILE_SIZE, (ty - tile_y1) * TILE_SIZE))
 
         # Crop to the exact padded bbox (not the full tile grid).
         origin_x, origin_y = tile_x1 * TILE_SIZE, tile_y1 * TILE_SIZE
@@ -1102,7 +1107,7 @@ def build_map_export_png(pins: pd.DataFrame, heading: str, meta_lines) -> bytes:
         meta.append(f"{len(strays)} pin(s) far from the rest, not shown — check location: " + "; ".join(bits) + more)
 
     fs = 26
-    f_title, f_meta = _img_font(int(fs * 1.25), True), _img_font(int(fs * 0.9))
+    f_meta = _img_font(int(fs * 0.9))
     map_w = IMG_W - 2 * IMG_MARGIN
 
     canvas = Image.new("RGB", (IMG_W, IMG_H_MIN), (255, 255, 255))
@@ -1124,22 +1129,7 @@ def build_map_export_png(pins: pd.DataFrame, heading: str, meta_lines) -> bytes:
     meta = wrapped
 
     # -- Header (identical treatment to the table images) --
-    y = IMG_MARGIN
-    d.text((IMG_MARGIN, y), heading, font=f_title, fill=IMG_INK)
-    try:
-        logo = Image.open(io.BytesIO(base64.b64decode(LOGO_PRINT_B64))).convert("RGB")
-        lh = int(fs * 2.4)
-        logo = logo.resize((int(logo.width * lh / logo.height), lh))
-        canvas.paste(logo, (IMG_W - IMG_MARGIN - logo.width, IMG_MARGIN - int(fs * 0.3)))
-    except Exception:
-        pass
-    y += int(fs * 1.9)
-    for m in meta:
-        d.text((IMG_MARGIN, y), m, font=f_meta, fill=IMG_INK_SOFT)
-        y += int(fs * 1.35)
-    y += int(fs * 0.4)
-    d.line([(IMG_MARGIN, y), (IMG_W - IMG_MARGIN, y)], fill=IMG_BRAND, width=3)
-    map_top = y + int(fs * 0.6)
+    map_top = _draw_image_header(canvas, d, fs, heading, meta)
     map_h = IMG_H_MIN - IMG_MARGIN - map_top
 
     if not keep_lat:
@@ -1254,16 +1244,12 @@ def render_hourly_heatmap(df: pd.DataFrame, hour_cols, color_grid):
     fig_h = max(2.0, n_rows * 0.5 + 1.2)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    def hex_to_rgb(h):
-        h = h.lstrip("#")
-        return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
-
     img = np.ones((n_rows, len(cols_to_plot), 3))
     for i in range(n_rows):
         for j, col in enumerate(cols_to_plot):
             col_idx = df.columns.get_loc(col)
             bg, _ = color_grid[i][col_idx]
-            img[i, j] = hex_to_rgb(bg) if bg else (1, 1, 1)
+            img[i, j] = tuple(c / 255 for c in _hex_to_rgb(bg)) if bg else (1, 1, 1)
 
     ax.imshow(img, aspect="auto")
     ax.set_xticks(range(len(cols_to_plot)))
@@ -1280,7 +1266,7 @@ def render_hourly_heatmap(df: pd.DataFrame, hour_cols, color_grid):
     for spine in ax.spines.values():
         spine.set_visible(False)
     fig.tight_layout()
-    st.pyplot(fig, use_container_width=True)
+    st.pyplot(fig, width="stretch")
     plt.close(fig)
 
 
@@ -1353,7 +1339,7 @@ def tab_action_bar(key: str, show_upload: bool = False):
     widths = [1.15, 1.6, 6] if show_upload else [1.15, 7.6]
     cols = st.columns(widths)
     with cols[0]:
-        if st.button("Refresh", use_container_width=True, key=f"refresh_{key}"):
+        if st.button("Refresh", width="stretch", key=f"refresh_{key}"):
             # Nothing to confirm, so nothing should be carried into the
             # reloaded page — this is what flooded it with notices.
             st.session_state.pop("_carry_messages", None)
@@ -1362,7 +1348,7 @@ def tab_action_bar(key: str, show_upload: bool = False):
             st.rerun()
     if show_upload:
         with cols[1]:
-            if st.button("Update Installs", use_container_width=True, key=f"push_{key}"):
+            if st.button("Update Installs", width="stretch", key=f"push_{key}"):
                 st.session_state["trigger_analytics_push"] = True
 
 
@@ -1545,15 +1531,11 @@ st.markdown("""
        Kept pointing at tokens so nothing carries an off-system value. */
     --accent: var(--brand-500);
     --accent-dark: var(--brand-700);
-    --accent-soft: var(--brand-050);
     --ink: var(--ink-900);
     --ink-soft: var(--ink-600);
     --bg: var(--surface-000);
     --card-border: var(--hairline);
-    --surface: var(--surface-100);
-    --stripe: var(--surface-000);
     --radius: var(--radius-md);
-    --gap: var(--space-5);
 }
 
 html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -1568,12 +1550,7 @@ html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, 'Se
     display:flex; align-items:center; gap:12px;
     box-shadow: 0 1px 2px rgba(16,21,31,0.04);
 }
-.top-banner .icon-badge {
-    width:40px; height:40px; border-radius:var(--radius-md); background:var(--accent-soft);
-    display:flex; align-items:center; justify-content:center; font-size:1.3rem; flex-shrink:0;
-}
 .top-banner .t { font-size:1.15rem; font-weight:800; color:var(--ink); letter-spacing:-.2px; margin:0; }
-.top-banner .s { font-size:.78rem; color:var(--ink-soft); margin:0; font-weight:500; }
 
 /* Segmented-control style tabs, closer to Groww/Kite bottom-nav feel */
 .stTabs [data-baseweb="tab-list"] {
@@ -2004,17 +1981,22 @@ def _batched(worksheet: str):
     return data.get(worksheet)
 
 
+def _note_missing_sheet(worksheet: str) -> pd.DataFrame:
+    """Say once per session that a tab doesn't exist; read it as empty."""
+    missing = st.session_state.setdefault("_missing_sheets", set())
+    if worksheet not in missing:
+        missing.add(worksheet)
+        st.toast(f"Sheet tab '{worksheet}' not found — create it in Google Sheets.", icon="⚠️")
+    return pd.DataFrame()
+
+
 def get_data(worksheet: str, retries: int = 3) -> pd.DataFrame:
     version = _sheet_version(worksheet)
 
     batched = _batched(worksheet)
     if batched is not None:
         if isinstance(batched, str) and batched == _MISSING:
-            missing = st.session_state.setdefault("_missing_sheets", set())
-            if worksheet not in missing:
-                missing.add(worksheet)
-                st.toast(f"Sheet tab '{worksheet}' not found — create it in Google Sheets.", icon="⚠️")
-            return pd.DataFrame()
+            return _note_missing_sheet(worksheet)
         return batched.copy()
 
     if _rate_limit_cooloff_active():
@@ -2023,12 +2005,7 @@ def get_data(worksheet: str, retries: int = 3) -> pd.DataFrame:
         try:
             result = _read_worksheet_cached(worksheet, version)
             if isinstance(result, str) and result == _MISSING:
-                # Report once per session, not on every rerun.
-                missing = st.session_state.setdefault("_missing_sheets", set())
-                if worksheet not in missing:
-                    missing.add(worksheet)
-                    st.toast(f"Sheet tab '{worksheet}' not found — create it in Google Sheets.", icon="⚠️")
-                return pd.DataFrame()
+                return _note_missing_sheet(worksheet)
             return result.copy()
         except Exception as e:
             if _is_rate_limited(e):
@@ -2213,6 +2190,41 @@ def extract_detail_fields(ws, row: int, optional_map: dict) -> dict:
     return out
 
 
+def parse_install_rows(ws, header_row: int, col_map: dict, extra_map: dict, blank_location: str = "Unspecified"):
+    """Install records from an MDM export sheet, one per row with a TL_ login,
+    a date and a time. `col_map` holds the required columns (find_header_row),
+    `extra_map` the optional ones (find_optional_cols) — Section and New Meter
+    Type are read from whichever has them. Shared by every upload (Installs
+    bulk and legacy, Map legacy, Analytics, Undo) so they can't drift apart.
+    Returns (records, rows skipped for a non-TL_ login)."""
+    login_col = col_map["Installer LoginID"]
+    date_col, time_col = col_map["Installation Date"], col_map["Installation Time"]
+    sec_col = col_map.get("Section") or extra_map.get("Section")
+    type_col = col_map.get("New Meter Type") or extra_map.get("New Meter Type")
+    records, skipped_non_tl = [], 0
+    for r in range(header_row + 1, ws.max_row + 1):
+        raw_installer = ws.cell(row=r, column=login_col).value
+        if raw_installer is None or str(raw_installer).strip() == "":
+            continue
+        if not is_valid_installer_id(raw_installer):
+            skipped_non_tl += 1
+            continue
+        d = normalize_date_val(ws.cell(row=r, column=date_col).value)
+        t = normalize_time_val(ws.cell(row=r, column=time_col).value)
+        if d is None or t is None:
+            continue
+        section = ws.cell(row=r, column=sec_col).value if sec_col else None
+        mtype = ws.cell(row=r, column=type_col).value if type_col else None
+        rec = {
+            "date": d, "time": t, "installer_id": str(raw_installer).strip(),
+            "location": str(section).strip() if section else blank_location,
+            "meter_type": str(mtype).strip() if mtype else "",
+        }
+        rec.update(extract_detail_fields(ws, r, extra_map))
+        records.append(rec)
+    return records, skipped_non_tl
+
+
 def clean_id_value(v) -> str:
     """Strip the trailing ".0" Google Sheets adds to numeric cells, so meter and
     consumer numbers read as 643612600001 rather than 643612600001.0. Also
@@ -2237,7 +2249,6 @@ def clean_id_value(v) -> str:
 # counted as 1PH AND 3PH: the Dashboard (which adds qty_1ph + qty_3ph) came out
 # higher than Analytics (which counts rows), and 1PH billing was inflated.
 # This reads the PHASE token only and returns exactly one answer per install.
-import re as _re
 _PH_3 = _re.compile(r"(?<![0-9])3\s*[-_ ]?\s*(?:PH|PHASE|P\b|Ø)|\bTHREE[\s_-]*PHASE\b|\bTHREE\b|\bLTCT\b|\bPOLY[\s_-]*PHASE\b")
 _PH_1 = _re.compile(r"(?<![0-9])1\s*[-_ ]?\s*(?:PH|PHASE|P\b|Ø)|\bSINGLE[\s_-]*PHASE\b|\bSINGLE\b")
 
@@ -2290,6 +2301,14 @@ def extract_section_code(sno) -> str:
     if len(digits) < 7:
         return "Unclassified"
     return digits[5:7]
+
+
+def clean_id_columns(df: pd.DataFrame, cols=("SNO", "Old Meter No", "New Meter No")) -> pd.DataFrame:
+    """clean_id_value() on whichever of these display columns the frame has."""
+    for c in cols:
+        if c in df.columns:
+            df[c] = df[c].apply(clean_id_value)
+    return df
 
 
 def section_codes(series: pd.Series) -> pd.Series:
@@ -2437,9 +2456,9 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     text_x = pdf.l_margin
     try:
         logo_h = 13.0
-        logo_img = Image.open(io.BytesIO(base64.b64decode(LOGO_PRINT_B64)))
+        logo_img = Image.open(io.BytesIO(_logo_print_bytes()))
         logo_w = logo_h * (logo_img.width / logo_img.height)
-        pdf.image(io.BytesIO(base64.b64decode(LOGO_PRINT_B64)), x=pdf.l_margin, y=header_top, h=logo_h)
+        pdf.image(io.BytesIO(_logo_print_bytes()), x=pdf.l_margin, y=header_top, h=logo_h)
         text_x = pdf.l_margin + logo_w + 5
     except Exception:
         pass  # logo is decoration — never block the report over it
@@ -2475,7 +2494,6 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(16, 21, 31)
     pdf.cell(0, 6, "Installation Quantities By Date & Section Code", ln=1)
-    col_labels = ["Date"] + section_codes_sorted + ["1PH", "3PH", "Total"]
     avail_w = pdf.w - pdf.l_margin - pdf.r_margin
     row_h = 6.5
 
@@ -2960,7 +2978,6 @@ WORK_DAY_END = max(WORK_DAY_START, min(31, int(get_setting("work_day_end", DEFAU
 
 def load_holidays() -> dict:
     """Settings key "holidays": JSON {"YYYY-MM-DD": "name"}."""
-    import json as _json
     raw = get_setting("holidays", "")
     try:
         data = _json.loads(raw) if raw else {}
@@ -2981,18 +2998,16 @@ HOLIDAYS = load_holidays()
 #              differently; leave the 3PH rate at 0 if it isn't.
 EXPENSE_COLS = ["expense_id", "month", "cost_type", "category", "item", "vehicle_reg",
                 "amount", "rate_1ph", "rate_3ph", "recurring", "site"]
-# A fixed cost belongs to one site (a Section), or is shared. Shared costs are
-# split equally across the sites active that month. Expenses entered before
-# sites existed have no site and are treated as shared.
-SHARED_SITE = "Shared"
 # Where a fixed expense belongs (the Expenses sheet's `site` column):
 #   a site name  -> that site's own cost
-#   "All sites"  -> chosen by you to be shared; split across sites by installs
+#   "All sites"  -> shared; split equally among the sites with more than
+#                   SHARED_MIN_INSTALLS installs that month (site_cost_breakdown)
 #   "General"    -> not assigned to anywhere yet. Entries saved before this
 #                   (blank, or the old automatic "Shared") start here, so every
 #                   shared cost is one you have assigned yourself.
 ALL_SITES = "All sites"
 GENERAL_SITE = "General"
+SHARED_SITE = "Shared"    # the old automatic value — read as General
 
 
 def expense_bucket(v) -> str:
@@ -3003,6 +3018,8 @@ def expense_bucket(v) -> str:
     if t == ALL_SITES:
         return ALL_SITES
     return t
+
+
 VEHICLE_COLS = ["reg_no", "description", "is_active"]
 
 # ── Stock: received, installed, returned ───────────────────────────────────
@@ -3079,17 +3096,20 @@ def _loc_key(name) -> str:
     return " ".join(_re.sub(r"[^A-Z0-9]+", " ", str(name).upper()).split())
 
 
-def load_location_aliases() -> dict:
-    """Spellings mapped to a location in the Store tab: {key of the spelling ->
-    location name}. Settings key "location_aliases" (JSON). A spelling mapped
-    to itself means "keep it as its own name"."""
-    import json as _json
-    raw = get_setting("location_aliases", "")
+def _raw_location_aliases() -> dict:
+    """The Store tab's spelling -> location mappings exactly as saved
+    (Settings key "location_aliases", JSON)."""
     try:
-        data = _json.loads(raw) if raw else {}
-        return {_loc_key(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+        data = _json.loads(get_setting("location_aliases", "") or "{}")
     except Exception:
         return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_location_aliases() -> dict:
+    """Spellings mapped to a location in the Store tab: {key of the spelling ->
+    location name}. A spelling mapped to itself means "keep it as its own name"."""
+    return {_loc_key(k): str(v) for k, v in _raw_location_aliases().items()}
 
 
 def _canonical_locations(*series) -> dict:
@@ -4244,9 +4264,8 @@ HR_ROLE_COLS = ["designation", "duties", "schedule"]
 HR_GUARDED = ("account_no", "pf_no", "joining_date")   # kept as text by the '#' guard
 
 
-@st.cache_resource(show_spinner=False)
 def hr_logo_bytes() -> bytes:
-    return base64.b64decode(LOGO_PRINT_B64)
+    return _logo_print_bytes()
 
 
 @st.cache_resource(show_spinner=False)
@@ -4447,7 +4466,6 @@ def render_daily_calendar(mkey: str):
     breakup for whichever day is tapped.
 
     A fragment: tapping a day reruns only this block, not all eight tabs."""
-    import calendar as _cal
     counts = month_daily_counts(mkey)
     if not counts:
         st.info(f"No installs recorded in {month_label(mkey)}.")
@@ -4511,54 +4529,54 @@ def render_daily_calendar(mkey: str):
     # CSS below keys off this container, so only the calendar's rows are
     # forced to stay 7-across — every other st.columns in the app keeps
     # Streamlit's normal stacking on a phone.
-    for wk, week in enumerate(_cal.Calendar(firstweekday=0).monthdayscalendar(y, m)):
-      with st.container(key=f"calweek_{mkey}_{wk}"):
-        cols = st.columns(7, gap="small")
-        for col, dayno in zip(cols, week):
-            with col:
-                if dayno == 0:
-                    st.markdown("<div style='height:1px;'></div>", unsafe_allow_html=True)
-                    continue
-                dstr = f"{y:04d}-{m:02d}-{dayno:02d}"
-                n = int(counts.get(dstr, 0))
-                # A day with no installs isn't clickable — there is nothing to
-                # break up, and a dead button invites a pointless rerun.
-                if n == 0:
-                    # Styled like a day cell but not a button: there is no
-                    # breakup to show for a day with nothing on it. A day still
-                    # in the future isn't a shortfall, so it stays neutral —
-                    # only days up to today count as a red zero.
-                    # Today isn't a shortfall yet either — its upload may still be to come.
-                    future = date(y, m, dayno) >= today_ist()
-                    # A declared holiday, or a day outside the working window,
-                    # isn't a shortfall either: shown neutral, holidays labelled.
-                    _hol = HOLIDAYS.get(dstr)
-                    off = bool(_hol) or not (WORK_DAY_START <= dayno <= WORK_DAY_END)
-                    neutral = future or off
-                    bg = "var(--surface-100)" if off else ("var(--surface-000)" if future else CF_RED_BG)
-                    fg = "var(--ink-600)" if neutral else CF_RED_FONT
-                    mark = "Hol" if _hol else "-"
-                    st.markdown(
-                        f'<div class="cal-empty" title="{_hol or ""}" style="text-align:center;border-radius:var(--radius-sm);'
-                        f'border:1px solid var(--hairline);background:{bg};color:{fg};'
-                        f'padding:7px 2px;line-height:1.15;">'
-                        f'<div style="font-size:10.5px;font-weight:700;opacity:.75;">{dayno}</div>'
-                        f'<div style="font-size:{"11px" if _hol else "15px"};font-weight:800;'
-                        + ('opacity:.45;' if neutral and not _hol else '') +
-                        f'">{mark}</div></div>',
-                        unsafe_allow_html=True)
-                    continue
-                # Label is the count only; the day number comes from the CSS
-                # above it (see the ::before rule).
-                if st.button(f"{n}", key=f"cal_{dstr}", use_container_width=True,
-                             type=("primary" if dstr == picked else "secondary"),
-                             help=f"{n} install(s) on {dstr}"):
-                    # No explicit rerun: a button inside a fragment already
-                    # reruns the fragment, and st.rerun(scope="fragment") is
-                    # invalid on a full-script run, which is when the first
-                    # click happens.
-                    st.session_state["cal_picked_day"] = dstr
-                    picked = dstr
+    for wk, week in enumerate(calendar.Calendar(firstweekday=0).monthdayscalendar(y, m)):
+        with st.container(key=f"calweek_{mkey}_{wk}"):
+            cols = st.columns(7, gap="small")
+            for col, dayno in zip(cols, week):
+                with col:
+                    if dayno == 0:
+                        st.markdown("<div style='height:1px;'></div>", unsafe_allow_html=True)
+                        continue
+                    dstr = f"{y:04d}-{m:02d}-{dayno:02d}"
+                    n = int(counts.get(dstr, 0))
+                    # A day with no installs isn't clickable — there is nothing to
+                    # break up, and a dead button invites a pointless rerun.
+                    if n == 0:
+                        # Styled like a day cell but not a button: there is no
+                        # breakup to show for a day with nothing on it. A day still
+                        # in the future isn't a shortfall, so it stays neutral —
+                        # only days up to today count as a red zero.
+                        # Today isn't a shortfall yet either — its upload may still be to come.
+                        future = date(y, m, dayno) >= today_ist()
+                        # A declared holiday, or a day outside the working window,
+                        # isn't a shortfall either: shown neutral, holidays labelled.
+                        _hol = HOLIDAYS.get(dstr)
+                        off = bool(_hol) or not (WORK_DAY_START <= dayno <= WORK_DAY_END)
+                        neutral = future or off
+                        bg = "var(--surface-100)" if off else ("var(--surface-000)" if future else CF_RED_BG)
+                        fg = "var(--ink-600)" if neutral else CF_RED_FONT
+                        mark = "Hol" if _hol else "-"
+                        st.markdown(
+                            f'<div class="cal-empty" title="{_hol or ""}" style="text-align:center;border-radius:var(--radius-sm);'
+                            f'border:1px solid var(--hairline);background:{bg};color:{fg};'
+                            f'padding:7px 2px;line-height:1.15;">'
+                            f'<div style="font-size:10.5px;font-weight:700;opacity:.75;">{dayno}</div>'
+                            f'<div style="font-size:{"11px" if _hol else "15px"};font-weight:800;'
+                            + ('opacity:.45;' if neutral and not _hol else '') +
+                            f'">{mark}</div></div>',
+                            unsafe_allow_html=True)
+                        continue
+                    # Label is the count only; the day number comes from the CSS
+                    # above it (see the ::before rule).
+                    if st.button(f"{n}", key=f"cal_{dstr}", width="stretch",
+                                 type=("primary" if dstr == picked else "secondary"),
+                                 help=f"{n} install(s) on {dstr}"):
+                        # No explicit rerun: a button inside a fragment already
+                        # reruns the fragment, and st.rerun(scope="fragment") is
+                        # invalid on a full-script run, which is when the first
+                        # click happens.
+                        st.session_state["cal_picked_day"] = dstr
+                        picked = dstr
 
     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
 
@@ -4570,10 +4588,10 @@ def render_daily_calendar(mkey: str):
     if worked:
         hi_day = max(worked, key=worked.get)
         lo_day = min(worked, key=worked.get)
-        last_day_n = _cal.monthrange(y, m)[1]
+        last_day_n = calendar.monthrange(y, m)[1]
         # Working days that had no installs — declared holidays and days outside
         # the working window aren't counted; they were never meant to be worked.
-        holidays = [d for d in range(1, last_day_n + 1)
+        missed_days = [d for d in range(1, last_day_n + 1)
                     if date(y, m, d) <= today_ist()
                     and is_working_day(date(y, m, d))
                     and int(counts.get(f"{y:04d}-{m:02d}-{d:02d}", 0)) == 0]
@@ -4582,8 +4600,8 @@ def render_daily_calendar(mkey: str):
         render_stat_tiles([
             ("chart", f"{worked[hi_day]:,}", "Max", fmt_day(hi_day), "normal"),
             ("gauge", f"{worked[lo_day]:,}", "Min", fmt_day(lo_day), "normal"),
-            ("calendar", f"{len(holidays)}", "Missed days", "no installs",
-             "danger" if holidays else "normal"),
+            ("calendar", f"{len(missed_days)}", "Missed days", "no installs",
+             "danger" if missed_days else "normal"),
             ("calendar", f"{_declared}", "Holidays", "declared", "normal"),
         ])
 
@@ -4592,13 +4610,13 @@ def render_daily_calendar(mkey: str):
     if breakup.empty:
         st.info("No records for that date.")
     else:
-        st.dataframe(breakup, use_container_width=True, hide_index=True,
+        st.dataframe(breakup, width="stretch", hide_index=True,
                      height=dataframe_height(len(breakup)))
         download_image_button(breakup, f"Sections_{picked}.png", key="dl_img_cal_day",
                               title=f"Section-Wise Installs — {picked}")
 
     # Chart of the same daily totals, across the whole month.
-    last_day = _cal.monthrange(y, m)[1]
+    last_day = calendar.monthrange(y, m)[1]
     series = pd.DataFrame(
         {"Installs": [int(counts.get(f"{y:04d}-{m:02d}-{d:02d}", 0)) for d in range(1, last_day + 1)]},
         index=pd.Index(range(1, last_day + 1), name=f"Day of {month_label(mkey)}"))
@@ -4621,23 +4639,6 @@ GST_PCT = 0.09
 PRIMARY_SPLIT = 0.50                  # Sandeep's share of the Sandeep+Raghu pool
 PARTNERS = ("Sandeep", "Raghu", "Kiran", "Manju")   # first two are primary
 INCENTIVE_TEMPLATE_B64 = "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"
-
-
-def month_installs_1ph(mkey: str) -> int:
-    """1PH installs for a calendar month, counted from the install log — the
-    same ledger the Dashboard and the Customer Report use."""
-    df = install_log_prepared()
-    if df.empty or not has_col(df, "date", "meter_type"):
-        return 0
-    return int((df.loc[df["_month"] == mkey, "_phase"] == "1PH").sum())
-
-
-def month_installs_3ph(mkey: str) -> int:
-    """3PH installs for a calendar month, from the install log."""
-    df = install_log_prepared()
-    if df.empty or not has_col(df, "date", "meter_type"):
-        return 0
-    return int((df.loc[df["_month"] == mkey, "_phase"] == "3PH").sum())
 
 
 def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: float,
@@ -4703,11 +4704,11 @@ def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
     calc = wb["1Ph Incentive Calc"]
     calc["B5"] = INCENTIVE_UNIT_RATE_1PH          # new unit rate
     calc["B6"] = INCENTIVE_FLAT_ADDON_1PH         # survey add-on
-    calc["B7"] = installs                         # <- from the install log
+    calc["B7"] = installs                         # <- from Installations (as the Expenses tab)
     calc["E5"] = old_rate
     calc["E6"] = INCENTIVE_FLAT_ADDON_1PH
     calc["E7"] = installs
-    calc["A3"] = f"Month: {month_label(mkey)}  |  1PH installs from the install log: {installs:,}"
+    calc["A3"] = f"Month: {month_label(mkey)}  |  1PH installs (Installations): {installs:,}"
 
     # ── 3PH: its own calculator sheet (same layout, same slabs) ──────────
     calc3 = wb.copy_worksheet(calc)
@@ -4721,7 +4722,7 @@ def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
     for ref in ("A1", "A5"):
         if isinstance(calc3[ref].value, str):
             calc3[ref] = calc3[ref].value.replace("1Ph", "3Ph").replace("1PH", "3PH")
-    calc3["A3"] = f"Month: {month_label(mkey)}  |  3PH installs from the install log: {installs_3ph:,}"
+    calc3["A3"] = f"Month: {month_label(mkey)}  |  3PH installs (Installations): {installs_3ph:,}"
 
     # ── Slabs on the month's TOTAL installs (1PH + 3PH) ──────────────────
     # The incentive is earned on all installs whatever their type. Each sheet
@@ -4860,9 +4861,9 @@ def load_liaisoning() -> pd.DataFrame:
     df["phone"] = df["phone"].apply(lambda v: v[:-2] if v.endswith(".0") else v)
     # Spacing tidied ("PADAMATI.  RAJESH " -> "PADAMATI. RAJESH") so one person
     # never shows up as two linemen.
-    df["lineman"] = df["lineman"].apply(lambda v: " ".join(_re.sub(r"\.(?=\S)", ". ", v).split()) if v not in ("nan", "None") else "")
+    df["lineman"] = df["lineman"].apply(clean_lineman_name)
     # One spelling per lineman and per section, so neither is split in two.
-    df["lineman"] = _one_spelling(df["lineman"], lambda v: _re.sub(r"[^A-Z0-9]", "", str(v).upper()))
+    df["lineman"] = _one_spelling(df["lineman"], lineman_key)
     df["location"] = _one_spelling(df["location"], section_key)
     return df
 
@@ -4922,7 +4923,6 @@ def liaisoning_table(mkey: str) -> pd.DataFrame:
 # back blank — and are rewritten in the new layout once, keeping every row.
 LIAISONING_EXTRA_COLS = ["designation", "phone"]
 LIAISONING_ALL_COLS = LIAISONING_COLS + LIAISONING_EXTRA_COLS
-import difflib as _difflib
 
 
 def clean_lineman_name(name) -> str:
@@ -5063,7 +5063,7 @@ def parse_staff_rows(rows) -> pd.DataFrame:
     if hi is None:
         return pd.DataFrame(columns=["name", "designation", "phone", "codes", "skipped"])
     for row in rows[hi + 1:]:
-        def cell(k):
+        def cell(k, row=row):
             j = cols.get(k)
             return row[j] if j is not None and j < len(row) else None
         nm = clean_lineman_name(cell("name"))
@@ -5165,19 +5165,23 @@ VARIABLE_RATE_DEFAULTS = {"Installer Payment": {"1PH": 0.0, "3PH": 80.0},
 SHARED_MIN_INSTALLS = 50
 
 
+def category_rates(var_rows: pd.DataFrame, cat: str):
+    """(rate per 1PH, rate per 3PH) for one variable category in a month: the
+    saved rate, or the standard rate when none is saved for that month."""
+    sub = var_rows[var_rows["category"] == cat] if not var_rows.empty else var_rows
+    if sub.empty:
+        std = VARIABLE_RATE_DEFAULTS.get(cat, {})
+        return std.get("1PH", 0.0), std.get("3PH", 0.0)
+    return (float(pd.to_numeric(sub["rate_1ph"], errors="coerce").fillna(0).sum()),
+            float(pd.to_numeric(sub["rate_3ph"], errors="coerce").fillna(0).sum()))
+
+
 def effective_variable_rates(var_rows: pd.DataFrame):
-    """(rate per 1PH, rate per 3PH) for a month: each category's saved rate,
-    or its standard rate when none is saved for that month."""
-    r1 = r3 = 0.0
-    for cat in EXPENSE_VARIABLE_CATEGORIES:
-        sub = var_rows[var_rows["category"] == cat] if not var_rows.empty else var_rows
-        if sub is not None and not sub.empty:
-            r1 += float(pd.to_numeric(sub["rate_1ph"], errors="coerce").fillna(0).sum())
-            r3 += float(pd.to_numeric(sub["rate_3ph"], errors="coerce").fillna(0).sum())
-        else:
-            r1 += VARIABLE_RATE_DEFAULTS.get(cat, {}).get("1PH", 0.0)
-            r3 += VARIABLE_RATE_DEFAULTS.get(cat, {}).get("3PH", 0.0)
-    return r1, r3
+    """(rate per 1PH, rate per 3PH) for a month, all variable categories together."""
+    rates = [category_rates(var_rows, cat) for cat in EXPENSE_VARIABLE_CATEGORIES]
+    return sum(r for r, _ in rates), sum(r for _, r in rates)
+
+
 # Costs that belong to a particular vehicle (chosen from the Vehicles list).
 EXPENSE_VEHICLE_CATEGORIES = {"Vehicle Rent", "Vehicle EMI", "Vehicle Maintenance", "Vehicle Permits", "Diesel"}
 # Costs that are usually the same every month — pre-ticked as "repeats monthly"
@@ -5270,11 +5274,7 @@ def expense_summary(df_exp: pd.DataFrame, mkey: str, n_1ph: int, n_3ph: int) -> 
         if amt:
             by_cat.append(("Fixed", cat, amt))
     for cat in EXPENSE_VARIABLE_CATEGORIES:
-        sub = var[var["category"] == cat]
-        if sub.empty:     # no rate saved this month: the standard rate
-            c1, c3 = VARIABLE_RATE_DEFAULTS.get(cat, {}).get("1PH", 0.0), VARIABLE_RATE_DEFAULTS.get(cat, {}).get("3PH", 0.0)
-        else:
-            c1, c3 = float(sub["rate_1ph"].sum()), float(sub["rate_3ph"].sum())
+        c1, c3 = category_rates(var, cat)
         amt = float(c1 * n_1ph + c3 * n_3ph)
         if amt:
             by_cat.append(("Variable", cat, amt))
@@ -5285,10 +5285,9 @@ def expense_summary(df_exp: pd.DataFrame, mkey: str, n_1ph: int, n_3ph: int) -> 
     # Variable cost of one more install, for the target projection and the
     # slider: the 1PH and 3PH rates weighted by this month's actual mix, so
     # 3PH work is costed at its own rate. Before any installs, the 1PH rate.
-    _n = n_1ph + n_3ph
-    variable_rate = ((_r1 * n_1ph + _r3 * n_3ph) / _n) if _n else _r1
-    total_cost = fixed_total + variable_total
     n = n_1ph + n_3ph
+    variable_rate = (variable_total / n) if n else _r1
+    total_cost = fixed_total + variable_total
     # None (shown as "—") when there are no installs to divide by, or no costs
     # entered for the month: 0.00 would read as "these installs cost nothing".
     per = (lambda x: x / n) if (n > 0 and (not rows.empty or variable_total)) else (lambda x: None)
@@ -5302,23 +5301,40 @@ def expense_summary(df_exp: pd.DataFrame, mkey: str, n_1ph: int, n_3ph: int) -> 
     }
 
 
+def month_installations(mkey: str) -> pd.DataFrame:
+    """Installations rows for a calendar month with `_d` (date), `site` (one
+    name per location) and `n1` / `n3` (whole installs). The cost model asks
+    for this several times a run, so it is worked out once; callers must not
+    modify it in place."""
+    key = ("month_installations", mkey, _batch_version())
+    hit = _RUN_MEMO.get(key)
+    if hit is not None:
+        return hit
+    df = get_data("Installations")
+    if df.empty or not has_col(df, "date", "location", "qty_1ph", "qty_3ph"):
+        d = pd.DataFrame(columns=["_d", "site", "n1", "n3"])
+    else:
+        dt = pd.to_datetime(df["date"], errors="coerce")
+        m = dt.dt.strftime("%Y-%m") == mkey
+        d = df[m].copy()
+        d["_d"] = dt[m].dt.date
+        d["site"] = d["location"].astype(str).str.strip().replace("", "Unspecified")
+        # One name per location — installs arrive as "CHITTINAGAR", costs are
+        # saved as "Chittinagar"; the Admin spelling (and Store-tab mappings) win.
+        _canon = _canonical_locations(d["site"])
+        d["site"] = d["site"].map(lambda v: _canon.get(_loc_key(v), v))
+        d["n1"] = safe_numeric_col(d, "qty_1ph").astype(int)
+        d["n3"] = safe_numeric_col(d, "qty_3ph").astype(int)
+    _RUN_MEMO[key] = d
+    return d
+
+
 def month_site_installs(mkey: str) -> pd.DataFrame:
     """1PH / 3PH installs per site (Section) for a month, from Installations —
     the same figures the Dashboard reports."""
-    df = get_data("Installations")
-    cols = ["site", "n1", "n3"]
-    if df.empty or not has_col(df, "date", "location", "qty_1ph", "qty_3ph"):
-        return pd.DataFrame(columns=cols)
-    d = df[pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m") == mkey].copy()
+    d = month_installations(mkey)
     if d.empty:
-        return pd.DataFrame(columns=cols)
-    d["site"] = d["location"].astype(str).str.strip().replace("", "Unspecified")
-    # One name per location — installs arrive as "CHITTINAGAR", costs are saved
-    # as "Chittinagar"; the Admin spelling (and Store-tab mappings) win.
-    _canon = _canonical_locations(d["site"])
-    d["site"] = d["site"].map(lambda v: _canon.get(_loc_key(v), v))
-    d["n1"] = safe_numeric_col(d, "qty_1ph")
-    d["n3"] = safe_numeric_col(d, "qty_3ph")
+        return pd.DataFrame(columns=["site", "n1", "n3"])
     out = d.groupby("site")[["n1", "n3"]].sum().reset_index()
     out["n1"], out["n3"] = out["n1"].astype(int), out["n3"].astype(int)
     return out
@@ -5336,27 +5352,18 @@ def month_billing_by_date(mkey: str) -> dict:
 
     Returns {"sites": {site: {"n1","n3","inc1","inc3","bill1","bill3","bill"}},
              "inc1", "inc3", "bill1", "bill3", "n1", "n3"}."""
-    df = get_data("Installations")
     out = {"sites": {}, "inc1": 0.0, "inc3": 0.0, "bill1": 0.0, "bill3": 0.0, "n1": 0, "n3": 0}
-    if df.empty or not has_col(df, "date", "location", "qty_1ph", "qty_3ph"):
-        return out
-    d = df[pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m") == mkey].copy()
+    d = month_installations(mkey)
     if d.empty:
         return out
-    d["_d"] = pd.to_datetime(d["date"], errors="coerce").dt.date
-    d["site"] = d["location"].astype(str).str.strip().replace("", "Unspecified")
-    _canon = _canonical_locations(d["site"])
-    d["site"] = d["site"].map(lambda v: _canon.get(_loc_key(v), v))
-    d["n1"] = safe_numeric_col(d, "qty_1ph").astype(int)
-    d["n3"] = safe_numeric_col(d, "qty_3ph").astype(int)
-    cum = 0
-    for day, g in d.sort_values("_d").groupby("_d", sort=True):
+    cum, inc_cum = 0, 0.0          # installs so far this month, and their incentive
+    for _, g in d.sort_values("_d").groupby("_d", sort=True):
         n_day = int(g["n1"].sum() + g["n3"].sum())
         if n_day <= 0:
             continue
-        inc_day = tier_slabs(cum + n_day)[0] - (tier_slabs(cum)[0] if cum else 0.0)
-        per = inc_day / n_day
-        cum += n_day
+        inc_now = tier_slabs(cum + n_day)[0]
+        per = (inc_now - inc_cum) / n_day
+        cum, inc_cum = cum + n_day, inc_now
         for site, gs in g.groupby("site"):
             a1, a3 = int(gs["n1"].sum()), int(gs["n3"].sum())
             e = out["sites"].setdefault(site, {"n1": 0, "n3": 0, "inc1": 0.0, "inc3": 0.0})
@@ -5453,7 +5460,7 @@ def site_cost_breakdown(df_exp: pd.DataFrame, mkey: str) -> dict:
         "v1": (billing["bill1"] / billing["n1"]) if billing["n1"] else (INCENTIVE_UNIT_RATE_1PH + INCENTIVE_FLAT_ADDON_1PH),
         "v3": (billing["bill3"] / billing["n3"]) if billing["n3"] else (RATE_3PH_NEW + SURVEY_3PH),
         "n1": tot_n1, "n3": tot_n3, "cost1": tot_c1, "cost3": tot_c3, "total": total,
-        "stranded": 0.0, "unallocated_shared": unallocated_shared,
+        "unallocated_shared": unallocated_shared,
         "cpi1": (tot_c1 / tot_n1) if tot_n1 else None,
         "cpi3": (tot_c3 / tot_n3) if tot_n3 else None,
         "cpi": (total / (tot_n1 + tot_n3)) if (tot_n1 + tot_n3) else None,
@@ -5521,27 +5528,6 @@ def render_cost_slider(fixed_total: float, variable_rate: float, actual_installs
         st.line_chart(curve, height=220)
 
 
-def apply_expense_edits(df_exp: pd.DataFrame, edited: pd.DataFrame) -> pd.DataFrame:
-    """Merge the Expenses tab's edit table back into the full Expenses sheet,
-    matched by expense_id — other months' rows are never touched."""
-    out = df_exp[EXPENSE_COLS].copy().set_index("expense_id")
-    for _, r in edited.iterrows():
-        eid = r["expense_id"]
-        if eid not in out.index:
-            continue
-        if r["Delete"]:
-            out = out.drop(index=eid)
-            continue
-        out.at[eid, "item"] = str(r["Description"] if pd.notna(r["Description"]) else "").strip()
-        out.at[eid, "amount"] = float(r["Amount (Rs.)"] or 0)
-        out.at[eid, "rate_1ph"] = float(r["Rate 1PH"] or 0)
-        out.at[eid, "rate_3ph"] = float(r["Rate 3PH"] or 0)
-        out.at[eid, "recurring"] = "1" if r["Repeats"] else "0"
-        if "Site" in r.index:
-            out.at[eid, "site"] = str(r["Site"] or SHARED_SITE)
-    return out.reset_index()[EXPENSE_COLS]
-
-
 def apply_vehicle_edits(edited: pd.DataFrame, used_regs: set):
     """Returns (vehicles_df, blocked_regs). A vehicle with costs on record is
     deactivated rather than deleted, so those costs keep their vehicle."""
@@ -5561,10 +5547,45 @@ def apply_vehicle_edits(edited: pd.DataFrame, used_regs: set):
 def fmt_rs(v, decimals: int = 0) -> str:
     return "—" if v is None else f"{v:,.{decimals}f}"
 
+
+def _cost_card(title: str, amount: float, line1: str, line2: str, title_color: str = "--ink-900") -> str:
+    """One Expenses card: a name, the month's amount, two lines of detail."""
+    small = '<div style="font-size:11px;font-weight:600;color:var(--ink-600);">'
+    return (f'<div style="background:var(--surface-100);border-radius:var(--radius-md);padding:11px;'
+            f'display:flex;flex-direction:column;gap:4px;">'
+            f'<div style="font-size:13px;font-weight:700;color:var({title_color});">{title}</div>'
+            f'<div style="font-size:18px;font-weight:800;color:var(--ink-900);">Rs. {amount:,.0f}</div>'
+            f'{small}{line1}</div>{small}{line2}</div></div>')
+
+
+def recent_month_keys(today: date, n: int = 12) -> list:
+    """This month and the n-1 before it, newest first, as YYYY-MM keys."""
+    y, m, out = today.year, today.month, []
+    for _ in range(n):
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+    return out
+
+
+def prev_month_key(mkey: str) -> str:
+    y, m = int(mkey[:4]), int(mkey[5:])
+    return f"{y - 1:04d}-12" if m == 1 else f"{y:04d}-{m - 1:02d}"
+
+
+def date_range_bounds(value):
+    """(start, end) from a st.date_input range — two dates, one while the
+    second is being picked, or none; (None, None) when nothing is picked."""
+    if isinstance(value, (list, tuple)):
+        if len(value) >= 2:
+            return value[0], value[1]
+        return (value[0], value[0]) if value else (None, None)
+    return value, value
+
+
 active_techs = []
 if not df_technicians_master.empty and has_col(df_technicians_master, "is_active", "name"):
     for _, r in df_technicians_master.iterrows():
-        if str(r["is_active"]).strip().lower() in ["1", "1.0", "true", "yes"]:
+        if _truthy(r["is_active"]):
             n = str(r["name"]).strip()
             if n:
                 active_techs.append(n)
@@ -5643,6 +5664,16 @@ def supervisor_of(installer_id) -> str:
     return login_to_supervisor.get(str(installer_id).strip().lower(), UNASSIGNED_SUPERVISOR)
 
 
+def tech_name_for(installer_id) -> str:
+    """Technician display name for a login ID; the ID itself when unmapped."""
+    return tech_login_lookup.get(str(installer_id).lower(), installer_id)
+
+
+def install_key(rec) -> str:
+    """A record's install-log key: date||time||installer_id. One install, one key."""
+    return f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
+
+
 def _execute_push(parsed_records, source_label="install(s)"):
     """The actual write logic — no double-count risk gating. Called either
     directly (no risk detected) or after the supervisor explicitly confirms
@@ -5676,7 +5707,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
     backfilled_count = 0
     for rec in parsed_records:
         dates_seen.add(rec["date"])
-        key = f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
+        key = install_key(rec)
         if key in existing_keys:
             idx = key_to_idx[key]
             filled_something = False
@@ -5716,11 +5747,10 @@ def _execute_push(parsed_records, source_label="install(s)"):
     # mirror ran. The mirror is an upsert, so re-sending known rows is safe.
     map_batch = []
     for rec in parsed_records:
-        tn = tech_login_lookup.get(str(rec["installer_id"]).lower(), rec["installer_id"])
         map_batch.append({
-            "key": f"{rec['date']}||{rec['time']}||{rec['installer_id']}",
+            "key": install_key(rec),
             "date": rec["date"], "time": rec["time"], "installer_id": rec["installer_id"],
-            "tech_name": tn, "location": rec.get("location") or "",
+            "tech_name": tech_name_for(rec["installer_id"]), "location": rec.get("location") or "",
             "sno": rec.get("sno") or "", "old_meter_no": rec.get("old_meter_no") or "",
             "new_meter_no": rec.get("new_meter_no") or "",
             "lat": rec.get("lat") or "", "long": rec.get("long") or "",
@@ -5790,7 +5820,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
                  else (append_rows("UploadedInstallLog", new_log_rows, list(updated_log.columns))
                        or safe_update("UploadedInstallLog", updated_log)))
     if safe_update("Installations", df_inst_existing) and log_saved:
-        map_added, map_ok = mirror_records_to_map(map_batch)
+        _, map_ok = mirror_records_to_map(map_batch)
         if not map_ok:
             st.session_state["map_sync_warning"] = (
                 f"⚠️ {len(new_log_rows)} install(s) were saved to Installs data, but syncing them to the "
@@ -5872,13 +5902,26 @@ def mirror_records_to_map(records) -> tuple:
     return len(new_map_rows) + filled, ok
 
 
+_RUN_FRESH = set()   # batch versions this run has read straight from Google
+
+
 def get_data_fresh(worksheet: str) -> pd.DataFrame:
     """The sheet as it is in Google right now, not this app's cached copy.
     Two copies of the app write to the same install sheets — the PC
     auto-loader and the Streamlit Cloud app — and each only knows its own
     recent writes. Checking "already recorded?" against a cached copy let the
-    second one record the same installs again, so every write reads fresh."""
+    second one record the same installs again, so every write reads fresh.
+
+    The batched read brings back every worksheet at once, so once this run
+    has fetched it fresh, the other sheets in it are fresh too: a push that
+    checks the log and then Installations makes one trip to Google, not four.
+    Any write in between changes the version and the next call fetches again."""
+    batched = worksheet in SHEET_TABS and not st.session_state.get("_batch_read_off")
+    if batched and _batch_version() in _RUN_FRESH:
+        return get_data(worksheet)
     _bump_sheet_version(worksheet)
+    if batched:
+        _RUN_FRESH.add(_batch_version())
     return get_data(worksheet)
 
 
@@ -5953,12 +5996,12 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
 
     df_log_existing = get_data_fresh("UploadedInstallLog")
     existing_keys = set(df_log_existing["key"].values) if not df_log_existing.empty and "key" in df_log_existing.columns else set()
-    candidate_new = [rec for rec in valid_records if f"{rec['date']}||{rec['time']}||{rec['installer_id']}" not in existing_keys]
+    candidate_new = [rec for rec in valid_records if install_key(rec) not in existing_keys]
 
     risky = []
     if candidate_new:
         tmp_df = pd.DataFrame(candidate_new)
-        tmp_df["tech_name"] = tmp_df["installer_id"].apply(lambda x: tech_login_lookup.get(str(x).lower(), x))
+        tmp_df["tech_name"] = tmp_df["installer_id"].apply(tech_name_for)
         if "location" in tmp_df.columns:
             tmp_df["location"] = tmp_df["location"].apply(lambda x: x if x else "Unspecified")
         else:
@@ -5996,13 +6039,12 @@ def push_parsed_records_to_installations(parsed_records, source_label="install(s
         # else saves now. Holding the whole upload meant one manual entry
         # stopped a master file entirely — and the PC auto-loader, with nobody
         # to confirm, never saved anything.
-        def _tn(rec):
-            return tech_login_lookup.get(str(rec["installer_id"]).lower(), rec["installer_id"])
         risky_combos = {(r_["Date"], r_["Technician"], r_["Location"]) for r_ in risky}
-        held = [rec for rec in parsed_records
-                if (rec["date"], _tn(rec), rec.get("location") or "Unspecified") in risky_combos]
-        safe = [rec for rec in parsed_records
-                if (rec["date"], _tn(rec), rec.get("location") or "Unspecified") not in risky_combos]
+
+        def _at_risk(rec):
+            return (rec["date"], tech_name_for(rec["installer_id"]), rec.get("location") or "Unspecified") in risky_combos
+        held = [rec for rec in parsed_records if _at_risk(rec)]
+        safe = [rec for rec in parsed_records if not _at_risk(rec)]
         st.session_state["pending_push"] = {"records": held, "source_label": source_label, "risky": risky}
         if safe:
             _execute_push(safe, source_label)     # saves, then reruns to show the held rows
@@ -6103,6 +6145,28 @@ def reduce_rows_to_upload_counts(keys) -> int:
     return 0
 
 
+_DUP_COLUMN_NAMES = {
+    "key": "Key", "sno": "SNO", "date": "Date", "time": "Time", "tech_name": "Technician",
+    "location": "Location", "meter_type": "Meter Type", "old_meter_no": "Old Meter No",
+    "new_meter_no": "New Meter No",
+}
+
+
+def _same_sno_same_day(df: pd.DataFrame, cols) -> pd.DataFrame:
+    """Records sharing a Consumer No (SNO) on one date, each cluster together,
+    with 'Keep?' pre-set to keep the earliest time and drop the rest."""
+    sno_df = df[df["sno"].astype(str).str.strip() != ""].copy()
+    if sno_df.empty:
+        return pd.DataFrame()
+    dup_mask = sno_df.duplicated(subset=["sno", "date"], keep=False)
+    dups = sno_df[dup_mask].sort_values(["sno", "date", "time"]).copy()
+    if dups.empty:
+        return pd.DataFrame()
+    dups["Keep?"] = ~dups.duplicated(subset=["sno", "date"], keep="first")
+    out = dups[[c for c in list(cols) + ["Keep?"] if c in dups.columns]].rename(columns=_DUP_COLUMN_NAMES)
+    return clean_id_columns(out)
+
+
 def find_sno_duplicates():
     """The highest-confidence duplicate signal: the same Consumer No (SNO)
     appearing more than once in UploadedInstallLog on the SAME date. A given
@@ -6116,28 +6180,8 @@ def find_sno_duplicates():
     df_log = get_data("UploadedInstallLog")
     if df_log.empty or not has_col(df_log, "sno", "date", "time", "key"):
         return pd.DataFrame()
-
-    sno_df = df_log[df_log["sno"].astype(str).str.strip() != ""].copy()
-    if sno_df.empty:
-        return pd.DataFrame()
-
-    dup_mask = sno_df.duplicated(subset=["sno", "date"], keep=False)
-    dups = sno_df[dup_mask].sort_values(["sno", "date", "time"]).copy()
-    if dups.empty:
-        return pd.DataFrame()
-
-    # Default: keep the earliest record in each SNO+date cluster, flag the rest for removal.
-    dups["Keep?"] = ~dups.duplicated(subset=["sno", "date"], keep="first")
-    cols = ["key", "sno", "date", "time", "tech_name", "location", "meter_type", "old_meter_no", "new_meter_no", "Keep?"]
-    cols = [c for c in cols if c in dups.columns]
-    out = dups[cols].rename(columns={
-        "key": "Key", "sno": "SNO", "date": "Date", "time": "Time", "tech_name": "Technician",
-        "location": "Location", "meter_type": "Meter Type", "old_meter_no": "Old Meter No", "new_meter_no": "New Meter No",
-    })
-    for _idc in ["SNO", "Old Meter No", "New Meter No"]:
-        if _idc in out.columns:
-            out[_idc] = out[_idc].apply(clean_id_value)
-    return out
+    return _same_sno_same_day(df_log, ["key", "sno", "date", "time", "tech_name", "location", "meter_type",
+                                       "old_meter_no", "new_meter_no"])
 
 
 def find_near_time_duplicates(threshold_seconds: int = 120):
@@ -6175,9 +6219,7 @@ def find_near_time_duplicates(threshold_seconds: int = 120):
         "key": "Key", "installer_id": "Installer LoginID", "tech_name": "Technician", "date": "Date",
         "time": "Time", "location": "Location", "sno": "SNO", "meter_type": "Meter Type",
     })
-    if "SNO" in out.columns:
-        out["SNO"] = out["SNO"].apply(clean_id_value)
-    return out
+    return clean_id_columns(out, ("SNO",))
 
 
 def find_matching_log_keys_from_file(uploaded_file):
@@ -6195,19 +6237,55 @@ def find_matching_log_keys_from_file(uploaded_file):
     header_row, col_map = find_header_row(ws, INSTALL_BULK_REQUIRED_HEADERS)
     if header_row is None:
         return None
-    keys = set()
-    for r in range(header_row + 1, ws.max_row + 1):
-        raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
-        if raw_installer is None or str(raw_installer).strip() == "":
-            continue
-        if not is_valid_installer_id(raw_installer):
-            continue
-        d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
-        t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
-        if d is None or t is None:
-            continue
-        keys.add(f"{d}||{t}||{str(raw_installer).strip()}")
-    return keys
+    records, _ = parse_install_rows(ws, header_row, col_map, {})
+    return {install_key(rec) for rec in records}
+
+
+def parse_install_upload(uploaded_file):
+    """Read an uploaded MDM export for the Installs / Map uploaders, reporting
+    any problem on screen. Returns the records, or None if there are none."""
+    try:
+        ws = load_first_data_sheet(uploaded_file)
+    except Exception as e:
+        st.error(f"❌ Could not open the file: {e}")
+        return None
+    header_row, col_map = find_header_row(ws, INSTALL_BULK_REQUIRED_HEADERS)
+    if header_row is None:
+        st.error("❌ Could not find 'Installation Date', 'Installation Time', 'Installer LoginID', 'Section' and 'New Meter Type' columns in this file.")
+        return None
+    extra = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
+    parsed, skipped_non_tl = parse_install_rows(ws, header_row, col_map, extra)
+    if not parsed:
+        st.warning(f"⚠️ No valid {INSTALLER_ID_PREFIX} installer rows with a date and time were found in this file.")
+        return None
+    if skipped_non_tl:
+        st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
+    return parsed
+
+
+def _subtract_from_installations(rows: pd.DataFrame):
+    """Take install-log rows that are being removed back out of Installations:
+    their 1PH / 3PH counts come off the matching date/technician/location row,
+    and a row left at 0 / 0 is dropped."""
+    df_inst = get_data("Installations")
+    if df_inst.empty or not has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
+        return
+    for col in ["qty_1ph", "qty_3ph"]:
+        df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
+    rows = rows.copy()
+    _phase = meter_phases(rows["meter_type"]) if "meter_type" in rows.columns else pd.Series("", index=rows.index)
+    rows["is_1ph"] = _phase == "1PH"
+    rows["is_3ph"] = _phase == "3PH"
+    agg = rows.groupby(["date", "tech_name", "location"]).agg(
+        d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
+    ).reset_index()
+    for _, arow in agg.iterrows():
+        mask = (df_inst["date"] == arow["date"]) & (df_inst["tech_name"] == arow["tech_name"]) & (df_inst["location"] == arow["location"])
+        if mask.any():
+            df_inst.loc[mask, "qty_1ph"] = (df_inst.loc[mask, "qty_1ph"] - int(arow["d_1ph"])).clip(lower=0)
+            df_inst.loc[mask, "qty_3ph"] = (df_inst.loc[mask, "qty_3ph"] - int(arow["d_3ph"])).clip(lower=0)
+    df_inst = df_inst[~((df_inst["qty_1ph"] == 0) & (df_inst["qty_3ph"] == 0))].reset_index(drop=True)
+    safe_update("Installations", df_inst)
 
 
 def remove_install_log_rows(keys_to_remove) -> int:
@@ -6228,25 +6306,7 @@ def remove_install_log_rows(keys_to_remove) -> int:
     if removed_count == 0:
         return 0
 
-    df_inst = get_data("Installations")
-    if not df_inst.empty and has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
-        for col in ["qty_1ph", "qty_3ph"]:
-            df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
-        if "meter_type" not in removed_rows.columns:
-            removed_rows["meter_type"] = ""
-        _phase = meter_phases(removed_rows["meter_type"])
-        removed_rows["is_1ph"] = _phase == "1PH"
-        removed_rows["is_3ph"] = _phase == "3PH"
-        agg = removed_rows.groupby(["date", "tech_name", "location"]).agg(
-            d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
-        ).reset_index()
-        for _, arow in agg.iterrows():
-            mask = (df_inst["date"] == arow["date"]) & (df_inst["tech_name"] == arow["tech_name"]) & (df_inst["location"] == arow["location"])
-            if mask.any():
-                df_inst.loc[mask, "qty_1ph"] = (df_inst.loc[mask, "qty_1ph"] - int(arow["d_1ph"])).clip(lower=0)
-                df_inst.loc[mask, "qty_3ph"] = (df_inst.loc[mask, "qty_3ph"] - int(arow["d_3ph"])).clip(lower=0)
-        df_inst = df_inst[~((df_inst["qty_1ph"] == 0) & (df_inst["qty_3ph"] == 0))].reset_index(drop=True)
-        safe_update("Installations", df_inst)
+    _subtract_from_installations(removed_rows)
 
     df_log_clean = df_log[~is_target].reset_index(drop=True)
     safe_update("UploadedInstallLog", df_log_clean)
@@ -6260,24 +6320,8 @@ def find_map_duplicates():
     df_map = get_data("MapRecords")
     if df_map.empty or not has_col(df_map, "sno", "date", "time"):
         return pd.DataFrame()
-    sno_df = df_map[df_map["sno"].astype(str).str.strip() != ""].copy()
-    if sno_df.empty:
-        return pd.DataFrame()
-    dup_mask = sno_df.duplicated(subset=["sno", "date"], keep=False)
-    dups = sno_df[dup_mask].sort_values(["sno", "date", "time"]).copy()
-    if dups.empty:
-        return pd.DataFrame()
-    dups["Keep?"] = ~dups.duplicated(subset=["sno", "date"], keep="first")
-    cols = ["key", "sno", "date", "time", "tech_name", "location", "old_meter_no", "new_meter_no", "Keep?"]
-    cols = [c for c in cols if c in dups.columns]
-    out = dups[cols].rename(columns={
-        "key": "Key", "sno": "SNO", "date": "Date", "time": "Time", "tech_name": "Technician",
-        "location": "Location", "old_meter_no": "Old Meter No", "new_meter_no": "New Meter No",
-    })
-    for _idc in ["SNO", "Old Meter No", "New Meter No"]:
-        if _idc in out.columns:
-            out[_idc] = out[_idc].apply(clean_id_value)
-    return out
+    return _same_sno_same_day(df_map, ["key", "sno", "date", "time", "tech_name", "location",
+                                       "old_meter_no", "new_meter_no"])
 
 
 def remove_map_records(keys_to_remove) -> int:
@@ -6311,58 +6355,22 @@ def render_map_legacy_upload_widget():
     """, unsafe_allow_html=True)
     legacy_file = st.file_uploader("Upload Legacy/Historical Excel (.xlsx) — Map Only", type=["xlsx"], key="map_legacy_uploader")
     if legacy_file is not None:
-        if st.button("📥 Process Legacy Data (Map Only)", type="primary", use_container_width=True, key="map_legacy_process_btn"):
-            try:
-                ws = load_first_data_sheet(legacy_file)
-            except Exception as e:
-                st.error(f"❌ Could not open the file: {e}")
-                ws = None
-
-            if ws is not None:
-                header_row, col_map = find_header_row(ws, INSTALL_BULK_REQUIRED_HEADERS)
-                if header_row is None:
-                    st.error("❌ Could not find 'Installation Date', 'Installation Time', 'Installer LoginID', 'Section' and 'New Meter Type' columns in this file.")
+        if st.button("📥 Process Legacy Data (Map Only)", type="primary", width="stretch", key="map_legacy_process_btn"):
+            parsed = parse_install_upload(legacy_file)
+            if parsed:
+                for rec in parsed:
+                    rec["tech_name"] = tech_name_for(rec["installer_id"])
+                added, map_ok = mirror_records_to_map(parsed)
+                if not map_ok:
+                    st.error("❌ Failed to save to the Map. Make sure the 'MapRecords' worksheet tab exists in your Google Sheet (see the app's setup docstring for its columns), then try again.")
+                elif added == 0:
+                    st.error("❌ All records in this file are already on the map. Nothing new to add.")
                 else:
-                    detail_optional_map = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
-                    parsed = []
-                    skipped_non_tl = 0
-                    for r in range(header_row + 1, ws.max_row + 1):
-                        raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
-                        if raw_installer is None or str(raw_installer).strip() == "":
-                            continue
-                        if not is_valid_installer_id(raw_installer):
-                            skipped_non_tl += 1
-                            continue
-                        d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
-                        t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
-                        if d is None or t is None:
-                            continue
-                        section = ws.cell(row=r, column=col_map["Section"]).value
-                        rec = {
-                            "date": d, "time": t,
-                            "installer_id": str(raw_installer).strip(),
-                            "location": str(section).strip() if section else "Unspecified",
-                        }
-                        rec.update(extract_detail_fields(ws, r, detail_optional_map))
-                        rec["tech_name"] = tech_login_lookup.get(rec["installer_id"].lower(), rec["installer_id"])
-                        parsed.append(rec)
-
-                    if not parsed:
-                        st.warning(f"⚠️ No valid {INSTALLER_ID_PREFIX} installer rows with a date and time were found in this file.")
-                    else:
-                        if skipped_non_tl:
-                            st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
-                        added, map_ok = mirror_records_to_map(parsed)
-                        if not map_ok:
-                            st.error("❌ Failed to save to the Map. Make sure the 'MapRecords' worksheet tab exists in your Google Sheet (see the app's setup docstring for its columns), then try again.")
-                        elif added == 0:
-                            st.error("❌ All records in this file are already on the map. Nothing new to add.")
-                        else:
-                            st.success(f"✅ Added {added} new record(s) to the Map. Installations and inventory counts were not affected.")
-                            dup_check = find_map_duplicates()
-                            if not dup_check.empty:
-                                st.warning(f"⚠️ {dup_check['SNO'].nunique()} SNO(s) now have more than one record on the same date in Map data. Review under Map tab \u2192 Data Maintenance if you want to remove any.")
-                            st.rerun()
+                    st.success(f"✅ Added {added} new record(s) to the Map. Installations and inventory counts were not affected.")
+                    dup_check = find_map_duplicates()
+                    if not dup_check.empty:
+                        st.warning(f"⚠️ {dup_check['SNO'].nunique()} SNO(s) now have more than one record on the same date in Map data. Review under Map tab \u2192 Data Maintenance if you want to remove any.")
+                    st.rerun()
 
 
 def _old_phase_flags(mt):
@@ -6448,29 +6456,7 @@ def cleanup_non_tl_records():
         bad_rows = df_log[is_bad].copy()
         removed_log = len(bad_rows)
         if removed_log:
-            df_inst = get_data("Installations")
-            if not df_inst.empty and has_col(df_inst, "date", "tech_name", "location", "qty_1ph", "qty_3ph"):
-                for col in ["qty_1ph", "qty_3ph"]:
-                    df_inst[col] = pd.to_numeric(df_inst[col], errors="coerce").fillna(0).astype(int)
-                if "meter_type" not in bad_rows.columns:
-                    bad_rows["meter_type"] = ""
-                _phase = meter_phases(bad_rows["meter_type"])
-                bad_rows["is_1ph"] = _phase == "1PH"
-                bad_rows["is_3ph"] = _phase == "3PH"
-                agg = bad_rows.groupby(["date", "tech_name", "location"]).agg(
-                    d_1ph=("is_1ph", "sum"), d_3ph=("is_3ph", "sum")
-                ).reset_index()
-                for _, arow in agg.iterrows():
-                    mask = (
-                        (df_inst["date"] == arow["date"]) &
-                        (df_inst["tech_name"] == arow["tech_name"]) &
-                        (df_inst["location"] == arow["location"])
-                    )
-                    if mask.any():
-                        df_inst.loc[mask, "qty_1ph"] = (df_inst.loc[mask, "qty_1ph"] - int(arow["d_1ph"])).clip(lower=0)
-                        df_inst.loc[mask, "qty_3ph"] = (df_inst.loc[mask, "qty_3ph"] - int(arow["d_3ph"])).clip(lower=0)
-                df_inst = df_inst[~((df_inst["qty_1ph"] == 0) & (df_inst["qty_3ph"] == 0))].reset_index(drop=True)
-                safe_update("Installations", df_inst)
+            _subtract_from_installations(bad_rows)
             df_log_clean = df_log[~is_bad].reset_index(drop=True)
             safe_update("UploadedInstallLog", df_log_clean)
 
@@ -6500,49 +6486,10 @@ def render_legacy_upload_widget(key_prefix: str):
     """, unsafe_allow_html=True)
     legacy_file = st.file_uploader("Upload Legacy/Historical Excel (.xlsx)", type=["xlsx"], key=f"{key_prefix}_legacy_uploader")
     if legacy_file is not None:
-        if st.button("📥 Process Legacy Data", type="primary", use_container_width=True, key=f"{key_prefix}_legacy_process_btn"):
-            try:
-                ws = load_first_data_sheet(legacy_file)
-            except Exception as e:
-                st.error(f"❌ Could not open the file: {e}")
-                ws = None
-
-            if ws is not None:
-                header_row, col_map = find_header_row(ws, INSTALL_BULK_REQUIRED_HEADERS)
-                if header_row is None:
-                    st.error("❌ Could not find 'Installation Date', 'Installation Time', 'Installer LoginID', 'Section' and 'New Meter Type' columns in this file.")
-                else:
-                    detail_optional_map = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
-                    parsed = []
-                    skipped_non_tl = 0
-                    for r in range(header_row + 1, ws.max_row + 1):
-                        raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
-                        if raw_installer is None or str(raw_installer).strip() == "":
-                            continue
-                        if not is_valid_installer_id(raw_installer):
-                            skipped_non_tl += 1
-                            continue
-                        d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
-                        t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
-                        if d is None or t is None:
-                            continue
-                        section = ws.cell(row=r, column=col_map["Section"]).value
-                        mtype = ws.cell(row=r, column=col_map["New Meter Type"]).value
-                        rec = {
-                            "date": d, "time": t,
-                            "installer_id": str(raw_installer).strip(),
-                            "location": str(section).strip() if section else "Unspecified",
-                            "meter_type": str(mtype).strip() if mtype else "",
-                        }
-                        rec.update(extract_detail_fields(ws, r, detail_optional_map))
-                        parsed.append(rec)
-
-                    if not parsed:
-                        st.warning(f"⚠️ No valid {INSTALLER_ID_PREFIX} installer rows with a date and time were found in this file.")
-                    else:
-                        if skipped_non_tl:
-                            st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
-                        push_parsed_records_to_installations(parsed, source_label="legacy install(s)")
+        if st.button("📥 Process Legacy Data", type="primary", width="stretch", key=f"{key_prefix}_legacy_process_btn"):
+            parsed = parse_install_upload(legacy_file)
+            if parsed:
+                push_parsed_records_to_installations(parsed, source_label="legacy install(s)")
 
 
 def render_meter_search(key_prefix: str = "inst", show_heading: bool = True):
@@ -6579,11 +6526,9 @@ def render_meter_search(key_prefix: str = "inst", show_heading: bool = True):
                 }
                 cols_present = [c for c in display_cols_map if c in results.columns]
                 results_display = results[cols_present].rename(columns=display_cols_map).copy()
-                for _idc in ["SNO", "Old Meter No", "New Meter No"]:
-                    if _idc in results_display.columns:
-                        results_display[_idc] = results_display[_idc].apply(clean_id_value)
+                clean_id_columns(results_display)
                 st.success(f"✅ Found {len(results)} match(es).")
-                st.dataframe(results_display, use_container_width=True, hide_index=True,
+                st.dataframe(results_display, width="stretch", hide_index=True,
                              height=dataframe_height(len(results_display), max_px=500))
 
                 # Label: value text, so a result can be pasted into WhatsApp or
@@ -6601,11 +6546,11 @@ def render_meter_search(key_prefix: str = "inst", show_heading: bool = True):
                 with dl1:
                     st.download_button("Download as text", data=export_text,
                                        file_name=f"search_{search_query.strip()[:20] or 'results'}.txt",
-                                       mime="text/plain", use_container_width=True, key=f"{key_prefix}_search_dl_txt", on_click="ignore")
+                                       mime="text/plain", width="stretch", key=f"{key_prefix}_search_dl_txt", on_click="ignore")
                 with dl2:
                     st.download_button("Download as CSV", data=results_display.to_csv(index=False),
                                        file_name=f"search_{search_query.strip()[:20] or 'results'}.csv",
-                                       mime="text/csv", use_container_width=True, key=f"{key_prefix}_search_dl_csv", on_click="ignore")
+                                       mime="text/csv", width="stretch", key=f"{key_prefix}_search_dl_csv", on_click="ignore")
 
 
 # ── Persistent Map-sync failure warning (survives the st.rerun() that would ──
@@ -6632,15 +6577,15 @@ if "pending_push" in st.session_state:
         saved; only these rows are waiting. Review, then choose:
         </div>
         """, unsafe_allow_html=True)
-        st.dataframe(pd.DataFrame(pend["risky"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(pend["risky"]), width="stretch", hide_index=True)
         pc1, pc2 = st.columns(2)
         with pc1:
-            if st.button("✅ Proceed Anyway (verified — not duplicates)", type="primary", use_container_width=True, key="pending_push_proceed"):
+            if st.button("✅ Proceed Anyway (verified — not duplicates)", type="primary", width="stretch", key="pending_push_proceed"):
                 records, label = pend["records"], pend["source_label"]
                 del st.session_state["pending_push"]
                 _execute_push(records, label)
         with pc2:
-            if st.button("❌ Cancel This Upload", use_container_width=True, key="pending_push_cancel"):
+            if st.button("❌ Cancel This Upload", width="stretch", key="pending_push_cancel"):
                 del st.session_state["pending_push"]
                 st.info("Upload cancelled — nothing was saved.")
                 st.rerun()
@@ -6650,7 +6595,7 @@ if "pending_push" in st.session_state:
 # Quick search in the header — rendered into the column reserved beside the
 # banner, now that the data connection is ready.
 with head_search:
-    with st.popover("🔍", use_container_width=True, help="Search by meter / service no"):
+    with st.popover("🔍", width="stretch", help="Search by meter / service no"):
         render_meter_search("hdr", show_heading=False)
 
 # ── Tabs Configuration ────────────────────────────────────────────────────────
@@ -6759,8 +6704,7 @@ with tab_dash:
                         + ("" if fc["today_final"] else "- Today isn't counted in the pace until the day is over.\n"))
                     # Replay last month: what would each method have said on each day?
                     if len(_daily_prev) >= 6:
-                        import calendar as _cal
-                        _pl = _cal.monthrange(_pm_y, _pm_m)[1]
+                        _pl = calendar.monthrange(_pm_y, _pm_m)[1]
                         _actual = sum(_daily_prev.values())
                         errs_w, errs_a = [], []
                         for _d in range(WORK_DAY_START + 2, min(WORK_DAY_END, _pl)):
@@ -6780,14 +6724,14 @@ with tab_dash:
                                 f"against {sum(errs_a) / len(errs_a):.1f}% for a plain month-average.")
 
             sub_hdr("rupee", "This Month — Billing")
-            month_1ph_count = m_1ph
             # Slabs run on the month's total installs (1PH + 3PH together).
             billing = calculate_1ph_incentive_billing(m_1ph, m_3ph)
             billing3 = calculate_3ph_billing(m_3ph, m_1ph)
             # Cost per install by type, from the Expenses tab's site model — beside
             # the billed rate so the two can be compared at a glance.
-            cost_model = site_cost_breakdown(load_expenses(), month_key(today))
-            month_cost = expense_summary(load_expenses(), month_key(today), m_1ph, m_3ph)
+            _exp_now = load_expenses()
+            cost_model = site_cost_breakdown(_exp_now, month_key(today))
+            month_cost = expense_summary(_exp_now, month_key(today), m_1ph, m_3ph)
             # Tier incentive by install date: each day's installs earn the slab
             # rate for the positions they reached in the month's running count,
             # so the 1PH/3PH split follows when each type was installed. The
@@ -6811,7 +6755,7 @@ with tab_dash:
                                             if (m_1ph + m_3ph) else None, 2),
                  "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)},
             ])
-            st.dataframe(bill_tbl, use_container_width=True, hide_index=True, height=dataframe_height(len(bill_tbl)))
+            st.dataframe(bill_tbl, width="stretch", hide_index=True, height=dataframe_height(len(bill_tbl)))
             with st.expander("View slab breakdown"):
                 # One set of slabs on the month's total installs, whatever the
                 # type; each type then takes its share of that incentive.
@@ -6826,7 +6770,7 @@ with tab_dash:
                         "Amount (Rs.)": slab_df["Amount (Rs.)"].sum()}])], ignore_index=True)
                     slab_df["From"] = slab_df["From"].astype(str)
                     slab_df["Rate (Rs.)"] = slab_df["Rate (Rs.)"].astype(str)
-                    st.dataframe(slab_df, use_container_width=True, hide_index=True,
+                    st.dataframe(slab_df, width="stretch", hide_index=True,
                                  height=dataframe_height(len(slab_df)))
                 _tot_inc = billing["tier_incentive_combined"]
                 _avg_inc = (_tot_inc / (m_1ph + m_3ph)) if (m_1ph + m_3ph) else 0.0
@@ -6841,7 +6785,7 @@ with tab_dash:
                 comp = pd.concat([comp, pd.DataFrame([{
                     "Type": "TOTAL", **{c: int(comp[c].sum()) for c in comp.columns if c != "Type"}}])],
                     ignore_index=True)
-                st.dataframe(comp, use_container_width=True, hide_index=True,
+                st.dataframe(comp, width="stretch", hide_index=True,
                              height=dataframe_height(len(comp)))
 
             sub_hdr("pin", "This Month, By Site")
@@ -6872,7 +6816,7 @@ with tab_dash:
                              "Billing (Rs.)": int(site_df["Billing (Rs.)"].sum()),
                              "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)}
                 site_df = pd.concat([site_df, pd.DataFrame([total_row])], ignore_index=True)
-                st.dataframe(site_df, use_container_width=True, hide_index=True, height=dataframe_height(len(site_df)))
+                st.dataframe(site_df, width="stretch", hide_index=True, height=dataframe_height(len(site_df)))
                 download_image_button(site_df, "This_Month_By_Site.png", key="dl_img_loc_month",
                                       title=f"This Month, By Site — {month_label(mk)}")
 
@@ -6880,21 +6824,8 @@ with tab_dash:
         sec_hdr("box", "Live Inventory Stock")
 
         _stock = stock_summary()
-        _ret_1ph, _ret_3ph = _stock["1 PH"]["returned"], _stock["3 PH"]["returned"]
-        if not df_inv.empty and has_col(df_inv, "type", "qty"):
-            total_in_1ph = safe_numeric_col(df_inv[df_inv["type"] == "1 PH"], "qty").sum()
-            total_in_3ph = safe_numeric_col(df_inv[df_inv["type"] == "3 PH"], "qty").sum()
-        else:
-            total_in_1ph = total_in_3ph = 0
-
-        if not df_inst.empty and has_col(df_inst, "qty_1ph", "qty_3ph"):
-            total_out_1ph = safe_numeric_col(df_inst, "qty_1ph").sum()
-            total_out_3ph = safe_numeric_col(df_inst, "qty_3ph").sum()
-        else:
-            total_out_1ph = total_out_3ph = 0
-
-        pending_1ph = int(total_in_1ph - total_out_1ph - _ret_1ph)
-        pending_3ph = int(total_in_3ph - total_out_3ph - _ret_3ph)
+        total_in_1ph, total_in_3ph = _stock["1 PH"]["received"], _stock["3 PH"]["received"]
+        pending_1ph, pending_3ph = _stock["1 PH"]["pending"], _stock["3 PH"]["pending"]
 
         render_stat_tiles([
             ("bolt",  f"{int(total_in_1ph):,}", "Recv", "1PH", "normal"),
@@ -6907,13 +6838,13 @@ with tab_dash:
         _dash_loc = stock_by_location()
         if not _dash_loc.empty:
             with st.expander("Stock by site"):
-                st.dataframe(_dash_loc, use_container_width=True, hide_index=True,
+                st.dataframe(_dash_loc, width="stretch", hide_index=True,
                              height=dataframe_height(len(_dash_loc), max_px=420))
         if pending_1ph < 0 or pending_3ph < 0:
             deficits = [t for t, v in (("1PH", pending_1ph), ("3PH", pending_3ph)) if v < 0]
             st.markdown(f'<div class="danger-box">More {" and ".join(deficits)} meters installed than received — check Inventory entries.</div>', unsafe_allow_html=True)
 
-        # ── Monthly Installs Overview ────────────────────────────────────────────
+        # ── Installation summary ─────────────────────────────────────────────────
         st.divider()
         sec_hdr("plug", "Installation Summary")
 
@@ -6926,12 +6857,9 @@ with tab_dash:
             with f2:
                 meter_filter = st.multiselect("Meter Type", ["1 PH", "3 PH"], default=["1 PH", "3 PH"])
 
-            if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-                d_start, d_end = date_range[0], date_range[1]
-            elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
-                d_start = d_end = date_range[0]
-            else:
-                d_start = d_end = date_range
+            d_start, d_end = date_range_bounds(date_range)
+            if d_start is None:          # picker cleared: show today
+                d_start = d_end = today_ist()
 
             show_1ph, show_3ph = "1 PH" in meter_filter, "3 PH" in meter_filter
 
@@ -7000,7 +6928,7 @@ with tab_dash:
                     INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MAX,
                 )
                 with st.expander("View as table (1PH / 3PH split)"):
-                    st.dataframe(group_df, use_container_width=True, hide_index=True,
+                    st.dataframe(group_df, width="stretch", hide_index=True,
                                  height=dataframe_height(len(group_df)))
                 download_image_button(
                     group_df, "Technician_Breakdown.png", key="dl_img_group_df",
@@ -7015,7 +6943,7 @@ with tab_dash:
                 export_df.loc[len(export_df)] = ["PENDING STOCK", "", pending_1ph, pending_3ph, ""]
 
                 csv_data = export_df.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Download CSV Report", data=csv_data, file_name="Installation_Summary.csv", mime="text/csv", use_container_width=True, on_click="ignore")
+                st.download_button("📥 Download CSV Report", data=csv_data, file_name="Installation_Summary.csv", mime="text/csv", width="stretch", on_click="ignore")
 
                 date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
                 wa_loc_df = filtered.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
@@ -7069,13 +6997,10 @@ with tab_dash:
                 sample = df_log_for_report.loc[codes == "Unclassified", "sno"].astype(str).head(3).tolist()
                 st.warning(f"⚠️ {unclassified_n} record(s) have an unreadable Consumer No and can't be assigned a section code. Examples: {', '.join(repr(s) for s in sample)}")
 
-        if st.button("Generate Report", type="primary", use_container_width=True, key="generate_weekly_report_btn"):
-            if isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 2:
-                rd_start, rd_end = report_date_range
-            elif isinstance(report_date_range, (list, tuple)) and len(report_date_range) == 1:
-                rd_start = rd_end = report_date_range[0]
-            else:
-                rd_start = rd_end = report_date_range
+        if st.button("Generate Report", type="primary", width="stretch", key="generate_weekly_report_btn"):
+            rd_start, rd_end = date_range_bounds(report_date_range)
+            if rd_start is None:
+                rd_start = rd_end = today_ist()
             with st.spinner("Generating report..."):
                 pdf_bytes, err = build_weekly_report_pdf(
                     rd_start, rd_end,
@@ -7093,7 +7018,7 @@ with tab_dash:
         if "weekly_report_pdf" in st.session_state:
             st.download_button("Download Report (PDF)", data=st.session_state["weekly_report_pdf"],
                                 file_name=st.session_state["weekly_report_name"], mime="application/pdf",
-                                use_container_width=True, key="download_weekly_report", on_click="ignore")
+                                width="stretch", key="download_weekly_report", on_click="ignore")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ANALYTICS  (fully independent of Installations/Inventory/Technicians —
@@ -7147,30 +7072,9 @@ def process_analytics_upload(analytics_file) -> dict:
         return {"ok": False, "wrote": False}
 
     optional_map = find_optional_cols(ws, header_row, ["Section", "New Meter Type"] + list(DETAIL_FIELD_HEADERS.values()))
-    parsed_records = []
-    skipped_non_tl = 0
-    for r in range(header_row + 1, ws.max_row + 1):
-        raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
-        if raw_installer is None or str(raw_installer).strip() == "":
-            continue
-        installer_id = str(raw_installer).strip()
-        if not is_valid_installer_id(installer_id):
-            skipped_non_tl += 1
-            continue
-        d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
-        t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
-        if d is None or t is None:
-            continue
-        section_val = ws.cell(row=r, column=optional_map["Section"]).value if "Section" in optional_map else None
-        mtype_val = ws.cell(row=r, column=optional_map["New Meter Type"]).value if "New Meter Type" in optional_map else None
-        rec = {
-            "date": d, "time": t, "installer_id": installer_id,
-            "hour": t.split(":")[0],
-            "location": str(section_val).strip() if section_val else "",
-            "meter_type": str(mtype_val).strip() if mtype_val else "",
-        }
-        rec.update(extract_detail_fields(ws, r, optional_map))
-        parsed_records.append(rec)
+    parsed_records, skipped_non_tl = parse_install_rows(ws, header_row, col_map, optional_map, blank_location="")
+    for rec in parsed_records:
+        rec["hour"] = rec["time"].split(":")[0]
 
     # New/unrecognized Installer LoginIDs — flagged immediately so the
     # supervisor can add them in Admin without waiting to push to Installs.
@@ -7197,7 +7101,7 @@ def process_analytics_upload(analytics_file) -> dict:
     dup_count = 0
     backfilled_count = 0
     for rec in parsed_records:
-        key = f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
+        key = install_key(rec)
         if key in existing_keys:
             idx = key_to_idx[key]
             # Re-uploading an already-recorded row never adds a new install —
@@ -7243,6 +7147,22 @@ def process_analytics_upload(analytics_file) -> dict:
     return {"ok": False, "wrote": False}
 
 
+SLOW_PROCESS_SECONDS = 5   # slower than this, the tab suggests tapping GO
+
+
+def run_analytics_upload(analytics_file, file_fp: str):
+    """Process an Analytics file and note how it went, for the GO prompt.
+    Reruns the page when it wrote anything, so the tables below catch up."""
+    t0 = time.time()
+    with st.spinner("📊 Processing and adding to Analytics..."):
+        result = process_analytics_upload(analytics_file)
+    st.session_state["analytics_last_fp"] = file_fp
+    st.session_state["analytics_last_ok"] = result["ok"]
+    st.session_state["analytics_last_slow"] = (time.time() - t0) > SLOW_PROCESS_SECONDS
+    if result["wrote"]:
+        st.rerun()
+
+
 with tab_analytics:
     if tab_analytics.open:   # only the open tab runs (tabs are created with on_change="rerun")
         tab_action_bar("analytics", show_upload=True)
@@ -7263,11 +7183,9 @@ with tab_analytics:
         with go_col:
             # GO re-runs "Add & Process" on demand. New files still process
             # automatically on upload; GO is for a retry or a forced re-run.
-            go_clicked = st.button("GO", type="primary", use_container_width=True,
+            go_clicked = st.button("GO", type="primary", width="stretch",
                                    key="analytics_go", disabled=analytics_file is None,
                                    help="Add & process this file")
-
-        SLOW_PROCESS_SECONDS = 5
 
         if analytics_file is not None:
             # Hash the actual bytes rather than name+size: the MDM export keeps the
@@ -7279,14 +7197,7 @@ with tab_analytics:
             analytics_file.seek(0)
 
             if st.session_state.get("analytics_last_fp") != file_fp:
-                t0 = time.time()
-                with st.spinner("📊 Processing and adding to Analytics..."):
-                    result = process_analytics_upload(analytics_file)
-                st.session_state["analytics_last_fp"] = file_fp
-                st.session_state["analytics_last_ok"] = result["ok"]
-                st.session_state["analytics_last_slow"] = (time.time() - t0) > SLOW_PROCESS_SECONDS
-                if result["wrote"]:
-                    st.rerun()
+                run_analytics_upload(analytics_file, file_fp)
 
             last_ok = st.session_state.get("analytics_last_ok", True)
             last_slow = st.session_state.get("analytics_last_slow", False)
@@ -7297,14 +7208,7 @@ with tab_analytics:
                             else "⏳ Processing took a while — tap GO if the figures below don't look up to date."))
 
             if go_clicked:
-                t0 = time.time()
-                with st.spinner("📊 Processing and adding to Analytics..."):
-                    result = process_analytics_upload(analytics_file)
-                st.session_state["analytics_last_fp"] = file_fp
-                st.session_state["analytics_last_ok"] = result["ok"]
-                st.session_state["analytics_last_slow"] = (time.time() - t0) > SLOW_PROCESS_SECONDS
-                if result["wrote"]:
-                    st.rerun()
+                run_analytics_upload(analytics_file, file_fp)
 
         # ── Build analytics tables from stored raw data ─────────────────────────
         st.divider()
@@ -7443,7 +7347,7 @@ with tab_analytics:
                         if _dup_all:
                             with st.expander(f"🧹 Remove {_dup_all:,} duplicate install record(s)"
                                              + (" (all dates)" if _dup_all != _dupkeys else ""), expanded=bool(_dupkeys)):
-                                if st.button("Check what will change", use_container_width=True, key="dup_fix_plan"):
+                                if st.button("Check what will change", width="stretch", key="dup_fix_plan"):
                                     st.session_state["_dup_fix"] = install_log_duplicate_fix()
                                 _plan = st.session_state.get("_dup_fix")
                                 if _plan == {}:
@@ -7453,10 +7357,10 @@ with tab_analytics:
                                                f"({', '.join(_plan['dates'])}) and sets these Installations rows to "
                                                "what the corrected log says:")
                                     if not _plan["changes"].empty:
-                                        st.dataframe(_plan["changes"], use_container_width=True, hide_index=True,
+                                        st.dataframe(_plan["changes"], width="stretch", hide_index=True,
                                                      height=dataframe_height(len(_plan["changes"]), max_px=360))
-                                    if st.button(f"Remove duplicates and correct Installations", type="primary",
-                                                 use_container_width=True, key="dup_fix_apply"):
+                                    if st.button("Remove duplicates and correct Installations", type="primary",
+                                                 width="stretch", key="dup_fix_apply"):
                                         _ok = safe_update("UploadedInstallLog", _plan["log_clean"])
                                         _ok = _ok and safe_update("Installations", _plan["inst_new"])
                                         _mp = get_data_fresh("MapRecords")
@@ -7467,7 +7371,7 @@ with tab_analytics:
                                             st.success(f"✅ Removed {_plan['n_dups']:,} duplicate record(s) and corrected Installations.")
                                             st.rerun()
                         if len(_missing) and st.button(f"Sync {len(_missing):,} install(s) from the install log into Analytics",
-                                                       use_container_width=True, key=f"analytics_sync_{sel_date}"):
+                                                       width="stretch", key=f"analytics_sync_{sel_date}"):
                             _cols = ["key", "date", "time", "installer_id", "hour", "location", "meter_type",
                                      "sno", "old_meter_no", "new_meter_no", "lat", "long"]
                             _rows = []
@@ -7517,7 +7421,6 @@ with tab_analytics:
                 return row
 
             hour_col_labels = [f"{h}-{h+1}" for h in hour_cols]
-            last_install_time = max(day_df["time"]) if not day_df.empty else "—"
 
             def _build_hourly_df(scope_df):
                 """Per-installer rows for a scope, plus its own TOTAL row."""
@@ -7544,7 +7447,7 @@ with tab_analytics:
                 hdf = _build_hourly_df(scope_df)
                 grid = build_hourly_color_grid(hdf, hour_col_labels)
                 if hourly_view_mode.startswith("📋"):
-                    st.dataframe(style_hourly_table(hdf, hour_col_labels), use_container_width=True,
+                    st.dataframe(style_hourly_table(hdf, hour_col_labels), width="stretch",
                                  hide_index=True, height=dataframe_height(len(hdf)))
                 else:
                     render_hourly_heatmap(hdf, hour_col_labels, grid)
@@ -7604,7 +7507,7 @@ with tab_analytics:
                     [(r["Section"], int(r["Total"])) for _, r in section_summary.iterrows()],
                     columns=4, total_label="Total",
                 )
-                st.dataframe(section_summary, use_container_width=True, hide_index=True,
+                st.dataframe(section_summary, width="stretch", hide_index=True,
                              height=dataframe_height(len(section_summary)))
             else:
                 st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
@@ -7631,7 +7534,7 @@ with tab_analytics:
                 "Total": int(half_df["Total"].sum()) if not half_df.empty else 0,
             }
             half_display_df = pd.concat([half_df, pd.DataFrame([half_total_row])], ignore_index=True)
-            st.dataframe(half_display_df, use_container_width=True, hide_index=True, height=dataframe_height(len(half_display_df)))
+            st.dataframe(half_display_df, width="stretch", hide_index=True, height=dataframe_height(len(half_display_df)))
             download_image_button(half_display_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half",
                                   title=f"Half-Day Split — {sel_date}\n{analytics_img_meta}")
 
@@ -7642,7 +7545,7 @@ with tab_analytics:
                 sub = day_df[day_df["installer_id"] == inst].sort_values("time")
                 first_t, last_t = sub["time"].iloc[0], sub["time"].iloc[-1]
                 n = len(sub)
-                active_pace, _break_min, _gaps = compute_active_pace(sub["time"].tolist())
+                active_pace, _, _ = compute_active_pace(sub["time"].tolist())
                 avg_rows.append({
                     "Installer": inst, "First Install": first_t, "Last Install": last_t,
                     "Total Installs": n,
@@ -7653,7 +7556,7 @@ with tab_analytics:
             avg_df = pd.DataFrame(avg_rows).sort_values("Total Installs", ascending=False)
             st.dataframe(
                 _style_map(avg_df.style, avg_time_style, subset=["Avg Time/Install (min)"]),
-                use_container_width=True, hide_index=True, height=dataframe_height(len(avg_df)),
+                width="stretch", hide_index=True, height=dataframe_height(len(avg_df)),
             )
             download_image_button(
                 avg_df, f"Avg_Install_Time_{sel_date}.png", key="dl_img_avg",
@@ -7668,7 +7571,7 @@ with tab_analytics:
                 reset_pin = st.text_input("Enter PIN to unlock reset", type="password", key="analytics_reset_pin")
                 if reset_pin == PIN_CODE:
                     confirm_reset = st.checkbox("I understand this will delete all Analytics data collected so far")
-                    if st.button("🗑️ Reset Analytics Data", type="primary", disabled=not confirm_reset, use_container_width=True):
+                    if st.button("🗑️ Reset Analytics Data", type="primary", disabled=not confirm_reset, width="stretch"):
                         empty_df = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour", "location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"])
                         if safe_update("AnalyticsRaw", empty_df):
                             st.success("✅ Analytics data cleared. Ready for a new day.")
@@ -7704,7 +7607,7 @@ with tab_analytics:
                            + (", ".join(_pdates) if len(_pdates) <= 6 else f"{len(_pdates)} dates ({_pdates[0]} to {_pdates[-1]})")
                            + ".")
             _push_now = st.button("Update Installs" + (f" ({len(_pending):,} new)" if len(_pending) else ""),
-                                  type="primary", use_container_width=True)
+                                  type="primary", width="stretch")
             if st.session_state.pop("trigger_analytics_push", False):
                 _push_now = True
             if _push_now:
@@ -7721,7 +7624,6 @@ with tab_analytics:
                 else:
                     st.info("All Analytics installs are already in the install log.")
 
-# ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 #  MAP  (built from MapRecords — its own independent sheet. Populated by a
 #  one-way mirror from Installs-tab uploads + Analytics's "Update Installs"
@@ -7774,16 +7676,16 @@ with tab_map:
             # Quick presets — the calendar's month arrows can sit off-screen on a
             # narrow phone viewport, so these cover the common jumps without it.
             qp1, qp2, qp3, qp4 = st.columns(4)
-            if qp1.button("Today", use_container_width=True, key="map_qp_today"):
+            if qp1.button("Today", width="stretch", key="map_qp_today"):
                 st.session_state["map_date_range"] = (today, today)
                 st.rerun()
-            if qp2.button("Last 7d", use_container_width=True, key="map_qp_7d"):
+            if qp2.button("Last 7d", width="stretch", key="map_qp_7d"):
                 st.session_state["map_date_range"] = (today - timedelta(days=6), today)
                 st.rerun()
-            if qp3.button("This month", use_container_width=True, key="map_qp_month"):
+            if qp3.button("This month", width="stretch", key="map_qp_month"):
                 st.session_state["map_date_range"] = (today.replace(day=1), today)
                 st.rerun()
-            if qp4.button("All data", use_container_width=True, key="map_qp_all"):
+            if qp4.button("All data", width="stretch", key="map_qp_all"):
                 st.session_state["map_date_range"] = (data_min_d, data_max_d)
                 st.rerun()
 
@@ -7793,14 +7695,7 @@ with tab_map:
             with mf2:
                 map_date_range = st.date_input("Date Range", default_range, min_value=picker_min, max_value=picker_max, key="map_date_range")
 
-            if isinstance(map_date_range, (list, tuple)) and len(map_date_range) == 2:
-                md_start, md_end = map_date_range[0], map_date_range[1]
-            elif isinstance(map_date_range, (list, tuple)) and len(map_date_range) == 1:
-                md_start = md_end = map_date_range[0]
-            elif isinstance(map_date_range, (list, tuple)):  # empty — nothing picked yet
-                md_start = md_end = None
-            else:
-                md_start = md_end = map_date_range
+            md_start, md_end = date_range_bounds(map_date_range)
 
             if md_start is None:
                 # Only reachable if the picker is cleared mid-session; show nothing
@@ -7893,7 +7788,7 @@ with tab_map:
                         "style": {"backgroundColor": "#14181F", "color": "white", "fontSize": "12px"},
                     },
                 )
-                st.pydeck_chart(deck, use_container_width=True)
+                st.pydeck_chart(deck, width="stretch")
                 if _density:
                     st.markdown(f'<div class="info-box">{len(tooltip_df):,} installs in view, shown as density — larger circles '
                                 f'mean more installs. Narrow the dates or sections to below {MAP_PIN_LIMIT:,} to see '
@@ -7964,9 +7859,7 @@ with tab_map:
                         map_table_cols = ["date", "time", "tech_name", "location", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
                         map_table_cols = [c for c in map_table_cols if c in pinned.columns]
                         map_table = pinned[map_table_cols].copy()
-                        for _idc in ["sno", "old_meter_no", "new_meter_no"]:
-                            if _idc in map_table.columns:
-                                map_table[_idc] = map_table[_idc].apply(clean_id_value)
+                        clean_id_columns(map_table, ("sno", "old_meter_no", "new_meter_no"))
                         # The table's data is sent even while this is closed, so
                         # it shows the latest rows; the full list is a download.
                         _sort = [c for c in ("date", "time") if c in map_table.columns]
@@ -7974,7 +7867,7 @@ with tab_map:
                             map_table = map_table.sort_values(_sort, ascending=False)
                         if len(map_table) > MAP_TABLE_LIMIT:
                             st.caption(f"Latest {MAP_TABLE_LIMIT:,} of {len(map_table):,}; download for the full list.")
-                        st.dataframe(map_table.head(MAP_TABLE_LIMIT), use_container_width=True, hide_index=True,
+                        st.dataframe(map_table.head(MAP_TABLE_LIMIT), width="stretch", hide_index=True,
                                      height=dataframe_height(min(len(map_table), MAP_TABLE_LIMIT), max_px=500))
                         _full = map_table
                         lazy_download_button(f"📥 Download all {len(map_table):,} as CSV",
@@ -7988,7 +7881,7 @@ with tab_map:
         st.divider()
         sec_hdr("broom", "Map Data Maintenance")
         with st.expander("🔎 Check & Remove Duplicate Map Records"):
-            if st.button("🔎 Scan For Duplicates", use_container_width=True, key="scan_map_dups_btn"):
+            if st.button("🔎 Scan For Duplicates", width="stretch", key="scan_map_dups_btn"):
                 st.session_state["map_dups_scanned"] = True
             if st.session_state.get("map_dups_scanned"):
                 map_dups = find_map_duplicates()
@@ -7996,9 +7889,9 @@ with tab_map:
                     st.success("✅ No same-SNO-same-date duplicates found in Map data.")
                 else:
                     st.warning(f"⚠️ Found {len(map_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
-                    edited_map_dups = st.data_editor(map_dups, use_container_width=True, hide_index=True, key="map_dups_editor", disabled=[c for c in map_dups.columns if c != "Keep?"])
+                    edited_map_dups = st.data_editor(map_dups, width="stretch", hide_index=True, key="map_dups_editor", disabled=[c for c in map_dups.columns if c != "Keep?"])
                     to_remove = edited_map_dups[~edited_map_dups["Keep?"]]["Key"].tolist()
-                    if st.button(f"🗑️ Remove {len(to_remove)} Unchecked Record(s)", type="primary", use_container_width=True, disabled=not to_remove, key="remove_map_dups_btn"):
+                    if st.button(f"🗑️ Remove {len(to_remove)} Unchecked Record(s)", type="primary", width="stretch", disabled=not to_remove, key="remove_map_dups_btn"):
                         removed = remove_map_records(to_remove)
                         st.success(f"✅ Removed {removed} duplicate record(s) from the Map.")
                         st.rerun()
@@ -8015,13 +7908,7 @@ with tab_exp:
 
         # -- Month --------------------------------------------------------------
         _today = today_ist()
-        _months = {month_key(_today)}
-        _y, _m = _today.year, _today.month
-        for _ in range(11):                          # the last 12 months, always offered
-            _m -= 1
-            if _m == 0:
-                _y, _m = _y - 1, 12
-            _months.add(f"{_y:04d}-{_m:02d}")
+        _months = set(recent_month_keys(_today))      # the last 12 months, always offered
         _months |= {str(x) for x in df_exp_all["month"].unique() if str(x).strip()}
         month_opts = sorted(_months, reverse=True)
         sel_month = st.selectbox("Month", month_opts, index=month_opts.index(month_key(_today)),
@@ -8082,39 +7969,23 @@ with tab_exp:
             _cards = []
             for x in site_cb["sites"]:
                 _n = x["n1"] + x["n3"]
-                _cards.append(
-                    f'<div style="background:var(--surface-100);border-radius:var(--radius-md);padding:11px;'
-                    f'display:flex;flex-direction:column;gap:4px;">'
-                    f'<div style="font-size:13px;font-weight:700;color:var(--ink-900);">{x["site"]}</div>'
-                    f'<div style="font-size:18px;font-weight:800;color:var(--ink-900);">Rs. {x["cost"]:,.0f}</div>'
-                    + (f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">Own {x["own_fixed"]:,.0f} — '
-                       f'moved to shared (no installs)</div>' if x["moved_to_shared"] else
-                       f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">Own {x["own_fixed"]:,.0f} · '
-                       f'Shared {x["shared_fixed"]:,.0f}</div>')
-                    + f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">'
-                    + (f'{_n:,} installs · Rs. {fmt_rs(x["cpi"], 1)} / install' if _n else 'No installs this month')
-                    + '</div></div>')
+                _cards.append(_cost_card(
+                    x["site"], x["cost"],
+                    (f'Own {x["own_fixed"]:,.0f} — moved to shared (no installs)' if x["moved_to_shared"]
+                     else f'Own {x["own_fixed"]:,.0f} · Shared {x["shared_fixed"]:,.0f}'),
+                    (f'{_n:,} installs · Rs. {fmt_rs(x["cpi"], 1)} / install' if _n else 'No installs this month')))
             if site_cb["shared_pool"]:
                 _idle_amt = sum(site_cb["idle_moved"].values())
-                _cards.append(
-                    f'<div style="background:var(--surface-100);border-radius:var(--radius-md);padding:11px;'
-                    f'display:flex;flex-direction:column;gap:4px;">'
-                    f'<div style="font-size:13px;font-weight:700;color:var(--brand-700);">Shared</div>'
-                    f'<div style="font-size:18px;font-weight:800;color:var(--ink-900);">Rs. {site_cb["shared_pool"]:,.0f}</div>'
-                    f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">All sites {site_cb["shared_fixed"]:,.0f}'
-                    + (f' + no-install sites {_idle_amt:,.0f}' if _idle_amt else '') + '</div>'
-                    f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">'
-                    + (f'Rs. {site_cb["shared_each"]:,.0f} each to {len(site_cb["sharers"])} site(s)'
-                       if site_cb["sharers"] else 'Waiting for installs')
-                    + '</div></div>')
+                _cards.append(_cost_card(
+                    "Shared", site_cb["shared_pool"],
+                    f'All sites {site_cb["shared_fixed"]:,.0f}'
+                    + (f' + no-install sites {_idle_amt:,.0f}' if _idle_amt else ''),
+                    (f'Rs. {site_cb["shared_each"]:,.0f} each to {len(site_cb["sharers"])} site(s)'
+                     if site_cb["sharers"] else 'Waiting for installs'),
+                    title_color="--brand-700"))
             if site_cb.get("general_fixed"):
-                _cards.append(
-                    f'<div style="background:var(--surface-100);border-radius:var(--radius-md);padding:11px;'
-                    f'display:flex;flex-direction:column;gap:4px;">'
-                    f'<div style="font-size:13px;font-weight:700;color:var(--danger-700);">General</div>'
-                    f'<div style="font-size:18px;font-weight:800;color:var(--ink-900);">Rs. {site_cb["general_fixed"]:,.0f}</div>'
-                    f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">Not assigned to a site yet</div>'
-                    f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">Assign or delete below</div></div>')
+                _cards.append(_cost_card("General", site_cb["general_fixed"], "Not assigned to a site yet",
+                                         "Assign or delete below", title_color="--danger-700"))
             st.markdown('<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;'
                         'margin-bottom:var(--space-5);">' + "".join(_cards) + '</div>', unsafe_allow_html=True)
             with st.expander("Site details — 1PH / 3PH split"):
@@ -8126,7 +7997,7 @@ with tab_exp:
                     "Cost / 1PH": fmt_rs(x["cpi1"], 2), "Cost / 3PH": fmt_rs(x["cpi3"], 2),
                     "Cost / Install": fmt_rs(x["cpi"], 2), "Site Cost": round(x["cost"]),
                 } for x in site_cb["sites"]])
-                st.dataframe(site_tbl, use_container_width=True, hide_index=True,
+                st.dataframe(site_tbl, width="stretch", hide_index=True,
                              height=dataframe_height(len(site_tbl)))
             _rule = (f"split equally among the {len(site_cb['sharers'])} site(s) with more than "
                      f"{SHARED_MIN_INSTALLS} installs this month" if site_cb["sharers_rule"] == "over_min"
@@ -8150,7 +8021,7 @@ with tab_exp:
                 cat_df["Month (Rs.)"] = cat_df["Month (Rs.)"].round(0).astype(int)
                 cat_df["Share"] = cat_df["Month (Rs.)"].apply(
                     lambda v: f"{v / summ['total_cost'] * 100:.0f}%" if summ["total_cost"] else "—")
-                st.dataframe(cat_df, use_container_width=True, hide_index=True, height=dataframe_height(len(cat_df)))
+                st.dataframe(cat_df, width="stretch", hide_index=True, height=dataframe_height(len(cat_df)))
 
             veh_rows = df_exp_all[(df_exp_all["month"].astype(str) == sel_month)
                                   & (df_exp_all["category"].isin(EXPENSE_VEHICLE_CATEGORIES))
@@ -8165,7 +8036,7 @@ with tab_exp:
                     vt["Total"] = vt.sum(axis=1)
                     vt = vt.round(0).astype(int).sort_values("Total", ascending=False).reset_index()
                     vt = vt.rename(columns={"vehicle_reg": "Vehicle"})
-                    st.dataframe(vt, use_container_width=True, hide_index=True, height=dataframe_height(len(vt)))
+                    st.dataframe(vt, width="stretch", hide_index=True, height=dataframe_height(len(vt)))
 
         # ══ Add an expense ═══════════════════════════════════════════════════
         st.divider()
@@ -8174,15 +8045,15 @@ with tab_exp:
             st.session_state["exp_form_version"] = 0
         ev = st.session_state["exp_form_version"]
         _loc_opts = list(active_locs) + [ALL_SITES, GENERAL_SITE]
-        _yy, _mm = int(sel_month[:4]), int(sel_month[5:])
-        prev_month = f"{_yy - 1:04d}-12" if _mm == 1 else f"{_yy:04d}-{_mm - 1:02d}"
+        prev_month = prev_month_key(sel_month)
 
         ac1, ac2 = st.columns(2)
         with ac1:
             exp_cat = st.selectbox("Category", EXPENSE_FIXED_CATEGORIES, key=f"exp_cat_f_{ev}")
         with ac2:
             exp_site = st.selectbox("Location", _loc_opts, index=len(_loc_opts) - 1, key=f"exp_site_{ev}",
-                                    help="All sites: split across sites by installs. General: not assigned yet.")
+                                    help=f"All sites: shared equally by the sites with more than {SHARED_MIN_INSTALLS} "
+                                         "installs that month. General: not assigned yet.")
         ac3, ac4 = st.columns(2)
         with ac3:
             exp_amt = st.number_input("Amount (Rs.)", min_value=0.0, step=100.0, value=0.0, key=f"exp_amt_{ev}")
@@ -8192,7 +8063,7 @@ with tab_exp:
         exp_item = st.text_input("Description (optional)", key=f"exp_item_{ev}",
                                  placeholder=EXPENSE_ITEM_HINT.get(exp_cat, ""))
         exp_rec = st.checkbox("Repeats monthly", value=exp_cat in EXPENSE_RECURRING_DEFAULT, key=f"exp_rec_{ev}_{exp_cat}")
-        if st.button("➕ Add Expense", type="primary", use_container_width=True, key="exp_add_fixed"):
+        if st.button("➕ Add Expense", type="primary", width="stretch", key="exp_add_fixed"):
             if exp_amt <= 0:
                 st.error("❌ Enter an amount.")
             elif exp_cat in EXPENSE_VEHICLE_CATEGORIES and exp_reg in ("", "-- Select --"):
@@ -8221,7 +8092,7 @@ with tab_exp:
                 for _, r in prev_rec.iterrows()]]
             if not to_copy.empty:
                 if st.button(f"📋 Copy {len(to_copy)} repeating cost(s) from {month_label(prev_month)}",
-                             use_container_width=True, key="exp_copy_prev"):
+                             width="stretch", key="exp_copy_prev"):
                     copied = to_copy[EXPENSE_COLS].copy()
                     copied["month"] = sel_month
                     base = int(time.time() * 1000)
@@ -8259,7 +8130,7 @@ with tab_exp:
                 "expense_id": ordered["expense_id"].values,
             })
             all_ed = st.data_editor(
-                view, use_container_width=True, hide_index=True,
+                view, width="stretch", hide_index=True,
                 key=f"exp_all_{sel_month}_{_sheet_version('Expenses')}",
                 column_config={
                     "expense_id": None,
@@ -8272,7 +8143,7 @@ with tab_exp:
                 },
                 height=dataframe_height(len(view), max_px=640))
             _chg = int((all_ed.astype(str).values != view.astype(str).values).any(axis=1).sum())
-            if st.button(f"💾 Save{f' ({_chg} changed)' if _chg else ''}", type="primary", use_container_width=True,
+            if st.button(f"💾 Save{f' ({_chg} changed)' if _chg else ''}", type="primary", width="stretch",
                          key="exp_all_save", disabled=_chg == 0):
                 out = df_exp_all[EXPENSE_COLS].copy().set_index("expense_id")
                 for _, r in all_ed.iterrows():
@@ -8300,7 +8171,7 @@ with tab_exp:
                 "Description": general["item"].astype(str).values,
                 "expense_id": general["expense_id"].values,
             })
-            gen_ed = st.data_editor(gview, use_container_width=True, hide_index=True,
+            gen_ed = st.data_editor(gview, width="stretch", hide_index=True,
                                     key=f"exp_gen_{sel_month}_{_sheet_version('Expenses')}",
                                     disabled=["Category", "Amount (Rs.)", "Description"],
                                     column_config={"expense_id": None,
@@ -8309,7 +8180,7 @@ with tab_exp:
             _gd = gen_ed[gen_ed["Delete"]]
             gc1, gc2 = st.columns(2)
             with gc1:
-                if st.button(f"🗑️ Delete {len(_gd)} ticked", use_container_width=True, key="exp_gen_del",
+                if st.button(f"🗑️ Delete {len(_gd)} ticked", width="stretch", key="exp_gen_del",
                              disabled=_gd.empty):
                     out = df_exp_all[~df_exp_all["expense_id"].isin(set(_gd["expense_id"]))]
                     if safe_update("Expenses", out[EXPENSE_COLS]):
@@ -8317,7 +8188,7 @@ with tab_exp:
                         st.rerun()
             with gc2:
                 _sure = st.checkbox(f"Delete all {len(general)}", key=f"exp_gen_all_sure_{sel_month}")
-                if st.button(f"🗑️ Delete all General", use_container_width=True, key="exp_gen_del_all",
+                if st.button("🗑️ Delete all General", width="stretch", key="exp_gen_del_all",
                              disabled=not _sure):
                     out = df_exp_all[~df_exp_all["expense_id"].isin(set(general["expense_id"]))]
                     if safe_update("Expenses", out[EXPENSE_COLS]):
@@ -8351,7 +8222,7 @@ with tab_exp:
                             unsafe_allow_html=True)
             vb1, vb2 = st.columns(2)
             with vb1:
-                if st.button("💾 Save Rate", type="primary", use_container_width=True, key="exp_add_var"):
+                if st.button("💾 Save Rate", type="primary", width="stretch", key="exp_add_var"):
                     if r1 <= 0 and r3 <= 0:
                         st.error("❌ Enter at least one rate.")
                     else:
@@ -8369,7 +8240,7 @@ with tab_exp:
                             st.success(f"✅ {exp_vcat} rate saved for {month_label(sel_month)}.")
                             st.rerun()
             with vb2:
-                if not cur.empty and st.button("🗑️ Remove rate", use_container_width=True, key="exp_del_var"):
+                if not cur.empty and st.button("🗑️ Remove rate", width="stretch", key="exp_del_var"):
                     if safe_update("Expenses", df_exp_all[~df_exp_all["expense_id"].isin(set(cur["expense_id"]))][EXPENSE_COLS]):
                         st.success(f"✅ {exp_vcat} rate removed for {month_label(sel_month)}.")
                         st.rerun()
@@ -8377,8 +8248,10 @@ with tab_exp:
         # -- 1PH incentive & profit sharing -------------------------------------
         st.divider()
         sec_hdr("receipt", "Incentive & Profit Sharing")
-        _n1ph = month_installs_1ph(sel_month)
-        _n3ph = month_installs_3ph(sel_month)
+        # The same install counts as the rest of this tab and the Dashboard
+        # billing (the Installations sheet), so the expense per install, the
+        # billing and the profit split all rest on one set of figures.
+        _n1ph, _n3ph = n1, n3
         _cpi = summ["total_per_install"]
         if (_n1ph + _n3ph) == 0:
             st.info(f"No installs recorded for {month_label(sel_month)} yet.")
@@ -8437,7 +8310,7 @@ with tab_exp:
                 ("GST on additional", ps["gst_additional"]),
             ], columns=["Component", "Amount (Rs.)"])
             pool["Amount (Rs.)"] = pool["Amount (Rs.)"].round(0).astype(int)
-            st.dataframe(pool, use_container_width=True, hide_index=True, height=dataframe_height(len(pool)))
+            st.dataframe(pool, width="stretch", hide_index=True, height=dataframe_height(len(pool)))
 
             sub_hdr("users", "Partner-Wise")
             pw = ps["partners"].copy()
@@ -8445,7 +8318,7 @@ with tab_exp:
                 pw[c] = pw[c].round(0).astype(int)
             total_row = {"Partner": "TOTAL", **{c: int(pw[c].sum()) for c in pw.columns[1:]}}
             pw_disp = pd.concat([pw, pd.DataFrame([total_row])], ignore_index=True)
-            st.dataframe(pw_disp, use_container_width=True, hide_index=True, height=dataframe_height(len(pw_disp)))
+            st.dataframe(pw_disp, width="stretch", hide_index=True, height=dataframe_height(len(pw_disp)))
 
             lazy_download_button(
                 "📥 Download Excel (Incentive + Profit Sharing)",
@@ -8464,7 +8337,7 @@ with tab_exp:
         with vc2:
             new_desc = st.text_input("Description", key=f"veh_desc_{ev}", placeholder="e.g. Bolero – Chittinagar team")
         with vc3:
-            if st.button("➕ Add Vehicle", use_container_width=True, key="veh_add"):
+            if st.button("➕ Add Vehicle", width="stretch", key="veh_add"):
                 reg = normalize_reg_no(new_reg)
                 if len(reg) < 6:
                     st.error("❌ Enter a valid registration number.")
@@ -8486,9 +8359,9 @@ with tab_exp:
             vview.insert(0, "Delete", False)
             vview = vview[["Delete", "reg_no", "description", "Active"]].rename(
                 columns={"reg_no": "Registration No.", "description": "Description"})
-            vedit = st.data_editor(vview, use_container_width=True, hide_index=True, key=f"veh_editor_{_sheet_version('Vehicles')}",
+            vedit = st.data_editor(vview, width="stretch", hide_index=True, key=f"veh_editor_{_sheet_version('Vehicles')}",
                                    disabled=["Registration No."], height=dataframe_height(len(vview)))
-            if st.button("💾 Save Vehicle Changes", use_container_width=True, key="veh_save"):
+            if st.button("💾 Save Vehicle Changes", width="stretch", key="veh_save"):
                 new_veh, blocked = apply_vehicle_edits(vedit, used_regs)
                 if safe_update("Vehicles", new_veh):
                     if blocked:
@@ -8547,7 +8420,7 @@ with tab_liaison:
                                            placeholder="e.g. Chittinagar").split())
             if not typed:
                 return ""
-            match, _how = closest_match(typed, known_secs, key=section_key, cutoff=0.8)
+            match, _ = closest_match(typed, known_secs, key=section_key, cutoff=0.8)
             if match:
                 if st.checkbox(f"Keep “{typed}” as a separate section (it looks like “{match}”)",
                                key=f"{key}_sep"):
@@ -8559,14 +8432,7 @@ with tab_liaison:
 
         # -- Filters ---------------------------------------------------------------
         _today_l = today_ist()
-        _lmonths = {month_key(_today_l)}
-        _ly, _lm = _today_l.year, _today_l.month
-        for _ in range(11):
-            _lm -= 1
-            if _lm == 0:
-                _ly, _lm = _ly - 1, 12
-            _lmonths.add(f"{_ly:04d}-{_lm:02d}")
-        l_month_opts = sorted(_lmonths, reverse=True)
+        l_month_opts = recent_month_keys(_today_l)
         fc1, fc2 = st.columns([1, 2])
         with fc1:
             l_month = st.selectbox("Month", l_month_opts, index=l_month_opts.index(month_key(_today_l)),
@@ -8653,7 +8519,7 @@ with tab_liaison:
                 def _bold_last(row):
                     last = row.name == len(summ_disp) - 1
                     return ["font-weight:700;background-color:#E6F4F5" if last else "" for _ in row]
-                st.dataframe(summ_disp.style.apply(_bold_last, axis=1), use_container_width=True,
+                st.dataframe(summ_disp.style.apply(_bold_last, axis=1), width="stretch",
                              hide_index=True, height=dataframe_height(len(summ_disp)))
 
                 # Breakup: each lineman's section codes, a total under each, and a
@@ -8690,7 +8556,7 @@ with tab_liaison:
                         return ["font-weight:700;background-color:#E6F4F5"] * len(row)
                     return [""] * len(row)
                 sub_hdr("pin", "Breakup By Section Code")
-                st.dataframe(breakup.style.apply(_style_breakup, axis=1), use_container_width=True,
+                st.dataframe(breakup.style.apply(_style_breakup, axis=1), width="stretch",
                              hide_index=True, height=dataframe_height(len(breakup), max_px=760))
                 st.markdown(
                     f'<div class="info-box"><b>Total — {month_label(l_month)} · {_scope}'
@@ -8709,7 +8575,7 @@ with tab_liaison:
                 with dc3:
                     st.download_button("📥 Breakup CSV", data=breakup.to_csv(index=False).encode("utf-8"),
                                        file_name=f"liaisoning_breakup_{l_month}.csv", mime="text/csv",
-                                       use_container_width=True, key="liaison_bk_csv", on_click="ignore")
+                                       width="stretch", key="liaison_bk_csv", on_click="ignore")
 
             # -- Every section code, mapped or not ----------------------------------
             with st.expander(f"All section codes ({len(lt)}) — including ones with no lineman"):
@@ -8720,11 +8586,11 @@ with tab_liaison:
                 detail["Lineman"] = detail["Lineman"].replace("", "— not mapped —")
                 detail["Installs"] = detail["Installs"].astype(int)
                 detail["Payable (Rs.)"] = detail["Payable (Rs.)"].round(0).astype(int)
-                st.dataframe(detail, use_container_width=True, hide_index=True,
+                st.dataframe(detail, width="stretch", hide_index=True,
                              height=dataframe_height(len(detail), max_px=520))
                 st.download_button("📥 Download CSV", data=detail.to_csv(index=False).encode("utf-8"),
                                    file_name=f"liaisoning_{l_month}.csv", mime="text/csv",
-                                   use_container_width=True, key="liaison_csv", on_click="ignore")
+                                   width="stretch", key="liaison_csv", on_click="ignore")
 
         # -- Mappings that matched nothing ---------------------------------------
         # A mapping with no installs is normal early in the month, but a section
@@ -8735,8 +8601,6 @@ with tab_liaison:
         if not _map_all.empty:
             _counts_all = month_section_counts(l_month)
             _data_keys = {section_key(x) for x in _counts_all["location"]} if not _counts_all.empty else set()
-            _worked = ({(section_key(a), b) for a, b in zip(_counts_all["location"], _counts_all["section_code"])}
-                       if not _counts_all.empty else set())
             _bad = [r for r in _map_all.itertuples() if section_key(r.location) not in _data_keys]
             if _bad and _data_keys:
                 bad_names = sorted({r.location for r in _bad}, key=str.upper)
@@ -8830,7 +8694,7 @@ with tab_liaison:
                         st.caption(f"{len(prev_df)} name(s) in {u_sheet} · edit anything below before saving. "
                                    "Changing a matched name back to the file's spelling saves it as a separate lineman.")
                         ed = st.data_editor(
-                            prev_df, use_container_width=True, hide_index=True,
+                            prev_df, width="stretch", hide_index=True,
                             key=f"liaison_prev_{lv}_{_uh}_{u_sheet}_{_sk}",
                             disabled=["Check"],
                             column_config={
@@ -8845,7 +8709,7 @@ with tab_liaison:
                         plan, errs, seen_code = [], [], {}
                         for _, r in take.iterrows():
                             nm = clean_lineman_name(r["Lineman"])
-                            codes, _sk_bad = parse_route_codes(r["Section Codes"])
+                            codes, _ = parse_route_codes(r["Section Codes"])
                             _rt = pd.to_numeric(r["Rate (Rs.)"], errors="coerce")
                             if not nm:
                                 errs.append("A row ticked for import has no name.")
@@ -8879,7 +8743,7 @@ with tab_liaison:
                             st.error(f"❌ {e}")
                         n_new = sum(1 for p in plan if not closest_match(p[0], known_linemen)[0])
                         if st.button(f"💾 Save {len(plan)} {'lineman' if len(plan) == 1 else 'linemen'} · {len(new_codes)} code(s) to {u_sec}",
-                                     type="primary", use_container_width=True, key=f"liaison_usave_{lv}",
+                                     type="primary", width="stretch", key=f"liaison_usave_{lv}",
                                      disabled=bool(errs) or not plan):
                             base = liaisoning_frame(df_map_l)
                             _in = base["location"].apply(section_key) == _sk
@@ -8940,7 +8804,7 @@ with tab_liaison:
                 pick = st.selectbox("Lineman", ["— new —"] + known_linemen, key=f"liaison_man_pick_{lv}")
                 if pick == "— new —":
                     m_lineman = clean_lineman_name(st.text_input("New lineman name", key=f"liaison_man_{lv}"))
-                    _m, _how = closest_match(m_lineman, known_linemen) if m_lineman else (None, None)
+                    _m, _ = closest_match(m_lineman, known_linemen) if m_lineman else (None, None)
                     if _m:
                         if st.checkbox(f"Save as a different person (looks like saved lineman “{_m}”)",
                                        key=f"liaison_man_sep_{lv}"):
@@ -8964,7 +8828,7 @@ with tab_liaison:
                                       placeholder="LM, JLM …")
             with lc6:
                 m_ph = st.text_input("Phone (optional)", value=_p0, key=f"liaison_ph_{lv}_{m_lineman}")
-            if st.button("➕ Save Mapping", type="primary", use_container_width=True, key="liaison_add"):
+            if st.button("➕ Save Mapping", type="primary", width="stretch", key="liaison_add"):
                 if not m_loc:
                     st.error("❌ Choose the section.")
                 elif not str(m_lineman).strip():
@@ -9021,7 +8885,7 @@ with tab_liaison:
                                 _g, key=f"liaison_sim_{_col}_{_i}_{_sheet_version('Liaisoning')}")
                         with sc2:
                             st.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
-                            if st.button("Merge", key=f"liaison_merge_{_col}_{_i}", use_container_width=True):
+                            if st.button("Merge", key=f"liaison_merge_{_col}_{_i}", width="stretch"):
                                 merged_l = full_l.copy()
                                 merged_l.loc[merged_l[_col].isin(_g), _col] = _keep
                                 if safe_update("Liaisoning", liaisoning_frame(merged_l, _sec_by_key)):
@@ -9039,14 +8903,14 @@ with tab_liaison:
                 ["Section", "Lineman", "Section Code"])
             mv = mv[["Delete", "Section", "Section Code", "Lineman", "Designation", "Phone", "Rate (Rs.)"]]
             med = st.data_editor(
-                mv, use_container_width=True, hide_index=True,
+                mv, width="stretch", hide_index=True,
                 key=f"liaison_editor_{_sheet_version('Liaisoning')}_{cm_sec}",
                 disabled=["Section Code"],
                 column_config={"Rate (Rs.)": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="%.2f")},
                 height=dataframe_height(len(mv)))
             n_del_l = int(med["Delete"].sum())
             if st.button(f"💾 Save Changes{f' (deleting {n_del_l})' if n_del_l else ''}", type="primary",
-                         use_container_width=True, key="liaison_save"):
+                         width="stretch", key="liaison_save"):
                 keep = med[~med["Delete"]]
                 edited = pd.DataFrame({
                     "location": keep["Section"].astype(str).str.strip(),
@@ -9081,49 +8945,10 @@ with tab_inst:
         bulk_file = st.file_uploader("Upload Installation Excel (.xlsx)", type=["xlsx"], key="bulk_install_uploader")
 
         if bulk_file is not None:
-            if st.button("📥 Process & Save Installs", type="primary", use_container_width=True):
-                try:
-                    ws = load_first_data_sheet(bulk_file)
-                except Exception as e:
-                    st.error(f"❌ Could not open the file: {e}")
-                    ws = None
-
-                if ws is not None:
-                    header_row, col_map = find_header_row(ws, INSTALL_BULK_REQUIRED_HEADERS)
-                    if header_row is None:
-                        st.error("❌ Could not find 'Installation Date', 'Installation Time', 'Installer LoginID', 'Section' and 'New Meter Type' columns in this file.")
-                    else:
-                        detail_optional_map = find_optional_cols(ws, header_row, list(DETAIL_FIELD_HEADERS.values()))
-                        parsed = []
-                        skipped_non_tl = 0
-                        for r in range(header_row + 1, ws.max_row + 1):
-                            raw_installer = ws.cell(row=r, column=col_map["Installer LoginID"]).value
-                            if raw_installer is None or str(raw_installer).strip() == "":
-                                continue
-                            if not is_valid_installer_id(raw_installer):
-                                skipped_non_tl += 1
-                                continue
-                            d = normalize_date_val(ws.cell(row=r, column=col_map["Installation Date"]).value)
-                            t = normalize_time_val(ws.cell(row=r, column=col_map["Installation Time"]).value)
-                            if d is None or t is None:
-                                continue
-                            section = ws.cell(row=r, column=col_map["Section"]).value
-                            mtype = ws.cell(row=r, column=col_map["New Meter Type"]).value
-                            rec = {
-                                "date": d, "time": t,
-                                "installer_id": str(raw_installer).strip(),
-                                "location": str(section).strip() if section else "Unspecified",
-                                "meter_type": str(mtype).strip() if mtype else "",
-                            }
-                            rec.update(extract_detail_fields(ws, r, detail_optional_map))
-                            parsed.append(rec)
-
-                        if not parsed:
-                            st.warning(f"⚠️ No valid {INSTALLER_ID_PREFIX} installer rows with a date and time were found in this file.")
-                        else:
-                            if skipped_non_tl:
-                                st.caption(f"ℹ️ Ignored {skipped_non_tl} row(s) with a non-{INSTALLER_ID_PREFIX} installer ID.")
-                            push_parsed_records_to_installations(parsed, source_label="install(s)")
+            if st.button("📥 Process & Save Installs", type="primary", width="stretch"):
+                parsed = parse_install_upload(bulk_file)
+                if parsed:
+                    push_parsed_records_to_installations(parsed, source_label="install(s)")
 
         st.divider()
         render_meter_search("inst")
@@ -9165,7 +8990,7 @@ with tab_inst:
                         q3 = st.number_input("3PH", min_value=0, step=1, value=0, key=f"qm_q3_{v}_{t}", label_visibility="collapsed")
                     qty_map[t] = (q1, q3)
 
-            if st.button("➕ Add These To Batch", type="primary", use_container_width=True, disabled=not qm_techs):
+            if st.button("➕ Add These To Batch", type="primary", width="stretch", disabled=not qm_techs):
                 if qm_date is None:
                     st.error("❌ Pick a date first.")
                 elif qm_loc == "-- Select --":
@@ -9205,7 +9030,7 @@ with tab_inst:
                     single_q1 = st.number_input("1 PH Qty", min_value=0, step=1, value=0, key=f"single_q1_{v}")
                 with sc4:
                     single_q3 = st.number_input("3 PH Qty", min_value=0, step=1, value=0, key=f"single_q3_{v}")
-                if st.button("➕ Add This Entry To Batch", use_container_width=True):
+                if st.button("➕ Add This Entry To Batch", width="stretch"):
                     if single_date is None or single_tech == "-- Select --" or single_loc == "-- Select --":
                         st.error("❌ Fill date, technician and location.")
                     elif single_q1 == 0 and single_q3 == 0:
@@ -9246,9 +9071,9 @@ with tab_inst:
 
                 bcol1, bcol2 = st.columns(2)
                 with bcol1:
-                    clear_batch = st.button("🗑️ Clear Batch", use_container_width=True)
+                    clear_batch = st.button("🗑️ Clear Batch", width="stretch")
                 with bcol2:
-                    save_all = st.button(f"💾 Save All ({len(batch)}) To Sheet", type="primary", use_container_width=True)
+                    save_all = st.button(f"💾 Save All ({len(batch)}) To Sheet", type="primary", width="stretch")
 
                 if clear_batch:
                     st.session_state["installs_batch"] = []
@@ -9312,7 +9137,7 @@ with tab_inst:
                 disp_log["qty_1ph"] = disp_log["qty_1ph"].apply(lambda x: safe_int(x))
                 disp_log["qty_3ph"] = disp_log["qty_3ph"].apply(lambda x: safe_int(x))
                 disp_log["Total"] = disp_log["qty_1ph"] + disp_log["qty_3ph"]
-            st.dataframe(disp_log, use_container_width=True, hide_index=True)
+            st.dataframe(disp_log, width="stretch", hide_index=True)
 
             # Search, then pick: the list used to hold every record ever
             # entered, rebuilt on each click.
@@ -9471,7 +9296,7 @@ with tab_inv:
         stock_tbl = pd.DataFrame([
             {"Type": t, "Received": v["received"], "Installed": v["installed"],
              "Returned": v["returned"], "Pending": v["pending"]} for t, v in _ss.items()])
-        st.dataframe(stock_tbl, use_container_width=True, hide_index=True, height=dataframe_height(len(stock_tbl)))
+        st.dataframe(stock_tbl, width="stretch", hide_index=True, height=dataframe_height(len(stock_tbl)))
 
         sub_hdr("pin", "Stock By Location")
 
@@ -9520,8 +9345,7 @@ with tab_inv:
                 if _adds:
                     _lbl.append(f"add {len(_adds)} location(s)")
                 if st.button("💾 Save" + (f" — {', '.join(_lbl)}" if _lbl else ""), type="primary",
-                             use_container_width=True, key="locmap_save"):
-                    import json as _json
+                             width="stretch", key="locmap_save"):
                     if any(p_ == _NEW and not nm for p_, nm in _choices.values()):
                         st.error("❌ Enter a name for each new location.")
                     else:
@@ -9535,11 +9359,7 @@ with tab_inv:
                                 ok = safe_update("Locations", pd.concat([df_l_exist, pd.DataFrame(_rows)], ignore_index=True)
                                                  if not df_l_exist.empty else pd.DataFrame(_rows))
                         if ok:
-                            _al = {}
-                            try:
-                                _al = _json.loads(get_setting("location_aliases", "") or "{}")
-                            except Exception:
-                                _al = {}
+                            _al = dict(_raw_location_aliases())
                             for nm_, (p_, new_) in _choices.items():
                                 _al[nm_] = new_ if p_ == _NEW else (nm_ if p_ == _KEEP else p_)
                             ok = save_settings({"location_aliases": _json.dumps(_al)})
@@ -9552,7 +9372,7 @@ with tab_inv:
         if by_loc.empty:
             st.info("No stock recorded yet.")
         else:
-            st.dataframe(by_loc, use_container_width=True, hide_index=True,
+            st.dataframe(by_loc, width="stretch", hide_index=True,
                          height=dataframe_height(len(by_loc), max_px=420))
             if (by_loc["Location"] == "Unspecified").any():
                 st.markdown('<div class="warn-box">Stock received before locations were recorded shows as '
@@ -9618,7 +9438,7 @@ with tab_inv:
                                + (f" — {b_from} can cover all of it." if _avail_b >= _short
                                   else f" — {b_from} has only {_avail_b:,}; borrow the rest from another site."))
                 if st.button(f"🔁 Borrow {int(b_qty):,} × {b_type} from {b_from} to {b_to}", type="primary",
-                             use_container_width=True, key="borrow_save"):
+                             width="stretch", key="borrow_save"):
                     if not ensure_worksheet("Transfers", TRANSFER_COLS):
                         st.error("❌ Couldn't create the Transfers tab in the Google Sheet — add a tab named "
                                  "Transfers with the header: " + ", ".join(TRANSFER_COLS))
@@ -9643,13 +9463,13 @@ with tab_inv:
                 _tl = _tl.rename(columns={"date": "Date", "type": "Type", "qty": "Qty",
                                           "from_location": "From", "to_location": "To",
                                           "dc_no": "DC No.", "remarks": "Remarks"})
-                _tld = st.data_editor(_tl, use_container_width=True, hide_index=True,
+                _tld = st.data_editor(_tl, width="stretch", hide_index=True,
                                       disabled=[c for c in _tl.columns if c != "Delete"],
                                       key=f"borrow_log_{_sheet_version('Transfers')}",
                                       height=dataframe_height(len(_tl), max_px=360))
                 _nd = int(_tld["Delete"].sum())
                 if _nd and st.button(f"🗑️ Delete {_nd} entr{'y' if _nd == 1 else 'ies'}",
-                                     use_container_width=True, key="borrow_log_delete"):
+                                     width="stretch", key="borrow_log_delete"):
                     _keep_idx = _tld.index[~_tld["Delete"]]
                     if safe_update("Transfers", _tr_log.loc[sorted(_keep_idx), TRANSFER_COLS]):
                         st.success("✅ Borrow log updated.")
@@ -9658,20 +9478,15 @@ with tab_inv:
         _al_saved = load_location_aliases()
         if _al_saved:
             with st.expander(f"Location name mappings ({len(_al_saved)})"):
-                _raw_al = {}
-                try:
-                    import json as _json
-                    _raw_al = _json.loads(get_setting("location_aliases", "") or "{}")
-                except Exception:
-                    pass
+                _raw_al = _raw_location_aliases()
                 _am = pd.DataFrame([{"Remove": False, "Name in data": k, "Counted as": v}
                                     for k, v in _raw_al.items()])
-                _amd = st.data_editor(_am, use_container_width=True, hide_index=True,
+                _amd = st.data_editor(_am, width="stretch", hide_index=True,
                                       disabled=["Name in data", "Counted as"],
                                       key=f"locmap_editor_{_sheet_version('Settings')}",
                                       height=dataframe_height(len(_am), max_px=300))
                 _nrem = int(_amd["Remove"].sum())
-                if _nrem and st.button(f"Remove {_nrem} mapping(s)", use_container_width=True, key="locmap_remove"):
+                if _nrem and st.button(f"Remove {_nrem} mapping(s)", width="stretch", key="locmap_remove"):
                     _keep = {r["Name in data"]: r["Counted as"] for _, r in _amd.iterrows() if not r["Remove"]}
                     if save_settings({"location_aliases": _json.dumps(_keep)}):
                         st.success("✅ Mappings removed — those names will be asked about again.")
@@ -9683,7 +9498,7 @@ with tab_inv:
                 st.dataframe(_ret_log.rename(columns={
                     "date": "Date", "type": "Type", "qty": "Qty", "location": "Location",
                     "dc_no": "DC No.", "remarks": "Remarks"}).iloc[::-1],
-                    use_container_width=True, hide_index=True, height=dataframe_height(len(_ret_log), max_px=360))
+                    width="stretch", hide_index=True, height=dataframe_height(len(_ret_log), max_px=360))
 
         sec_hdr("list", "Inventory Log")
         if df_inv_t.empty:
@@ -9691,13 +9506,13 @@ with tab_inv:
         else:
             inv_sorted = df_inv_t.iloc[::-1].reset_index(drop=True)
             inv_exp = inv_sorted.rename(columns={"date": "Date", "type": "Type", "qty": "Qty", "mrn": "MRN No", "make": "Make"})
-            st.download_button("⬇ Export Inventory CSV", inv_exp.to_csv(index=False).encode(), "inventory.csv", "text/csv", use_container_width=True, on_click="ignore")
+            st.download_button("⬇ Export Inventory CSV", inv_exp.to_csv(index=False).encode(), "inventory.csv", "text/csv", width="stretch", on_click="ignore")
 
             ITEMS_INV = 10
             total_inv_p = max(1, math.ceil(len(inv_sorted) / ITEMS_INV))
             inv_page = st.number_input(f"Page (1–{total_inv_p})", min_value=1, max_value=total_inv_p, step=1, value=1, key="inv_page")
             si, ei = (inv_page - 1) * ITEMS_INV, inv_page * ITEMS_INV
-            st.dataframe(inv_sorted.iloc[si:ei], use_container_width=True, hide_index=True)
+            st.dataframe(inv_sorted.iloc[si:ei], width="stretch", hide_index=True)
 
             inv_options_map = {}
             for idx, row in inv_sorted.iterrows():
@@ -9763,15 +9578,11 @@ with tab_inv:
                         st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  ADMIN
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
 #  HR — offer letters, payslips, employee records, roles
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_hr:
     if tab_hr.open:   # only the open tab runs (tabs are created with on_change="rerun")
         tab_action_bar("hr")
-        import calendar as _hr_cal
         _hr_today = today_ist()
         _hr_emp = hr_load_employees()
         _hr_roles = hr_load_roles()
@@ -9883,7 +9694,7 @@ with tab_hr:
             _ref = _ex["offer_ref"] if _ref_on_record else hr_next_offer_ref(_hr_emp["offer_ref"], ol_date)
             st.caption(f"Reference: {_ref}" + (" (from their record)" if _ref_on_record else ""))
 
-            if st.button("Generate Offer Letter", type="primary", use_container_width=True, key="hr_ol_go"):
+            if st.button("Generate Offer Letter", type="primary", width="stretch", key="hr_ol_go"):
                 errs = []
                 if not ol_name.strip():
                     errs.append("Enter the employee's name.")
@@ -9945,7 +9756,7 @@ with tab_hr:
             _f = st.session_state.get("hr_offer_file")
             if _f:
                 st.download_button(f"📥 Download {_f['label']}", data=_f["bytes"], file_name=_f["name"],
-                                   mime=_f["mime"], key="hr_dl_offer", on_click="ignore", use_container_width=True)
+                                   mime=_f["mime"], key="hr_dl_offer", on_click="ignore", width="stretch")
 
         # ── Payslip ────────────────────────────────────────────────────────────
         with hr_t_slip:
@@ -9970,7 +9781,7 @@ with tab_hr:
                 ps_month = st.selectbox("Month", _months, index=1, format_func=month_label, key="hr_ps_month")
                 _py, _pm = int(ps_month[:4]), int(ps_month[5:])
                 _month_long = datetime(_py, _pm, 1).strftime("%B %Y")
-                _dim = _hr_cal.monthrange(_py, _pm)[1]
+                _dim = calendar.monthrange(_py, _pm)[1]
                 _jd = pd.to_datetime(emp["joining_date"], errors="coerce")
                 if pd.notna(_jd) and ps_month < _jd.strftime("%Y-%m"):
                     st.markdown(f'<div class="warn-box">{emp["name"]} joined in {_jd.strftime("%B %Y")}, after '
@@ -10003,7 +9814,7 @@ with tab_hr:
                 with st.expander("Salary breakup (edit if needed)"):
                     _split = pd.DataFrame(hr_salary_split(ps_salary), columns=["Component", "Amount (Rs.)"])
                     _edited = st.data_editor(
-                        _split, hide_index=True, use_container_width=True, disabled=["Component"],
+                        _split, hide_index=True, width="stretch", disabled=["Component"],
                         key=f"hr_ps_split_{ps_emp_id}_{ps_salary}",
                         column_config={"Amount (Rs.)": st.column_config.NumberColumn(min_value=0, step=100, format="%d")},
                         height=dataframe_height(len(_split)))
@@ -10023,7 +9834,7 @@ with tab_hr:
                 ps_fmt = _hr_format_choice("hr_ps_fmt")
                 ps_sign = st.checkbox("Include signature and seal", value=True, key="hr_ps_sign",
                                       help="Untick to leave the space blank for a wet signature and seal.")
-                if st.button("Generate Payslip", type="primary", use_container_width=True, key="hr_ps_go"):
+                if st.button("Generate Payslip", type="primary", width="stretch", key="hr_ps_go"):
                     if ps_fmt == "docx" and not HR_DOCX_OK:
                         st.error("❌ Word output needs python-docx in requirements.txt. Choose PDF for now.")
                     else:
@@ -10046,7 +9857,7 @@ with tab_hr:
                 _pf = st.session_state.get("hr_slip_file")
                 if _pf:
                     st.download_button(f"📥 Download {_pf['label']}", data=_pf["bytes"], file_name=_pf["name"],
-                                       mime=_pf["mime"], key="hr_dl_slip", on_click="ignore", use_container_width=True)
+                                       mime=_pf["mime"], key="hr_dl_slip", on_click="ignore", width="stretch")
 
         # ── Employees ──────────────────────────────────────────────────────────
         with hr_t_emp:
@@ -10084,7 +9895,7 @@ with tab_hr:
                     ae_pan = st.text_input("PAN", key=f"hr_ae_pan_{hv}")
                 with ae12:
                     ae_pf = st.text_input("PF number", key=f"hr_ae_pf_{hv}")
-                if st.button("Add Employee", type="primary", use_container_width=True, key="hr_ae_go",
+                if st.button("Add Employee", type="primary", width="stretch", key="hr_ae_go",
                              disabled=_hr_emp_missing):
                     _des = (ae_custom if ae_role.startswith("Other") else ae_role).strip()
                     if not ae_id.strip() or not ae_name.strip() or not _des:
@@ -10109,7 +9920,7 @@ with tab_hr:
                 _view["joining_date"] = _view["joining_date"].map(lambda d: d if pd.notna(d) else None)
                 _view.insert(0, "Delete", False)
                 _ed = st.data_editor(
-                    _view, hide_index=True, use_container_width=True, disabled=["emp_id"],
+                    _view, hide_index=True, width="stretch", disabled=["emp_id"],
                     key=f"hr_emp_editor_{_sheet_version('Employees')}",
                     column_config={
                         "emp_id": st.column_config.TextColumn("ID"),
@@ -10130,7 +9941,7 @@ with tab_hr:
                 st.caption("Mark someone as Exited to keep their record but drop them from the payslip list. "
                            "Account and PF numbers are saved with a leading # so Google Sheets keeps them as text.")
                 if st.button(f"💾 Save Changes{f' (deleting {_n_del})' if _n_del else ''}", type="primary",
-                             use_container_width=True, key="hr_emp_save", disabled=_hr_emp_missing):
+                             width="stretch", key="hr_emp_save", disabled=_hr_emp_missing):
                     _keep = hr_prepare_saved_employees(_ed, _hr_emp)
                     if hr_save_employees(_keep):
                         st.success("✅ Employee records updated.")
@@ -10159,7 +9970,7 @@ with tab_hr:
                                key=f"hr_role_sched_{hr_slug(_pick)}_{_rfp}")
             rb1, rb2 = st.columns(2)
             with rb1:
-                if st.button("Save Role", type="primary", use_container_width=True, key="hr_role_save",
+                if st.button("Save Role", type="primary", width="stretch", key="hr_role_save",
                              disabled=_hr_roles_missing):
                     if not _role_name:
                         st.error("❌ Enter a designation.")
@@ -10171,20 +9982,23 @@ with tab_hr:
             with rb2:
                 if _cur.get("saved"):
                     _builtin = _pick in HR_DEFAULT_ROLES
-                    if st.button("Revert to built-in" if _builtin else "Delete role", use_container_width=True,
+                    if st.button("Revert to built-in" if _builtin else "Delete role", width="stretch",
                                  key="hr_role_del"):
                         if hr_delete_role(_pick):
                             st.success(f"✅ {_pick} {'reverted' if _builtin else 'deleted'}.")
                             st.rerun()
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ADMIN
+# ═══════════════════════════════════════════════════════════════════════════════
 with tab_admin:
     if tab_admin.open:   # only the open tab runs (tabs are created with on_change="rerun")
         tab_action_bar("admin")
         # App version lives here rather than in the header: it is only needed to
         # confirm which build is live after a deploy.
         st.markdown(f'<div class="info-box">App version <b>v{APP_VERSION}</b></div>', unsafe_allow_html=True)
-        if st.button("🔓 Log Out This Browser", use_container_width=True, key="logout_btn"):
+        if st.button("🔓 Log Out This Browser", width="stretch", key="logout_btn"):
             st.session_state["authenticated"] = False
             if "k" in st.query_params:
                 del st.query_params["k"]
@@ -10223,7 +10037,7 @@ with tab_admin:
                                               value=int(_cur), key=f"month_target_{tgt_month}")
         with tm3:
             st.write("")
-            if st.button("Save Month Target", type="primary", use_container_width=True, key="save_month_target"):
+            if st.button("Save Month Target", type="primary", width="stretch", key="save_month_target"):
                 if save_settings({f"monthly_install_target:{tgt_month}": int(month_target_in)}):
                     st.success(f"{month_label(tgt_month)} target set to {int(month_target_in):,}.")
                     st.rerun()
@@ -10241,7 +10055,7 @@ with tab_admin:
                 st.markdown(f'<div class="info-box">Site targets add up to <b>{_sum:,}</b>'
                             + (f' — the month target is {int(month_target_in):,}.' if int(month_target_in) != _sum else '.')
                             + '</div>', unsafe_allow_html=True)
-            if st.button("Save Site Targets", use_container_width=True, key="save_site_targets"):
+            if st.button("Save Site Targets", width="stretch", key="save_site_targets"):
                 if save_settings({f"site_target:{k}:{tgt_month}": int(v) for k, v in _site_vals.items()}):
                     st.success(f"Site targets saved for {month_label(tgt_month)}.")
                     st.rerun()
@@ -10251,11 +10065,11 @@ with tab_admin:
             _rows = [{"Month": month_label(k), "Target": f"{v:,}",
                       "": "in use now" if k == month_key(_today_adm) else ""} for k, v in _set_targets.items()]
             with st.expander(f"Months with their own target ({len(_set_targets)})"):
-                st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True,
+                st.dataframe(pd.DataFrame(_rows), width="stretch", hide_index=True,
                              height=dataframe_height(len(_rows), max_px=260))
                 _clear = st.selectbox("Remove a month's target", ["—"] + list(_set_targets), key="clear_month_target",
                                       format_func=lambda k: k if k == "—" else month_label(k))
-                if _clear != "—" and st.button(f"Remove {month_label(_clear)}", use_container_width=True, key="do_clear_month_target"):
+                if _clear != "—" and st.button(f"Remove {month_label(_clear)}", width="stretch", key="do_clear_month_target"):
                     _df = get_data("Settings")
                     _df = _df[_df["key"].astype(str).str.strip() != f"monthly_install_target:{_clear}"]
                     if safe_update("Settings", _df):
@@ -10277,8 +10091,7 @@ with tab_admin:
             st.markdown('<div class="danger-box">The last working day must not be before the first.</div>',
                         unsafe_allow_html=True)
         else:
-            import calendar as _cal_adm
-            _last = _cal_adm.monthrange(_today_adm.year, _today_adm.month)[1]
+            _last = calendar.monthrange(_today_adm.year, _today_adm.month)[1]
             _hol_here = sum(1 for dd in range(int(new_wd_start), min(int(new_wd_end), _last) + 1)
                             if is_holiday(date(_today_adm.year, _today_adm.month, dd)))
             _days = max(0, min(int(new_wd_end), _last) - int(new_wd_start) + 1) - _hol_here
@@ -10289,7 +10102,7 @@ with tab_admin:
                 + (f', {new_target / _days:,.0f} installs/day to reach {int(new_target):,}.' if _days and new_target else '.')
                 + '</div>', unsafe_allow_html=True)
 
-        if st.button("Save", type="primary", use_container_width=True, key="save_monthly_target",
+        if st.button("Save", type="primary", width="stretch", key="save_monthly_target",
                      disabled=new_wd_end < new_wd_start):
             if save_settings({"monthly_install_target": int(new_target),
                               "work_day_start": int(new_wd_start),
@@ -10327,11 +10140,10 @@ with tab_admin:
                         f'— already outside the working days ({WORK_DAY_START}–{WORK_DAY_END}), nothing to add.</div>',
                         unsafe_allow_html=True)
         if st.button(f"➕ Add Holiday{'s' if len(_new) > 1 else ''}" + (f" ({len(_new)})" if _new else ""),
-                     type="primary", use_container_width=True, key="holiday_add", disabled=not _new):
+                     type="primary", width="stretch", key="holiday_add", disabled=not _new):
             if not hol_name.strip():
                 st.error("❌ Enter the holiday's name.")
             else:
-                import json as _json
                 _hols = dict(HOLIDAYS)
                 for d in _new:
                     _hols[d.isoformat()] = " ".join(hol_name.split())
@@ -10354,7 +10166,7 @@ with tab_admin:
             _up = _hdf[~_hdf["_past"]]
             _past = _hdf[_hdf["_past"]]
             def _hol_editor(frame, key):
-                return st.data_editor(frame[["Delete", "Date", "Day", "Holiday"]], use_container_width=True,
+                return st.data_editor(frame[["Delete", "Date", "Day", "Holiday"]], width="stretch",
                                       hide_index=True, disabled=["Date", "Day"], key=key,
                                       height=dataframe_height(len(frame), max_px=360))
             edited = []
@@ -10365,9 +10177,8 @@ with tab_admin:
                 with st.expander(f"Earlier holidays ({len(_past)})"):
                     edited.append((_past, _hol_editor(_past, f"holiday_editor_past_{_sheet_version('Settings')}")))
             _n_del = sum(int(e["Delete"].sum()) for _, e in edited)
-            if st.button(f"💾 Save Holidays{f' (deleting {_n_del})' if _n_del else ''}", use_container_width=True,
+            if st.button(f"💾 Save Holidays{f' (deleting {_n_del})' if _n_del else ''}", width="stretch",
                          key="holiday_save"):
-                import json as _json
                 _hols = {}
                 for orig, e in edited:
                     for (_, o), (_, r) in zip(orig.iterrows(), e.iterrows()):
@@ -10411,7 +10222,7 @@ with tab_admin:
                                       help="The site (Section) this technician normally works at.")
             new_t_site = "" if new_t_site == "— none —" else new_t_site
 
-            if st.button("➕ Add To Batch", key="add_tech_batch_btn", type="primary", use_container_width=True):
+            if st.button("➕ Add To Batch", key="add_tech_batch_btn", type="primary", width="stretch"):
                 if not new_t_name.strip():
                     st.error("❌ Technician Name is required.")
                 elif any(b["name"] == new_t_name.strip() for b in st.session_state["tech_batch"]):
@@ -10441,7 +10252,7 @@ with tab_admin:
                             st.session_state["tech_batch"].pop(i)
                             st.rerun()
 
-                if st.button(f"💾 Save Batch ({len(st.session_state['tech_batch'])})", key="save_tech_batch", type="primary", use_container_width=True):
+                if st.button(f"💾 Save Batch ({len(st.session_state['tech_batch'])})", key="save_tech_batch", type="primary", width="stretch"):
                     df_t_exist = get_data("Technicians")
                     existing_names = set(df_t_exist["name"].values) if (not df_t_exist.empty and "name" in df_t_exist.columns) else set()
                     new_rows, skipped = [], []
@@ -10473,7 +10284,7 @@ with tab_admin:
                 st.info("No technicians added yet.")
             else:
                 for idx, row in df_t.iterrows():
-                    is_active = str(row.get("is_active", "1")).strip() in ["1", "1.0", "true", "yes"]
+                    is_active = _truthy(row.get("is_active", "1"))
                     pill_color = "var(--brand-700)" if is_active else "var(--ink-600)"
                     pill_bg = "var(--brand-050)" if is_active else "var(--surface-200)"
                     pill_text = "Active" if is_active else "Inactive"
@@ -10579,7 +10390,7 @@ with tab_admin:
                 new_sup_name = st.text_input("Supervisor Name", key=f"new_sup_name_{sv_v}")
             with sc2:
                 new_sup_phone = st.text_input("Phone (optional)", key=f"new_sup_phone_{sv_v}")
-            if st.button("➕ Add Supervisor", type="primary", use_container_width=True, key="add_sup_btn"):
+            if st.button("➕ Add Supervisor", type="primary", width="stretch", key="add_sup_btn"):
                 nm = new_sup_name.strip()
                 if not nm:
                     st.error("❌ Supervisor Name is required.")
@@ -10627,7 +10438,7 @@ with tab_admin:
                         )
                         ac1, ac2 = st.columns(2)
                         with ac1:
-                            if st.button("💾 Save Team", type="primary", use_container_width=True, key=f"save_team_{s_id or s_idx}"):
+                            if st.button("💾 Save Team", type="primary", width="stretch", key=f"save_team_{s_id or s_idx}"):
                                 df_new = df_t_all.copy()
                                 # Clear anyone previously under this supervisor, then
                                 # set the current picks — handles unassignment too.
@@ -10637,7 +10448,7 @@ with tab_admin:
                                     st.success(f"✅ {s_name}'s team updated ({len(picked)} technician(s)).")
                                     st.rerun()
                         with ac2:
-                            if st.button("🗑️ Delete Supervisor", use_container_width=True, key=f"del_sup_{s_id or s_idx}"):
+                            if st.button("🗑️ Delete Supervisor", width="stretch", key=f"del_sup_{s_id or s_idx}"):
                                 st.session_state["deleting_sup"] = s_id or str(s_idx)
 
                         if st.session_state.get("deleting_sup") == (s_id or str(s_idx)):
@@ -10675,7 +10486,7 @@ with tab_admin:
             sub_hdr("plus", "Add Locations (one or several)")
             new_loc_name = st.text_input("Location Name", key=f"new_loc_name_{lv}")
 
-            if st.button("➕ Add To Batch", key="add_loc_batch_btn", type="primary", use_container_width=True):
+            if st.button("➕ Add To Batch", key="add_loc_batch_btn", type="primary", width="stretch"):
                 if not new_loc_name.strip():
                     st.error("❌ Location name is required.")
                 elif new_loc_name.strip() in st.session_state["loc_batch"]:
@@ -10700,7 +10511,7 @@ with tab_admin:
                             st.session_state["loc_batch"].pop(i)
                             st.rerun()
 
-                if st.button(f"💾 Save Batch ({len(st.session_state['loc_batch'])})", key="save_loc_batch", type="primary", use_container_width=True):
+                if st.button(f"💾 Save Batch ({len(st.session_state['loc_batch'])})", key="save_loc_batch", type="primary", width="stretch"):
                     df_l_exist = get_data("Locations")
                     existing_locs = set(df_l_exist["location_name"].values) if (not df_l_exist.empty and "location_name" in df_l_exist.columns) else set()
                     new_rows, skipped = [], []
@@ -10802,14 +10613,14 @@ with tab_admin:
             New uploads are now correct. This corrects what is already saved.
             </div>
             """, unsafe_allow_html=True)
-                if st.button("Preview Correction", use_container_width=True, key="preview_phase_fix"):
+                if st.button("Preview Correction", width="stretch", key="preview_phase_fix"):
                     st.session_state["phase_fix_plan"] = plan_phase_count_repair()
 
                 if "phase_fix_plan" in st.session_state:
                     plan, values = st.session_state["phase_fix_plan"]
                     if not values.empty:
                         st.markdown("**How each meter type in your data was counted:**")
-                        st.dataframe(values, use_container_width=True, hide_index=True,
+                        st.dataframe(values, width="stretch", hide_index=True,
                                      height=dataframe_height(len(values)))
                     if plan.empty:
                         st.info("No correction needed — nothing was double counted.")
@@ -10823,10 +10634,10 @@ with tab_admin:
                         by_date = plan.groupby("date")[["d_1ph", "d_3ph"]].sum().reset_index()
                         by_date["Total change"] = by_date["d_1ph"] + by_date["d_3ph"]
                         by_date.columns = ["Date", "1PH change", "3PH change", "Total change"]
-                        st.dataframe(by_date.sort_values("Date", ascending=False), use_container_width=True,
+                        st.dataframe(by_date.sort_values("Date", ascending=False), width="stretch",
                                      hide_index=True, height=dataframe_height(len(by_date)))
                         if st.button(f"Apply Correction to {len(plan)} row(s)", type="primary",
-                                     use_container_width=True, key="apply_phase_fix"):
+                                     width="stretch", key="apply_phase_fix"):
                             n = apply_phase_count_repair(plan)
                             if n:
                                 # Guard: the correction is a one-time delta. Running
@@ -10847,7 +10658,7 @@ with tab_admin:
         nothing is duplicated and no install counts change.
         </div>
         """, unsafe_allow_html=True)
-            if st.button("Sync Map Now", type="primary", use_container_width=True, key="sync_map_from_log"):
+            if st.button("Sync Map Now", type="primary", width="stretch", key="sync_map_from_log"):
                 df_log_all = get_data("UploadedInstallLog")
                 if df_log_all.empty or "key" not in df_log_all.columns:
                     st.warning("The Installs log is empty — nothing to sync.")
@@ -10878,7 +10689,7 @@ with tab_admin:
         """, unsafe_allow_html=True)
             cleanup_pin = st.text_input("Enter PIN to unlock", type="password", key="cleanup_pin")
             if cleanup_pin == PIN_CODE:
-                if st.button(f"🧹 Remove All Non-{INSTALLER_ID_PREFIX} Records", type="primary", use_container_width=True, key="run_cleanup_btn"):
+                if st.button(f"🧹 Remove All Non-{INSTALLER_ID_PREFIX} Records", type="primary", width="stretch", key="run_cleanup_btn"):
                     removed_log, removed_araw = cleanup_non_tl_records()
                     if removed_log or removed_araw:
                         st.success(f"✅ Removed {removed_log} record(s) from Installs data and {removed_araw} from Analytics data. Installations totals have been corrected.")
@@ -10896,7 +10707,7 @@ with tab_admin:
         fix is to remove the extra, never to delete the row.
         </div>
         """, unsafe_allow_html=True)
-            if st.button("🔎 Run Discrepancy Check", use_container_width=True, key="run_discrepancy_check"):
+            if st.button("🔎 Run Discrepancy Check", width="stretch", key="run_discrepancy_check"):
                 # Kept in session state: a button drawn inside another button's
                 # result never fires, because clicking it reruns the app and the
                 # outer button is no longer "pressed".
@@ -10919,7 +10730,7 @@ with tab_admin:
                     editable = flagged.copy()
                     editable.insert(0, "Remove extra", bool(select_all))
                     edited = st.data_editor(
-                        editable, use_container_width=True, hide_index=True,
+                        editable, width="stretch", hide_index=True,
                         # The key includes the select-all state so toggling it
                         # rebuilds the ticks instead of keeping stale ones.
                         key=f"discrepancy_editor_{int(select_all)}",
@@ -10929,7 +10740,7 @@ with tab_admin:
                     picked = edited[edited["Remove extra"]]
                     extra = int(picked["Implied Manual Qty"].sum()) if not picked.empty else 0
                     if st.button(f"Remove {extra} extra install(s) from {len(picked)} row(s)", type="primary",
-                                 use_container_width=True, disabled=picked.empty, key="apply_discrepancy_fix"):
+                                 width="stretch", disabled=picked.empty, key="apply_discrepancy_fix"):
                         keys = list(zip(picked["Date"], picked["Technician"], picked["Location"]))
                         n = reduce_rows_to_upload_counts(keys)
                         del st.session_state["discrepancy_report"]
@@ -10942,7 +10753,7 @@ with tab_admin:
                 if not flagged.empty:
                     st.download_button("📥 Download This Report", data=flagged.to_csv(index=False).encode("utf-8"),
                                        file_name="installations_discrepancy_report.csv", mime="text/csv",
-                                       use_container_width=True, on_click="ignore")
+                                       width="stretch", on_click="ignore")
 
         with st.expander("↩️ Undo A Previous Upload"):
             st.markdown("""
@@ -10958,7 +10769,7 @@ with tab_admin:
             if undo_pin == PIN_CODE:
                 undo_file = st.file_uploader("Re-upload the file to undo", type=["xlsx"], key="undo_uploader")
                 if undo_file is not None:
-                    if st.button("🔍 Find Matching Records In Installs Data", use_container_width=True, key="undo_find_btn"):
+                    if st.button("🔍 Find Matching Records In Installs Data", width="stretch", key="undo_find_btn"):
                         file_keys = find_matching_log_keys_from_file(undo_file)
                         if file_keys is None:
                             st.error("❌ Could not read this file's columns — make sure it's the same export format.")
@@ -10975,9 +10786,9 @@ with tab_admin:
                                 else:
                                     st.session_state["pending_undo_keys"] = set(matching["key"].values)
                                     st.warning(f"⚠️ Found {len(matching)} record(s) from this file still in Installs data.")
-                                    st.dataframe(matching, use_container_width=True, hide_index=True, height=dataframe_height(len(matching)))
+                                    st.dataframe(matching, width="stretch", hide_index=True, height=dataframe_height(len(matching)))
                 if "pending_undo_keys" in st.session_state:
-                    if st.button(f"🗑️ Remove These {len(st.session_state['pending_undo_keys'])} Record(s) & Reverse Counts", type="primary", use_container_width=True, key="undo_remove_btn"):
+                    if st.button(f"🗑️ Remove These {len(st.session_state['pending_undo_keys'])} Record(s) & Reverse Counts", type="primary", width="stretch", key="undo_remove_btn"):
                         removed = remove_install_log_rows(st.session_state["pending_undo_keys"])
                         st.success(f"✅ Removed {removed} record(s) and corrected Installations totals.")
                         del st.session_state["pending_undo_keys"]
@@ -10992,7 +10803,7 @@ with tab_admin:
         Scoped to Installs data — for Map-only duplicates use the Map tab.
         </div>
         """, unsafe_allow_html=True)
-            if st.button("🔎 Scan For Duplicates", use_container_width=True, key="scan_sno_dups_btn"):
+            if st.button("🔎 Scan For Duplicates", width="stretch", key="scan_sno_dups_btn"):
                 st.session_state["sno_dups_scanned"] = True
             scanned = st.session_state.get("sno_dups_scanned", False)
             sno_dups = find_sno_duplicates() if scanned else pd.DataFrame()
@@ -11000,11 +10811,11 @@ with tab_admin:
                 st.success("✅ No same-SNO-same-date duplicates found in Installs data.")
             elif scanned:
                 st.warning(f"⚠️ Found {len(sno_dups)} record(s) across duplicate SNO+date clusters. Uncheck 'Keep?' to remove — a sensible default (keep earliest, remove the rest) is pre-selected.")
-                edited_sno_dups = st.data_editor(sno_dups, use_container_width=True, hide_index=True, key="sno_dups_editor", disabled=[c for c in sno_dups.columns if c != "Keep?"])
+                edited_sno_dups = st.data_editor(sno_dups, width="stretch", hide_index=True, key="sno_dups_editor", disabled=[c for c in sno_dups.columns if c != "Keep?"])
                 dup_pin = st.text_input("Enter PIN to unlock removal", type="password", key="sno_dup_pin")
                 if dup_pin == PIN_CODE:
                     to_remove_sno = edited_sno_dups[~edited_sno_dups["Keep?"]]["Key"].tolist()
-                    if st.button(f"🗑️ Remove {len(to_remove_sno)} Unchecked Record(s) & Reverse Counts", type="primary", use_container_width=True, disabled=not to_remove_sno, key="remove_sno_dups_btn"):
+                    if st.button(f"🗑️ Remove {len(to_remove_sno)} Unchecked Record(s) & Reverse Counts", type="primary", width="stretch", disabled=not to_remove_sno, key="remove_sno_dups_btn"):
                         removed = remove_install_log_rows(to_remove_sno)
                         st.success(f"✅ Removed {removed} duplicate record(s) and corrected Installations totals.")
                         st.rerun()
@@ -11014,7 +10825,7 @@ with tab_admin:
             near_dups = find_near_time_duplicates() if scanned else pd.DataFrame()
             if not near_dups.empty:
                 sub_hdr("clock", "Lower-Confidence: Same Installer, Times Within 2 Minutes")
-                st.dataframe(near_dups, use_container_width=True, hide_index=True, height=dataframe_height(len(near_dups)))
+                st.dataframe(near_dups, width="stretch", hide_index=True, height=dataframe_height(len(near_dups)))
 
 
 # ── End of the run: clear the first-load screen ──────────────────────────────
