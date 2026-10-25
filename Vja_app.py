@@ -523,23 +523,6 @@ def tier_colors(v, red_max, yellow_min, yellow_max):
     return (CF_GREEN_BG, CF_GREEN_FONT)
 
 
-def _css(colors) -> str:
-    """(bg, font) pair -> inline CSS for pandas Styler; '' when uncoloured."""
-    bg, fg = colors
-    return f"background-color:{bg};color:{fg}" if bg else ""
-
-
-def _style_map(styler, func, subset=None):
-    """pandas renamed Styler.applymap -> Styler.map (2.1+) and later removed
-    applymap entirely, while older pandas doesn't have .map on Styler yet.
-    Try the modern name first, fall back to the old one, so this works across
-    whatever pandas version Streamlit Cloud happens to have installed."""
-    try:
-        return styler.map(func, subset=subset) if subset is not None else styler.map(func)
-    except AttributeError:
-        return styler.applymap(func, subset=subset) if subset is not None else styler.applymap(func)
-
-
 def cell_colors_3tier(v, mid):
     """3-tier for a single count cell: <mid red · =mid yellow · >mid green."""
     try:
@@ -566,10 +549,6 @@ def avg_time_colors(v):
     if v <= AVG_TIME_YELLOW_MAX:
         return (CF_YELLOW_BG, CF_YELLOW_FONT)
     return (CF_RED_BG, CF_RED_FONT)
-
-
-def avg_time_style(v):
-    return _css(avg_time_colors(v))
 
 
 def _is_aggregate_row(label) -> bool:
@@ -1286,40 +1265,85 @@ def dataframe_height(n_rows: int, row_px: int = 38, header_px: int = 38, max_px:
     return min(header_px + row_px * max(n_rows, 1) + 3, max_px)
 
 
-def render_scroll_table(df: pd.DataFrame, color_grid=None, max_height: int = None):
-    """A plain HTML table that scrolls sideways with the first column pinned.
+def _table_cell_text(v) -> str:
+    """How a value reads in a table: blank for missing, whole numbers without a
+    trailing .0, thousands separated, other decimals to two places."""
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "Yes" if v else "No"
+    if isinstance(v, (int, float)) or hasattr(v, "dtype"):
+        try:
+            if pd.isna(v):
+                return ""
+            f = float(v)
+            return f"{int(f):,}" if f.is_integer() else f"{f:,.2f}"
+        except (TypeError, ValueError):
+            pass
+    try:
+        if pd.isna(v):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(v)
 
-    For wide tables read on a phone: st.dataframe treats a swipe across its
-    header as dragging a column, so scrolling the hourly table sideways kept
-    moving its columns. Here a swipe only scrolls. Colours come from the same
-    (bg, font) grid the image export uses. Every row is shown — the page
-    scrolls down, the table only sideways — unless max_height is given."""
+
+_TABLE_CSS = (
+    '<style>'
+    '.tl-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;'
+    'border:1px solid var(--hairline);border-radius:var(--radius-md);margin-bottom:var(--space-3);}'
+    '.tl-scroll table{border-collapse:separate;border-spacing:0;font-size:13px;width:max-content;min-width:100%;'
+    'margin:0 !important;}'
+    '.tl-scroll th,.tl-scroll td{padding:7px 10px;text-align:center;white-space:nowrap;'
+    'border-bottom:1px solid var(--hairline);}'
+    '.tl-scroll th{position:sticky;top:0;background:var(--ink-900);color:#fff;font-weight:700;z-index:2;}'
+    '.tl-scroll th:first-child,.tl-scroll td:first-child{position:sticky;left:0;text-align:left;z-index:1;'
+    'background:var(--surface-100);font-weight:600;box-shadow:1px 0 0 var(--hairline);}'
+    '.tl-scroll th:first-child{z-index:3;background:var(--ink-900);}'
+    # A long first-column label (e.g. "On old base (shared equally by all
+    # four)") wraps rather than filling a phone screen and hiding the numbers.
+    '.tl-scroll th:first-child,.tl-scroll td:first-child{white-space:normal;min-width:64px;max-width:44vw;}'
+    '.tl-scroll tr.agg td{background-color:var(--surface-200);font-weight:700;}'
+    '.tl-scroll tr.sub td{background-color:#F2F4F6;font-weight:600;}'
+    '.tl-scroll .tl-empty{color:var(--ink-600);font-style:italic;}'
+    '.tl-scroll td.txt{text-align:left;white-space:normal;min-width:180px;max-width:62vw;}'
+    '</style>'
+)
+
+
+def render_scroll_table(df: pd.DataFrame, color_grid=None, max_height: int = None, row_classes=None):
+    """The app's table: plain HTML that scrolls sideways with the first column
+    pinned, used for every read-only table.
+
+    st.dataframe treats a swipe across its header as dragging a column, so on
+    a phone scrolling a wide table sideways kept moving its columns. Here a
+    swipe only scrolls. Every row is shown — the page scrolls down, the table
+    only sideways — unless max_height is given (kept for the few tables that
+    can run to hundreds of rows). Colours come from the same (bg, font) grid
+    the image export uses. A first-column value of TOTAL (or a subtotal
+    starting with "—") is shaded; `row_classes` can mark rows "agg" or "sub"."""
     import html as _html
     head = "".join(f"<th>{_html.escape(str(c))}</th>" for c in df.columns)
     body = []
     for i, row in enumerate(df.itertuples(index=False)):
-        agg = _is_aggregate_row(row[0])
+        cls = row_classes[i] if row_classes is not None and i < len(row_classes) else (
+            "agg" if len(row) and _is_aggregate_row(row[0]) else "")
         cells = []
         for j, v in enumerate(row):
             bg, fg = (color_grid[i][j] if color_grid is not None else (None, None))
-            style = (f"background:{bg};color:{fg};" if bg else "") + ("font-weight:700;" if fg or agg else "")
-            cells.append(f'<td style="{style}">{_html.escape("" if pd.isna(v) else str(v))}</td>')
-        body.append(f'<tr class="{"agg" if agg else ""}">' + "".join(cells) + "</tr>")
+            style = (f"background:{bg};color:{fg};font-weight:700;" if bg else "")
+            text = _table_cell_text(v)
+            # Long text (a description, a list of sections) reads left to right
+            # and wraps; numbers and short values stay centred on one line.
+            txt = ' class="txt"' if j and len(text) > 28 else ""
+            cells.append(f'<td{txt} style="{style}">{_html.escape(text)}</td>' if style
+                         else f'<td{txt}>{_html.escape(text)}</td>')
+        body.append((f'<tr class="{cls}">' if cls else "<tr>") + "".join(cells) + "</tr>")
+    if not body:
+        body.append(f'<tr><td class="tl-empty" colspan="{max(1, len(df.columns))}">No rows</td></tr>')
     _cap = f' style="max-height:{max_height}px;overflow-y:auto;"' if max_height else ""
     st.markdown(
-        '<style>'
-        '.tl-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;'
-        'border:1px solid var(--hairline);border-radius:var(--radius-md);margin-bottom:var(--space-3);}'
-        '.tl-scroll table{border-collapse:separate;border-spacing:0;font-size:13px;width:max-content;min-width:100%;}'
-        '.tl-scroll th,.tl-scroll td{padding:7px 10px;text-align:center;white-space:nowrap;'
-        'border-bottom:1px solid var(--hairline);}'
-        '.tl-scroll th{position:sticky;top:0;background:var(--ink-900);color:#fff;font-weight:700;z-index:2;}'
-        '.tl-scroll th:first-child,.tl-scroll td:first-child{position:sticky;left:0;text-align:left;z-index:1;'
-        'background:var(--surface-100);font-weight:600;box-shadow:1px 0 0 var(--hairline);}'
-        '.tl-scroll th:first-child{z-index:3;background:var(--ink-900);}'
-        '.tl-scroll tr.agg td{background-color:var(--surface-200);}'
-        '</style>'
-        f'<div class="tl-scroll"{_cap}><table><thead><tr>{head}</tr></thead>'
+        _TABLE_CSS + f'<div class="tl-scroll"{_cap}><table><thead><tr>{head}</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table></div>',
         unsafe_allow_html=True)
 
@@ -4715,8 +4739,7 @@ def render_daily_calendar(mkey: str):
     if breakup.empty:
         st.info("No records for that date.")
     else:
-        st.dataframe(breakup, width="stretch", hide_index=True,
-                     height=dataframe_height(len(breakup)))
+        render_scroll_table(breakup)
         download_image_button(breakup, f"Sections_{picked}.png", key="dl_img_cal_day",
                               title=f"Section-Wise Installs — {picked}")
 
@@ -6085,6 +6108,63 @@ def get_data_fresh(worksheet: str) -> pd.DataFrame:
     return get_data(worksheet)
 
 
+# Details that can be completed on an install already in the log without
+# touching any count. Section and meter type are left alone: they decide which
+# Installations row and which of 1PH / 3PH an install was counted under.
+FILLABLE_DETAILS = ("sno", "old_meter_no", "new_meter_no", "lat", "long")
+
+
+def _is_blank(v) -> bool:
+    if v is None:
+        return True
+    try:
+        if pd.isna(v):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(v).strip().lower() in ("", "nan", "none")
+
+
+def fill_log_details_from_analytics() -> int:
+    """Complete install-log rows whose Consumer No (or meter numbers, or
+    coordinates) is blank, from the Analytics record with the same key.
+
+    An install pushed from Analytics is never sent again once it is in the log
+    — Update Installs only sends installs the log doesn't have — so if it first
+    arrived without its Consumer No, a later file that has it filled Analytics
+    but never the log, and the Customer Report couldn't give it a section code.
+    Returns the number of log rows completed; counts never change."""
+    log = get_data_fresh("UploadedInstallLog")
+    araw = get_data_fresh("AnalyticsRaw")
+    if log.empty or araw.empty or "key" not in log.columns or "key" not in araw.columns:
+        return 0
+    cols = [c for c in FILLABLE_DETAILS if c in araw.columns]
+    src = araw.drop_duplicates("key").set_index("key")
+    for c in cols:
+        if c not in log.columns:
+            log[c] = ""
+    changed_idx = []
+    for i, k in zip(log.index, log["key"]):
+        if k not in src.index:
+            continue
+        did = False
+        for c in cols:
+            new = src.at[k, c]
+            if _is_blank(log.at[i, c]) and not _is_blank(new):
+                log.at[i, c] = str(new)
+                did = True
+        if did:
+            changed_idx.append(i)
+    if not changed_idx or not safe_update("UploadedInstallLog", log):
+        return 0
+    rows = log.loc[changed_idx]
+    mirror_records_to_map([{c: (r.get(c, "") if not _is_blank(r.get(c, "")) else "")
+                            for c in ("key", "date", "time", "installer_id", "tech_name", "location",
+                                      "sno", "old_meter_no", "new_meter_no", "lat", "long")}
+                           for _, r in rows.iterrows()])
+    return len(changed_idx)
+
+
 def install_log_duplicate_fix() -> dict:
     """Plan the clean-up of installs recorded twice in UploadedInstallLog (same
     date + time + installer key). Returns {} when there are none, else:
@@ -6688,8 +6768,7 @@ def render_meter_search(key_prefix: str = "inst", show_heading: bool = True):
                 results_display = results[cols_present].rename(columns=display_cols_map).copy()
                 clean_id_columns(results_display)
                 st.success(f"✅ Found {len(results)} match(es).")
-                st.dataframe(results_display, width="stretch", hide_index=True,
-                             height=dataframe_height(len(results_display), max_px=500))
+                render_scroll_table(results_display, max_height=500)
 
                 # Label: value text, so a result can be pasted into WhatsApp or
                 # a ticket without the receiver needing the app.
@@ -6737,7 +6816,7 @@ if "pending_push" in st.session_state:
         saved; only these rows are waiting. Review, then choose:
         </div>
         """, unsafe_allow_html=True)
-        st.dataframe(pd.DataFrame(pend["risky"]), width="stretch", hide_index=True)
+        render_scroll_table(pd.DataFrame(pend["risky"]))
         pc1, pc2 = st.columns(2)
         with pc1:
             if st.button("✅ Proceed Anyway (verified — not duplicates)", type="primary", width="stretch", key="pending_push_proceed"):
@@ -6915,7 +6994,7 @@ with tab_dash:
                                             if (m_1ph + m_3ph) else None, 2),
                  "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)},
             ])
-            st.dataframe(bill_tbl, width="stretch", hide_index=True, height=dataframe_height(len(bill_tbl)))
+            render_scroll_table(bill_tbl)
             with st.expander("View slab breakdown"):
                 # One set of slabs on the month's total installs, whatever the
                 # type; each type then takes its share of that incentive.
@@ -6930,8 +7009,7 @@ with tab_dash:
                         "Amount (Rs.)": slab_df["Amount (Rs.)"].sum()}])], ignore_index=True)
                     slab_df["From"] = slab_df["From"].astype(str)
                     slab_df["Rate (Rs.)"] = slab_df["Rate (Rs.)"].astype(str)
-                    st.dataframe(slab_df, width="stretch", hide_index=True,
-                                 height=dataframe_height(len(slab_df)))
+                    render_scroll_table(slab_df)
                 _tot_inc = billing["tier_incentive_combined"]
                 _avg_inc = (_tot_inc / (m_1ph + m_3ph)) if (m_1ph + m_3ph) else 0.0
                 st.caption(f"Incentive Rs. {_tot_inc:,.0f} on {m_1ph + m_3ph:,} installs (average Rs. {_avg_inc:,.2f}). "
@@ -6945,8 +7023,7 @@ with tab_dash:
                 comp = pd.concat([comp, pd.DataFrame([{
                     "Type": "TOTAL", **{c: int(comp[c].sum()) for c in comp.columns if c != "Type"}}])],
                     ignore_index=True)
-                st.dataframe(comp, width="stretch", hide_index=True,
-                             height=dataframe_height(len(comp)))
+                render_scroll_table(comp)
 
             sub_hdr("pin", "This Month, By Site")
             if this_month.empty:
@@ -6976,7 +7053,7 @@ with tab_dash:
                              "Billing (Rs.)": int(site_df["Billing (Rs.)"].sum()),
                              "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)}
                 site_df = pd.concat([site_df, pd.DataFrame([total_row])], ignore_index=True)
-                st.dataframe(site_df, width="stretch", hide_index=True, height=dataframe_height(len(site_df)))
+                render_scroll_table(site_df)
                 download_image_button(site_df, "This_Month_By_Site.png", key="dl_img_loc_month",
                                       title=f"This Month, By Site — {month_label(mk)}")
 
@@ -6998,8 +7075,7 @@ with tab_dash:
         _dash_loc = stock_by_location()
         if not _dash_loc.empty:
             with st.expander("Stock by site"):
-                st.dataframe(_dash_loc, width="stretch", hide_index=True,
-                             height=dataframe_height(len(_dash_loc), max_px=420))
+                render_scroll_table(_dash_loc)
         if pending_1ph < 0 or pending_3ph < 0:
             deficits = [t for t, v in (("1PH", pending_1ph), ("3PH", pending_3ph)) if v < 0]
             st.markdown(f'<div class="danger-box">More {" and ".join(deficits)} meters installed than received — check Inventory entries.</div>', unsafe_allow_html=True)
@@ -7088,8 +7164,7 @@ with tab_dash:
                     INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MAX,
                 )
                 with st.expander("View as table (1PH / 3PH split)"):
-                    st.dataframe(group_df, width="stretch", hide_index=True,
-                                 height=dataframe_height(len(group_df)))
+                    render_scroll_table(group_df)
                 download_image_button(
                     group_df, "Technician_Breakdown.png", key="dl_img_group_df",
                     color_grid=build_single_col_color_grid(group_df, "Total", lambda v: tier_colors(v, INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)),
@@ -7152,10 +7227,41 @@ with tab_dash:
 
         if not df_log_for_report.empty and "sno" in df_log_for_report.columns:
             codes = section_codes(df_log_for_report["sno"])
-            unclassified_n = int((codes == "Unclassified").sum())
-            if unclassified_n:
-                sample = df_log_for_report.loc[codes == "Unclassified", "sno"].astype(str).head(3).tolist()
-                st.warning(f"⚠️ {unclassified_n} record(s) have an unreadable Consumer No and can't be assigned a section code. Examples: {', '.join(repr(s) for s in sample)}")
+            _blank = df_log_for_report["sno"].map(_is_blank)
+            _unread = (codes == "Unclassified") & ~_blank
+            if _blank.any():
+                # No Consumer No on the record at all — not an unreadable one.
+                # Say where they came from, which is what points to the cause.
+                _b = df_log_for_report[_blank]
+                _dates = sorted(set(_b["date"].astype(str))) if "date" in _b.columns else []
+                _src = (_b["source"].replace("", "not recorded").value_counts().to_dict()
+                        if "source" in _b.columns else {})
+                _who = _b["installer_id"].value_counts().head(3).to_dict() if "installer_id" in _b.columns else {}
+                _araw = get_data("AnalyticsRaw")
+                _fillable = 0
+                if not _araw.empty and has_col(_araw, "key", "sno"):
+                    _have = set(_araw.loc[~_araw["sno"].map(_is_blank), "key"])
+                    _fillable = int(_b["key"].isin(_have).sum()) if "key" in _b.columns else 0
+                st.markdown(
+                    f'<div class="warn-box">{int(_blank.sum()):,} install(s) in the log have <b>no Consumer No</b>, '
+                    f'so they get no section code in this report. '
+                    + (f'Dates: {", ".join(_dates) if len(_dates) <= 5 else f"{len(_dates)} dates, {_dates[0]} to {_dates[-1]}"}. ' if _dates else '')
+                    + (f'Saved by: {", ".join(f"{k} ({v})" for k, v in _src.items())}. ' if _src else '')
+                    + (f'Installers: {", ".join(f"{k} ({v})" for k, v in _who.items())}.' if _who else '')
+                    + '</div>', unsafe_allow_html=True)
+                if _fillable and st.button(f"Fill {_fillable:,} Consumer No(s) from Analytics", width="stretch",
+                                           key="fill_sno_from_analytics"):
+                    _n = fill_log_details_from_analytics()
+                    if _n:
+                        st.success(f"✅ Completed {_n:,} install record(s) from Analytics — install counts unchanged.")
+                        st.rerun()
+                    st.info("Nothing to fill — Analytics has no Consumer No for these installs.")
+                st.caption(("The rest " if _fillable else "These ") + "can be completed by uploading the full MDMS file "
+                           "for those dates in Installs → Bulk Upload: installs already recorded are not counted again, "
+                           "their missing details are filled in.")
+            if _unread.any():
+                sample = df_log_for_report.loc[_unread, "sno"].astype(str).head(3).tolist()
+                st.warning(f"⚠️ {int(_unread.sum())} record(s) have an unreadable Consumer No and can't be assigned a section code. Examples: {', '.join(repr(s) for s in sample)}")
 
         if st.button("Generate Report", type="primary", width="stretch", key="generate_weekly_report_btn"):
             rd_start, rd_end = date_range_bounds(report_date_range)
@@ -7517,8 +7623,7 @@ with tab_analytics:
                                                f"({', '.join(_plan['dates'])}) and sets these Installations rows to "
                                                "what the corrected log says:")
                                     if not _plan["changes"].empty:
-                                        st.dataframe(_plan["changes"], width="stretch", hide_index=True,
-                                                     height=dataframe_height(len(_plan["changes"]), max_px=360))
+                                        render_scroll_table(_plan["changes"])
                                     if st.button("Remove duplicates and correct Installations", type="primary",
                                                  width="stretch", key="dup_fix_apply"):
                                         _ok = safe_update("UploadedInstallLog", _plan["log_clean"])
@@ -7668,8 +7773,7 @@ with tab_analytics:
                     [(r["Section"], int(r["Total"])) for _, r in section_summary.iterrows()],
                     columns=4, total_label="Total",
                 )
-                st.dataframe(section_summary, width="stretch", hide_index=True,
-                             height=dataframe_height(len(section_summary)))
+                render_scroll_table(section_summary)
             else:
                 st.info("No Section data on these records yet — re-upload with the Section column present to see this breakdown.")
 
@@ -7695,7 +7799,7 @@ with tab_analytics:
                 "Total": int(half_df["Total"].sum()) if not half_df.empty else 0,
             }
             half_display_df = pd.concat([half_df, pd.DataFrame([half_total_row])], ignore_index=True)
-            st.dataframe(half_display_df, width="stretch", hide_index=True, height=dataframe_height(len(half_display_df)))
+            render_scroll_table(half_display_df)
             download_image_button(half_display_df, f"Half_Day_Split_{sel_date}.png", key="dl_img_half",
                                   title=f"Half-Day Split — {sel_date}\n{analytics_img_meta}")
 
@@ -7715,13 +7819,11 @@ with tab_analytics:
                     "Avg Time/Install (min)": round(active_pace, 1) if active_pace is not None else "—",
                 })
             avg_df = pd.DataFrame(avg_rows).sort_values("Total Installs", ascending=False)
-            st.dataframe(
-                _style_map(avg_df.style, avg_time_style, subset=["Avg Time/Install (min)"]),
-                width="stretch", hide_index=True, height=dataframe_height(len(avg_df)),
-            )
+            _avg_grid = build_single_col_color_grid(avg_df, "Avg Time/Install (min)", avg_time_colors)
+            render_scroll_table(avg_df, _avg_grid)
             download_image_button(
                 avg_df, f"Avg_Install_Time_{sel_date}.png", key="dl_img_avg",
-                color_grid=build_single_col_color_grid(avg_df, "Avg Time/Install (min)", avg_time_colors),
+                color_grid=_avg_grid,
                 title=f"Active Pace / Installer — {sel_date}\n{analytics_img_meta}",
             )
 
@@ -7772,6 +7874,11 @@ with tab_analytics:
             if st.session_state.pop("trigger_analytics_push", False):
                 _push_now = True
             if _push_now:
+                # First complete installs already in the log whose Consumer No
+                # etc. arrived later in Analytics (they are never pushed again).
+                _filled = fill_log_details_from_analytics()
+                if _filled:
+                    st.success(f"✅ Filled in Consumer No / meter details for {_filled:,} install(s) already recorded.")
                 # The log is re-read fresh inside the push, so this list being
                 # built from a cached copy can't cause double counting.
                 push_records = []
@@ -8028,8 +8135,7 @@ with tab_map:
                             map_table = map_table.sort_values(_sort, ascending=False)
                         if len(map_table) > MAP_TABLE_LIMIT:
                             st.caption(f"Latest {MAP_TABLE_LIMIT:,} of {len(map_table):,}; download for the full list.")
-                        st.dataframe(map_table.head(MAP_TABLE_LIMIT), width="stretch", hide_index=True,
-                                     height=dataframe_height(min(len(map_table), MAP_TABLE_LIMIT), max_px=500))
+                        render_scroll_table(map_table.head(MAP_TABLE_LIMIT), max_height=500)
                         _full = map_table
                         lazy_download_button(f"📥 Download all {len(map_table):,} as CSV",
                                              lambda: _full.to_csv(index=False).encode("utf-8"),
@@ -8158,8 +8264,7 @@ with tab_exp:
                     "Cost / 1PH": fmt_rs(x["cpi1"], 2), "Cost / 3PH": fmt_rs(x["cpi3"], 2),
                     "Cost / Install": fmt_rs(x["cpi"], 2), "Site Cost": round(x["cost"]),
                 } for x in site_cb["sites"]])
-                st.dataframe(site_tbl, width="stretch", hide_index=True,
-                             height=dataframe_height(len(site_tbl)))
+                render_scroll_table(site_tbl)
             _rule = (f"split equally among the {len(site_cb['sharers'])} site(s) with more than "
                      f"{SHARED_MIN_INSTALLS} installs this month" if site_cb["sharers_rule"] == "over_min"
                      else f"split equally among all sites with installs (none has more than {SHARED_MIN_INSTALLS} yet)")
@@ -8182,7 +8287,7 @@ with tab_exp:
                 cat_df["Month (Rs.)"] = cat_df["Month (Rs.)"].round(0).astype(int)
                 cat_df["Share"] = cat_df["Month (Rs.)"].apply(
                     lambda v: f"{v / summ['total_cost'] * 100:.0f}%" if summ["total_cost"] else "—")
-                st.dataframe(cat_df, width="stretch", hide_index=True, height=dataframe_height(len(cat_df)))
+                render_scroll_table(cat_df)
 
             veh_rows = df_exp_all[(df_exp_all["month"].astype(str) == sel_month)
                                   & (df_exp_all["category"].isin(EXPENSE_VEHICLE_CATEGORIES))
@@ -8197,7 +8302,7 @@ with tab_exp:
                     vt["Total"] = vt.sum(axis=1)
                     vt = vt.round(0).astype(int).sort_values("Total", ascending=False).reset_index()
                     vt = vt.rename(columns={"vehicle_reg": "Vehicle"})
-                    st.dataframe(vt, width="stretch", hide_index=True, height=dataframe_height(len(vt)))
+                    render_scroll_table(vt)
 
         # ══ Add an expense ═══════════════════════════════════════════════════
         st.divider()
@@ -8501,7 +8606,7 @@ with tab_exp:
                 (f"Retention held on additional ({_ret * 100:.0f}%, 90 days)", ps["retention_additional"]),
             ], columns=["Component", "Amount (Rs.)"])
             pool["Amount (Rs.)"] = pool["Amount (Rs.)"].round(0).astype(int)
-            st.dataframe(pool, width="stretch", hide_index=True, height=dataframe_height(len(pool)))
+            render_scroll_table(pool)
 
             # -- When the money arrives ------------------------------------------
             sub_hdr("calendar", "Payment Schedule")
@@ -8529,7 +8634,7 @@ with tab_exp:
                 {"Paid on": _fmt_d(_ret_on), "What": f"Retention released ({_ret * 100:.0f}% of the invoice value before GST)",
                  "Amount (Rs.)": round(_invoice * _ret)},
             ])
-            st.dataframe(sched, width="stretch", hide_index=True, height=dataframe_height(len(sched)))
+            render_scroll_table(sched)
             st.markdown(
                 f'<div class="info-box">Invoice of Rs. {_invoice:,.0f} (before GST) dated {_fmt_d(_inv_date)}. '
                 f'<b>GST is received only {GST_PAY_DAYS} days after the invoice</b>, so the partners\' GST shares '
@@ -8550,7 +8655,7 @@ with tab_exp:
                 pw[c] = pw[c].round(0).astype(int)
             total_row = {"Partner": "TOTAL", **{c: int(pw[c].sum()) for c in pw.columns[1:]}}
             pw_disp = pd.concat([pw, pd.DataFrame([total_row])], ignore_index=True)
-            st.dataframe(pw_disp, width="stretch", hide_index=True, height=dataframe_height(len(pw_disp)))
+            render_scroll_table(pw_disp)
 
             # -- The 9% GST kept, by partner pair --------------------------------
             sub_hdr("receipt", f"GST {_gst * 100:.0f}% — Partner Breakup (paid {_fmt_d(_gst_on)})")
@@ -8568,7 +8673,7 @@ with tab_exp:
             gst_bk = pd.concat([gst_bk, pd.DataFrame([{"GST": "TOTAL", **{c: int(gst_bk[c].sum())
                                                                          for c in gst_bk.columns[1:]}}])],
                                ignore_index=True)
-            st.dataframe(gst_bk, width="stretch", hide_index=True, height=dataframe_height(len(gst_bk)))
+            render_scroll_table(gst_bk)
             _each = {p: float(_pp.loc[p, "GST On Old Base"] + _pp.loc[p, "GST On Additional"]) for p in PARTNERS}
             st.caption("Each: " + " · ".join(f"{p} Rs. {_each[p]:,.0f}" for p in _pair_a + _pair_b)
                        + f". The Rs. {_gst_total - _gst_kept:,.0f} payable to the government is not shared.")
@@ -8582,7 +8687,7 @@ with tab_exp:
             ret_bk = pd.concat([ret_bk, pd.DataFrame([{"GST": "TOTAL", **{c: int(ret_bk[c].sum())
                                                                          for c in ret_bk.columns[1:]}}])],
                                ignore_index=True).rename(columns={"GST": "Retention"})
-            st.dataframe(ret_bk, width="stretch", hide_index=True, height=dataframe_height(len(ret_bk)))
+            render_scroll_table(ret_bk)
             _each_r = {p: float(_pp.loc[p, "Retention (after 90 days)"]) for p in PARTNERS}
             st.caption("Each: " + " · ".join(f"{p} Rs. {_each_r[p]:,.0f}" for p in _pair_a + _pair_b)
                        + f". Held back from the payment on {_fmt_d(_net_on)} and paid on {_fmt_d(_ret_on)}.")
@@ -8783,12 +8888,7 @@ with tab_liaison:
                 for _c in ("Designation", "Phone"):
                     if not summ_disp[_c].astype(str).str.strip().any():
                         summ_disp = summ_disp.drop(columns=_c)
-
-                def _bold_last(row):
-                    last = row.name == len(summ_disp) - 1
-                    return ["font-weight:700;background-color:#E6F4F5" if last else "" for _ in row]
-                st.dataframe(summ_disp.style.apply(_bold_last, axis=1), width="stretch",
-                             hide_index=True, height=dataframe_height(len(summ_disp)))
+                render_scroll_table(summ_disp)     # the TOTAL row is shaded by the table itself
 
                 # Breakup: each lineman's section codes, a total under each, and a
                 # grand total for whatever the filters cover.
@@ -8815,17 +8915,8 @@ with tab_liaison:
                 # Money next to the name, so it's visible on a phone without scrolling.
                 breakup = pd.DataFrame(rows_b, columns=["Lineman", "Section Code", "Installs", "Payable (Rs.)",
                                                         "Rate (Rs.)", "Section"])
-
-                def _style_breakup(row):
-                    k = kinds[row.name]
-                    if k == "sub":
-                        return ["font-weight:600;background-color:#F2F4F6"] * len(row)
-                    if k == "total":
-                        return ["font-weight:700;background-color:#E6F4F5"] * len(row)
-                    return [""] * len(row)
                 sub_hdr("pin", "Breakup By Section Code")
-                st.dataframe(breakup.style.apply(_style_breakup, axis=1), width="stretch",
-                             hide_index=True, height=dataframe_height(len(breakup), max_px=760))
+                render_scroll_table(breakup, row_classes=[{"sub": "sub", "total": "agg"}.get(k, "") for k in kinds])
                 st.markdown(
                     f'<div class="info-box"><b>Total — {month_label(l_month)} · {_scope}'
                     + (f' · {len(l_men)} selected lineman' + ('' if len(l_men) == 1 else 'en') if l_men else '')
@@ -8854,8 +8945,7 @@ with tab_liaison:
                 detail["Lineman"] = detail["Lineman"].replace("", "— not mapped —")
                 detail["Installs"] = detail["Installs"].astype(int)
                 detail["Payable (Rs.)"] = detail["Payable (Rs.)"].round(0).astype(int)
-                st.dataframe(detail, width="stretch", hide_index=True,
-                             height=dataframe_height(len(detail), max_px=520))
+                render_scroll_table(detail)
                 download_button("📥 Download CSV", data=detail.to_csv(index=False).encode("utf-8"),
                                    file_name=f"liaisoning_{l_month}.csv", mime="text/csv",
                                    width="stretch", key="liaison_csv", on_click="ignore")
@@ -9405,7 +9495,7 @@ with tab_inst:
                 disp_log["qty_1ph"] = disp_log["qty_1ph"].apply(lambda x: safe_int(x))
                 disp_log["qty_3ph"] = disp_log["qty_3ph"].apply(lambda x: safe_int(x))
                 disp_log["Total"] = disp_log["qty_1ph"] + disp_log["qty_3ph"]
-            st.dataframe(disp_log, width="stretch", hide_index=True)
+            render_scroll_table(disp_log)
 
             # Search, then pick: the list used to hold every record ever
             # entered, rebuilt on each click.
@@ -9564,7 +9654,7 @@ with tab_inv:
         stock_tbl = pd.DataFrame([
             {"Type": t, "Received": v["received"], "Installed": v["installed"],
              "Returned": v["returned"], "Pending": v["pending"]} for t, v in _ss.items()])
-        st.dataframe(stock_tbl, width="stretch", hide_index=True, height=dataframe_height(len(stock_tbl)))
+        render_scroll_table(stock_tbl)
 
         sub_hdr("pin", "Stock By Location")
 
@@ -9640,8 +9730,7 @@ with tab_inv:
         if by_loc.empty:
             st.info("No stock recorded yet.")
         else:
-            st.dataframe(by_loc, width="stretch", hide_index=True,
-                         height=dataframe_height(len(by_loc), max_px=420))
+            render_scroll_table(by_loc)
             if (by_loc["Location"] == "Unspecified").any():
                 st.markdown('<div class="warn-box">Stock received before locations were recorded shows as '
                             '<b>Unspecified</b>. New inward entries carry their location.</div>',
@@ -9763,10 +9852,9 @@ with tab_inv:
         _ret_log = load_returns()
         if not _ret_log.empty:
             with st.expander(f"Returns log ({len(_ret_log)})"):
-                st.dataframe(_ret_log.rename(columns={
+                render_scroll_table(_ret_log.rename(columns={
                     "date": "Date", "type": "Type", "qty": "Qty", "location": "Location",
-                    "dc_no": "DC No.", "remarks": "Remarks"}).iloc[::-1],
-                    width="stretch", hide_index=True, height=dataframe_height(len(_ret_log), max_px=360))
+                    "dc_no": "DC No.", "remarks": "Remarks"}).iloc[::-1])
 
         sec_hdr("list", "Inventory Log")
         if df_inv_t.empty:
@@ -9780,7 +9868,7 @@ with tab_inv:
             total_inv_p = max(1, math.ceil(len(inv_sorted) / ITEMS_INV))
             inv_page = st.number_input(f"Page (1–{total_inv_p})", min_value=1, max_value=total_inv_p, step=1, value=1, key="inv_page")
             si, ei = (inv_page - 1) * ITEMS_INV, inv_page * ITEMS_INV
-            st.dataframe(inv_sorted.iloc[si:ei], width="stretch", hide_index=True)
+            render_scroll_table(inv_sorted.iloc[si:ei])
 
             inv_options_map = {}
             for idx, row in inv_sorted.iterrows():
@@ -10333,8 +10421,7 @@ with tab_admin:
             _rows = [{"Month": month_label(k), "Target": f"{v:,}",
                       "": "in use now" if k == month_key(_today_adm) else ""} for k, v in _set_targets.items()]
             with st.expander(f"Months with their own target ({len(_set_targets)})"):
-                st.dataframe(pd.DataFrame(_rows), width="stretch", hide_index=True,
-                             height=dataframe_height(len(_rows), max_px=260))
+                render_scroll_table(pd.DataFrame(_rows))
                 _clear = st.selectbox("Remove a month's target", ["—"] + list(_set_targets), key="clear_month_target",
                                       format_func=lambda k: k if k == "—" else month_label(k))
                 if _clear != "—" and st.button(f"Remove {month_label(_clear)}", width="stretch", key="do_clear_month_target"):
@@ -10888,8 +10975,7 @@ with tab_admin:
                     plan, values = st.session_state["phase_fix_plan"]
                     if not values.empty:
                         st.markdown("**How each meter type in your data was counted:**")
-                        st.dataframe(values, width="stretch", hide_index=True,
-                                     height=dataframe_height(len(values)))
+                        render_scroll_table(values)
                     if plan.empty:
                         st.info("No correction needed — nothing was double counted.")
                     else:
@@ -10902,8 +10988,7 @@ with tab_admin:
                         by_date = plan.groupby("date")[["d_1ph", "d_3ph"]].sum().reset_index()
                         by_date["Total change"] = by_date["d_1ph"] + by_date["d_3ph"]
                         by_date.columns = ["Date", "1PH change", "3PH change", "Total change"]
-                        st.dataframe(by_date.sort_values("Date", ascending=False), width="stretch",
-                                     hide_index=True, height=dataframe_height(len(by_date)))
+                        render_scroll_table(by_date.sort_values("Date", ascending=False))
                         if st.button(f"Apply Correction to {len(plan)} row(s)", type="primary",
                                      width="stretch", key="apply_phase_fix"):
                             n = apply_phase_count_repair(plan)
@@ -11054,7 +11139,7 @@ with tab_admin:
                                 else:
                                     st.session_state["pending_undo_keys"] = set(matching["key"].values)
                                     st.warning(f"⚠️ Found {len(matching)} record(s) from this file still in Installs data.")
-                                    st.dataframe(matching, width="stretch", hide_index=True, height=dataframe_height(len(matching)))
+                                    render_scroll_table(matching, max_height=500)
                 if "pending_undo_keys" in st.session_state:
                     if st.button(f"🗑️ Remove These {len(st.session_state['pending_undo_keys'])} Record(s) & Reverse Counts", type="primary", width="stretch", key="undo_remove_btn"):
                         removed = remove_install_log_rows(st.session_state["pending_undo_keys"])
@@ -11093,7 +11178,7 @@ with tab_admin:
             near_dups = find_near_time_duplicates() if scanned else pd.DataFrame()
             if not near_dups.empty:
                 sub_hdr("clock", "Lower-Confidence: Same Installer, Times Within 2 Minutes")
-                st.dataframe(near_dups, width="stretch", hide_index=True, height=dataframe_height(len(near_dups)))
+                render_scroll_table(near_dups, max_height=500)
 
 
 # ── End of the run: clear the first-load screen ──────────────────────────────
