@@ -529,10 +529,6 @@ def _css(colors) -> str:
     return f"background-color:{bg};color:{fg}" if bg else ""
 
 
-def tier_style(v, red_max, yellow_min, yellow_max):
-    return _css(tier_colors(v, red_max, yellow_min, yellow_max))
-
-
 def _style_map(styler, func, subset=None):
     """pandas renamed Styler.applymap -> Styler.map (2.1+) and later removed
     applymap entirely, while older pandas doesn't have .map on Styler yet.
@@ -555,10 +551,6 @@ def cell_colors_3tier(v, mid):
     if v == mid:
         return (CF_YELLOW_BG, CF_YELLOW_FONT)
     return (CF_GREEN_BG, CF_GREEN_FONT)
-
-
-def cell_style_3tier(v, mid):
-    return _css(cell_colors_3tier(v, mid))
 
 
 def avg_time_colors(v):
@@ -588,28 +580,9 @@ def _is_aggregate_row(label) -> bool:
     return s.upper() == "TOTAL" or s.startswith("—")
 
 
-def style_hourly_table(df: pd.DataFrame, hour_cols):
-    """Applies the LoginID_Summary-style colouring: per-cell 3-tier for each
-    installer's hour buckets, 4-tier for the Total column, and a matching
-    4-tier scheme for the bottom aggregate TOTAL row."""
-    def styler(data):
-        css = pd.DataFrame("", index=data.index, columns=data.columns)
-        for i in data.index:
-            is_total_row = _is_aggregate_row(data.loc[i, "Installer"])
-            for h in hour_cols:
-                if is_total_row:
-                    css.loc[i, h] = tier_style(data.loc[i, h], HOURLY_TOTAL_RED_MAX, HOURLY_TOTAL_YELLOW_MIN, HOURLY_TOTAL_YELLOW_MAX)
-                else:
-                    css.loc[i, h] = cell_style_3tier(data.loc[i, h], HOURLY_CELL_THRESHOLD)
-            if "Total" in data.columns:
-                css.loc[i, "Total"] = tier_style(data.loc[i, "Total"], INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)
-        return css
-    return df.style.apply(styler, axis=None)
-
-
 # ── Export-as-image helpers (Dashboard + Analytics "Download as Image") ─────
 def build_hourly_color_grid(df: pd.DataFrame, hour_cols):
-    """Per-cell (bg, font) grid matching style_hourly_table's on-screen colours,
+    """Per-cell (bg, font) grid matching the hourly table's on-screen colours,
     for rendering the same table as a PNG."""
     grid = []
     for i in range(len(df)):
@@ -825,6 +798,89 @@ def dataframe_to_png_bytes(df: pd.DataFrame, color_grid=None, title: str = None)
 _RENDER_LOCK = threading.Lock()   # the Map PNG still uses matplotlib, whose pyplot state isn't thread-safe
 
 
+def _is_ios() -> bool:
+    """An iPhone / iPad browser. There, a download opens the file full screen
+    with no way back — in the home-screen app it meant closing and reopening
+    the app every time — so files are handed to the share sheet instead."""
+    forced = st.session_state.get("_force_ios")
+    if forced is not None:
+        return bool(forced)
+    try:
+        ua = st.context.headers.get("User-Agent", "") or ""
+    except Exception:
+        ua = ""
+    return any(t in ua for t in ("iPhone", "iPad", "iPod"))
+
+
+def _ios_share_widget(data, file_name: str, mime: str):
+    """A Save / Share button that opens the iPhone share sheet (Save Image,
+    Save to Files, WhatsApp...). Closing it leaves the app where it was.
+    Runs in the component frame but uses the app page's own share sheet; if
+    that isn't available, the file opens in a new tab that has a Done button."""
+    raw = data.encode("utf-8") if isinstance(data, str) else bytes(data)
+    b64 = base64.b64encode(raw).decode("ascii")
+    safe_name = _json.dumps(str(file_name))
+    html_frame(f"""
+<button id="b" style="width:100%;height:42px;border-radius:10px;border:1px solid #0E6E7A;background:#0E6E7A;
+  color:#fff;font:600 15px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;cursor:pointer;">
+  📤 Save / Share</button>
+<script>
+(function () {{
+  const b64 = "{b64}", name = {safe_name}, type = {_json.dumps(mime or "application/octet-stream")};
+  document.getElementById("b").addEventListener("click", async function () {{
+    const P = window.parent;
+    const bin = atob(b64), arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    let file;
+    try {{ file = new P.File([arr], name, {{type: type}}); }} catch (e) {{ file = new File([arr], name, {{type: type}}); }}
+    try {{
+      if (P.navigator.canShare && P.navigator.canShare({{files: [file]}})) {{
+        await P.navigator.share({{files: [file], title: name}});
+        return;
+      }}
+    }} catch (e) {{ if (e && e.name === "AbortError") return; }}
+    const url = P.URL.createObjectURL(file);
+    const a = P.document.createElement("a");
+    a.href = url; a.target = "_blank"; a.rel = "noopener";
+    P.document.body.appendChild(a); a.click();
+    setTimeout(function () {{ a.remove(); P.URL.revokeObjectURL(url); }}, 120000);
+  }});
+}})();
+</script>""", height=46)
+
+
+def download_button(label: str, data, file_name: str = None, mime: str = None, key: str = None,
+                    width: str = "stretch", on_click="ignore", **kwargs):
+    """st.download_button everywhere except iPhone / iPad, where the file goes
+    to the share sheet (see _is_ios). `data` may be bytes, text, or a callable
+    that builds the file. On iPhone a callable is built on the first tap and
+    shared on the second — a share has to start from a tap of its own."""
+    if not _is_ios():
+        return st.download_button(label, data=data, file_name=file_name, mime=mime, key=key,
+                                  width=width, on_click=on_click, **kwargs)
+    key = key or f"dl_{file_name}"
+    if callable(data):
+        store = f"_ios_file_{key}"
+        if store not in st.session_state:
+            def _prepare():
+                try:
+                    st.session_state[store] = data()
+                except Exception as e:      # shown below instead of a share button
+                    st.session_state[store] = e
+                st.session_state["_ios_fresh"] = store
+            st.button(label, key=f"{key}_prep", width=width, on_click=_prepare,
+                      help="Prepares the file, then shows a Save / Share button.")
+            return None
+        data = st.session_state[store]
+        if isinstance(data, Exception):
+            st.session_state.pop(store, None)
+            st.error(f"❌ Couldn't prepare {file_name}: {data}")
+            return None
+        st.caption(f"{file_name} is ready.")
+    _ios_share_widget(data, file_name, mime)
+    return None
+
+
 def lazy_download_button(label: str, make_bytes, file_name: str, mime: str, key: str):
     """One-click download whose file is only built when clicked.
 
@@ -836,8 +892,7 @@ def lazy_download_button(label: str, make_bytes, file_name: str, mime: str, key:
     def _build():
         with _RENDER_LOCK:
             return make_bytes()
-    st.download_button(label, data=_build, file_name=file_name, mime=mime,
-                       width="stretch", key=key, on_click="ignore")
+    download_button(label, data=_build, file_name=file_name, mime=mime, width="stretch", key=key)
 
 
 def download_image_button(df: pd.DataFrame, file_name: str, key: str, color_grid=None, title: str = None, label: str = "📷 Download as Image"):
@@ -1229,6 +1284,42 @@ def dataframe_height(n_rows: int, row_px: int = 38, header_px: int = 38, max_px:
     scrollbar, capped at max_px for very long tables (which fall back to the
     normal scrollable view rather than pushing the page too tall)."""
     return min(header_px + row_px * max(n_rows, 1) + 3, max_px)
+
+
+def render_scroll_table(df: pd.DataFrame, color_grid=None, max_height: int = 520):
+    """A plain HTML table that scrolls sideways with the first column pinned.
+
+    For wide tables read on a phone: st.dataframe treats a swipe across its
+    header as dragging a column, so scrolling the hourly table sideways kept
+    moving its columns. Here a swipe only scrolls. Colours come from the same
+    (bg, font) grid the image export uses."""
+    import html as _html
+    head = "".join(f"<th>{_html.escape(str(c))}</th>" for c in df.columns)
+    body = []
+    for i, row in enumerate(df.itertuples(index=False)):
+        agg = _is_aggregate_row(row[0])
+        cells = []
+        for j, v in enumerate(row):
+            bg, fg = (color_grid[i][j] if color_grid is not None else (None, None))
+            style = (f"background:{bg};color:{fg};" if bg else "") + ("font-weight:700;" if fg or agg else "")
+            cells.append(f'<td style="{style}">{_html.escape("" if pd.isna(v) else str(v))}</td>')
+        body.append(f'<tr class="{"agg" if agg else ""}">' + "".join(cells) + "</tr>")
+    st.markdown(
+        '<style>'
+        '.tl-scroll{overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;'
+        'border:1px solid var(--hairline);border-radius:var(--radius-md);margin-bottom:var(--space-3);}'
+        '.tl-scroll table{border-collapse:separate;border-spacing:0;font-size:13px;width:max-content;min-width:100%;}'
+        '.tl-scroll th,.tl-scroll td{padding:7px 10px;text-align:center;white-space:nowrap;'
+        'border-bottom:1px solid var(--hairline);}'
+        '.tl-scroll th{position:sticky;top:0;background:var(--ink-900);color:#fff;font-weight:700;z-index:2;}'
+        '.tl-scroll th:first-child,.tl-scroll td:first-child{position:sticky;left:0;text-align:left;z-index:1;'
+        'background:var(--surface-100);font-weight:600;box-shadow:1px 0 0 var(--hairline);}'
+        '.tl-scroll th:first-child{z-index:3;background:var(--ink-900);}'
+        '.tl-scroll tr.agg td{background-color:var(--surface-200);}'
+        '</style>'
+        f'<div class="tl-scroll" style="max-height:{max_height}px;"><table><thead><tr>{head}</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>',
+        unsafe_allow_html=True)
 
 
 def render_hourly_heatmap(df: pd.DataFrame, hour_cols, color_grid):
@@ -1745,6 +1836,18 @@ with head_l:
 _notice_area = st.container()
 with _notice_area:
     replay_carried_messages()
+    _fresh_file = st.session_state.pop("_ios_fresh", None)
+    for _k in [k for k in st.session_state if str(k).startswith("_ios_file_") and k != _fresh_file]:
+        del st.session_state[_k]
+
+def html_frame(html: str, height: int = 0):
+    """HTML with scripts, in a frame that can reach the app page (login memory,
+    the iPhone share sheet). st.iframe where this Streamlit has it — the older
+    st.components.v1.html is being retired — else the older call."""
+    if hasattr(st, "iframe"):
+        return st.iframe(html, height=max(int(height), 1))
+    return st.components.v1.html(html, height=height)
+
 
 # ── Authentication / PIN Protection (persists until the app/tab is closed, ──
 # and now also survives a Streamlit Community Cloud app-sleep / session reset
@@ -1762,7 +1865,7 @@ if not st.session_state["authenticated"]:
     #    token and, if found, reload the page with it appended to the URL —
     #    covers a fresh app-sleep wake-up, a bookmarked/home-screen open, or
     #    any other visit that dropped the query param.
-    st.components.v1.html("""
+    html_frame("""
     <script>
     (function() {
         try {
@@ -1792,7 +1895,7 @@ if not st.session_state["authenticated"]:
                 # Nothing from the login screen should follow you in.
                 st.session_state.pop("_carry_messages", None)
                 st.query_params["k"] = REMEMBER_TOKEN
-                st.components.v1.html(f"""
+                html_frame(f"""
                 <script>
                 try {{ window.parent.localStorage.setItem('vja_remember_token', '{REMEMBER_TOKEN}'); }} catch (e) {{}}
                 </script>
@@ -4634,10 +4737,26 @@ INCENTIVE_OLD_UNIT_RATE_1PH = 150.0   # pre-hike rate, for the profit split
 RATE_3PH_NEW = 200.0
 RATE_3PH_OLD = 170.0
 SURVEY_3PH = 15.0
+# Unit rates, set in Expenses → Incentive & Profit Sharing → Pricing and saved
+# in Settings; the figures above are only the defaults. Read here, after
+# Settings has loaded, and used by every billing figure in the app.
+INCENTIVE_UNIT_RATE_1PH = float(get_setting("price_1ph_new", INCENTIVE_UNIT_RATE_1PH))
+INCENTIVE_OLD_UNIT_RATE_1PH = float(get_setting("price_1ph_old", INCENTIVE_OLD_UNIT_RATE_1PH))
+RATE_3PH_NEW = float(get_setting("price_3ph_new", RATE_3PH_NEW))
+RATE_3PH_OLD = float(get_setting("price_3ph_old", RATE_3PH_OLD))
 RETENTION_PCT = 0.15                  # held 90 days on the old base amount
 GST_PCT = 0.09
 PRIMARY_SPLIT = 0.50                  # Sandeep's share of the Sandeep+Raghu pool
 PARTNERS = ("Sandeep", "Raghu", "Kiran", "Manju")   # first two are primary
+# When an invoice is paid. Invoice dated 01.10.2026: the net (invoice less the
+# 15% retention and 2% TDS) is paid by 30.10.2026; the 18% GST on 25.11.2026,
+# 55 days after the invoice — 9% of it goes to the government and 9% stays
+# as profit (input tax credit available); the retention after 90 days.
+NET_PAY_DAYS = 29          # 01.10 -> 30.10
+GST_PAY_DAYS = 55          # 01.10 -> 25.11
+RETENTION_DAYS = 90
+TDS_PCT = 0.02
+GST_INVOICE_PCT = 0.18     # charged on the invoice; GST_PCT (9%) of it is kept
 INCENTIVE_TEMPLATE_B64 = "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"
 
 
@@ -4659,6 +4778,10 @@ def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: flo
     old_base_revenue = (old_rate + survey) * installs + (old3 + sv3) * n3
     expense_total = cost_per_install * (installs + n3)
     base_profit = old_base_revenue - expense_total
+    # Retention: the customer holds back retention_pct of the WHOLE invoice for
+    # 90 days. The part on the old base is shared by all four; the part on the
+    # additional amount (new pricing + incentive) by Sandeep & Raghu. It comes
+    # OUT of what is paid with the invoice — it is not extra money.
     retention = retention_pct * old_base_revenue
     gst_old = gst_pct * old_base_revenue
     price_hike = (new_rate - old_rate) * installs + (new3 - old3) * n3
@@ -4666,6 +4789,7 @@ def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: flo
     tier_incentive = (calculate_1ph_incentive_billing(installs, n3)["tier_incentive"]
                       + calculate_3ph_billing(n3, installs)["tier_incentive"])
     additional = price_hike + tier_incentive
+    retention_additional = retention_pct * additional
     gst_additional = gst_pct * additional
 
     quarter = lambda x: x / 4.0
@@ -4673,8 +4797,10 @@ def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: flo
     for i, name in enumerate(PARTNERS):
         primary = i < 2
         share_add = (split if i == 0 else (1 - split)) if primary else 0.0
-        base_s, ret_s, gst_s = quarter(base_profit), quarter(retention), quarter(gst_old)
-        add_s, gadd_s = additional * share_add, gst_additional * share_add
+        # Paid with the invoice: each share less the retention held on it.
+        base_s, gst_s = quarter(base_profit - retention), quarter(gst_old)
+        add_s, gadd_s = (additional - retention_additional) * share_add, gst_additional * share_add
+        ret_old_s, ret_add_s = quarter(retention), retention_additional * share_add
         rows.append({
             "Partner": name,
             "Base Profit Share": base_s,
@@ -4682,13 +4808,16 @@ def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: flo
             "Additional (New Pricing)": add_s,
             "GST On Additional": gadd_s,
             "Payable Now": base_s + gst_s + add_s + gadd_s,
-            "Retention (after 90 days)": ret_s,
-            "Grand Total": base_s + gst_s + add_s + gadd_s + ret_s,
+            "Retention On Old Base": ret_old_s,
+            "Retention On Additional": ret_add_s,
+            "Retention (after 90 days)": ret_old_s + ret_add_s,
+            "Grand Total": base_s + gst_s + add_s + gadd_s + ret_old_s + ret_add_s,
         })
     return {
         "installs": installs, "cost_per_install": cost_per_install,
         "old_base_revenue": old_base_revenue, "expense_total": expense_total,
         "base_profit": base_profit, "retention": retention, "gst_old": gst_old,
+        "retention_additional": retention_additional,
         "price_hike": price_hike, "tier_incentive": tier_incentive,
         "additional": additional, "gst_additional": gst_additional,
         "partners": pd.DataFrame(rows),
@@ -4697,12 +4826,16 @@ def profit_sharing_summary(installs: int, cost_per_install: float, old_rate: flo
 
 def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
                              old_rate: float, retention_pct: float, gst_pct: float,
-                             split: float, installs_3ph: int = 0) -> bytes:
+                             split: float, installs_3ph: int = 0, new_rate: float = None,
+                             old_rate_3ph: float = None, new_rate_3ph: float = None) -> bytes:
     """Fill the approved template's INPUT cells and hand back the workbook.
     Formulas are untouched, so Excel recalculates everything on open."""
     wb = openpyxl.load_workbook(io.BytesIO(base64.b64decode(INCENTIVE_TEMPLATE_B64)))
     calc = wb["1Ph Incentive Calc"]
-    calc["B5"] = INCENTIVE_UNIT_RATE_1PH          # new unit rate
+    new_rate = INCENTIVE_UNIT_RATE_1PH if new_rate is None else new_rate
+    old_rate_3ph = RATE_3PH_OLD if old_rate_3ph is None else old_rate_3ph
+    new_rate_3ph = RATE_3PH_NEW if new_rate_3ph is None else new_rate_3ph
+    calc["B5"] = new_rate                         # new unit rate
     calc["B6"] = INCENTIVE_FLAT_ADDON_1PH         # survey add-on
     calc["B7"] = installs                         # <- from Installations (as the Expenses tab)
     calc["E5"] = old_rate
@@ -4713,10 +4846,10 @@ def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
     # ── 3PH: its own calculator sheet (same layout, same slabs) ──────────
     calc3 = wb.copy_worksheet(calc)
     calc3.title = "3Ph Incentive Calc"
-    calc3["B5"] = RATE_3PH_NEW
+    calc3["B5"] = new_rate_3ph
     calc3["B6"] = SURVEY_3PH
     calc3["B7"] = installs_3ph
-    calc3["E5"] = RATE_3PH_OLD
+    calc3["E5"] = old_rate_3ph
     calc3["E6"] = SURVEY_3PH
     calc3["E7"] = installs_3ph
     for ref in ("A1", "A5"):
@@ -4766,8 +4899,33 @@ def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
     # so adding the two F19s would count it twice.
     ps["C23"] = "='1Ph Incentive Calc'!$B$26+'3Ph Incentive Calc'!$B$26"
     ps["B23"] = "Tier incentive on all installs (1PH share + 3PH share)"
-    if isinstance(ps["A11"].value, str):
-        ps["A11"] = "Retention % (on the old base amount, 1PH + 3PH)"
+    # Retention is held on the WHOLE invoice and comes out of what is paid
+    # now: old-base part shared by all four, additional part by Sandeep & Raghu.
+    ps["A11"] = "Retention % (held 90 days on the whole invoice, 1PH + 3PH)"
+    ps["A20"] = "RETENTION Held on Old Base (90 days)"
+    ps["A26"], ps["B26"], ps["C26"], ps["D26"] = (
+        "RETENTION Held on Additional (90 days)", "15% x Additional Amount", "=B11*C24",
+        "Sandeep & Raghu only (50/50)")
+    for c in "ABCD":
+        ps[f"{c}26"]._style = ps[f"{c}25"]._style
+    ps["A29"] = "Base Profit Share — paid now (old pricing less retention, equal 4-way)"
+    for col in "BCDE":
+        ps[f"{col}29"] = "=(C19-C20)/4"
+    ps["A30"] = "Retention Held — 90 days (old base equal 4-way; additional Sandeep & Raghu)"
+    ps["B30"], ps["C30"] = "=C20/4+C26*B13", "=C20/4+C26*(1-B13)"
+    ps["A32"] = "Additional New-Pricing Profit Share — paid now, less retention (Sandeep & Raghu only)"
+    ps["B32"], ps["C32"] = "=(C24-C26)*B13", "=(C24-C26)*(1-B13)"
+    ps["D41"], ps["E41"], ps["F41"], ps["G41"] = ("Retention Held (Total, Rs.)", "Kiran / Manju each (Rs.)",
+                                                  "Sandeep (Rs.)", "Raghu (Rs.)")
+    for c in "FG":
+        ps[f"{c}41"]._style = ps["E41"]._style
+    for r in range(42, 54):
+        ps[f"D{r}"] = "=$C$20+$C$26"
+        ps[f"E{r}"] = "=$C$20/4"
+        ps[f"F{r}"] = "=$C$20/4+$C$26*$B$13"
+        ps[f"G{r}"] = "=$C$20/4+$C$26*(1-$B$13)"
+        for c in "FG":
+            ps[f"{c}{r}"]._style = ps[f"E{r}"]._style
 
     ps["B10"] = round(float(cost_per_install), 2)  # <- from the Expenses tab
     ps["C10"] = f"From the Expenses tab — {month_label(mkey)} total cost / install (1PH + 3PH)"
@@ -6544,11 +6702,11 @@ def render_meter_search(key_prefix: str = "inst", show_heading: bool = True):
                              help="Tap inside, select all, copy — or use Download below.")
                 dl1, dl2 = st.columns(2)
                 with dl1:
-                    st.download_button("Download as text", data=export_text,
+                    download_button("Download as text", data=export_text,
                                        file_name=f"search_{search_query.strip()[:20] or 'results'}.txt",
                                        mime="text/plain", width="stretch", key=f"{key_prefix}_search_dl_txt", on_click="ignore")
                 with dl2:
-                    st.download_button("Download as CSV", data=results_display.to_csv(index=False),
+                    download_button("Download as CSV", data=results_display.to_csv(index=False),
                                        file_name=f"search_{search_query.strip()[:20] or 'results'}.csv",
                                        mime="text/csv", width="stretch", key=f"{key_prefix}_search_dl_csv", on_click="ignore")
 
@@ -6943,7 +7101,7 @@ with tab_dash:
                 export_df.loc[len(export_df)] = ["PENDING STOCK", "", pending_1ph, pending_3ph, ""]
 
                 csv_data = export_df.to_csv(index=False).encode("utf-8")
-                st.download_button("📥 Download CSV Report", data=csv_data, file_name="Installation_Summary.csv", mime="text/csv", width="stretch", on_click="ignore")
+                download_button("📥 Download CSV Report", data=csv_data, file_name="Installation_Summary.csv", mime="text/csv", width="stretch", on_click="ignore")
 
                 date_str = f"{d_start} to {d_end}" if d_start != d_end else str(d_start)
                 wa_loc_df = filtered.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
@@ -7016,7 +7174,7 @@ with tab_dash:
                 st.success("✅ Report ready below.")
 
         if "weekly_report_pdf" in st.session_state:
-            st.download_button("Download Report (PDF)", data=st.session_state["weekly_report_pdf"],
+            download_button("Download Report (PDF)", data=st.session_state["weekly_report_pdf"],
                                 file_name=st.session_state["weekly_report_name"], mime="application/pdf",
                                 width="stretch", key="download_weekly_report", on_click="ignore")
 
@@ -7447,8 +7605,9 @@ with tab_analytics:
                 hdf = _build_hourly_df(scope_df)
                 grid = build_hourly_color_grid(hdf, hour_col_labels)
                 if hourly_view_mode.startswith("📋"):
-                    st.dataframe(style_hourly_table(hdf, hour_col_labels), width="stretch",
-                                 hide_index=True, height=dataframe_height(len(hdf)))
+                    # Plain scrolling table, not st.dataframe: on a phone a sideways
+                    # swipe over st.dataframe's header drags the columns around.
+                    render_scroll_table(hdf, grid)
                 else:
                     render_hourly_heatmap(hdf, hour_col_labels, grid)
 
@@ -8260,10 +8419,37 @@ with tab_exp:
                 st.markdown('<div class="warn-box">No expenses entered for this month, so the '
                             'expense per install is 0 and the profit figures will be overstated. '
                             'Add this month\'s costs above first.</div>', unsafe_allow_html=True)
-            ic1, ic2, ic3, ic4 = st.columns(4)
-            with ic1:
-                _old_rate = st.number_input("Old unit rate (Rs.)", min_value=0.0, step=5.0,
-                                            value=float(INCENTIVE_OLD_UNIT_RATE_1PH), key="inc_old_rate")
+            # -- Pricing: old and new unit rates for both meter types ----------
+            sub_hdr("rupee", "Pricing (Rs. per install, before survey)")
+            _pv = _sheet_version("Settings")
+            pr1, pr2, pr3, pr4 = st.columns(4)
+            with pr1:
+                _p1_new = st.number_input("1PH new", min_value=0.0, step=5.0,
+                                          value=float(INCENTIVE_UNIT_RATE_1PH), key=f"price_1ph_new_{_pv}")
+            with pr2:
+                _p1_old = st.number_input("1PH old", min_value=0.0, step=5.0,
+                                          value=float(INCENTIVE_OLD_UNIT_RATE_1PH), key=f"price_1ph_old_{_pv}")
+            with pr3:
+                _p3_new = st.number_input("3PH new", min_value=0.0, step=5.0,
+                                          value=float(RATE_3PH_NEW), key=f"price_3ph_new_{_pv}")
+            with pr4:
+                _p3_old = st.number_input("3PH old", min_value=0.0, step=5.0,
+                                          value=float(RATE_3PH_OLD), key=f"price_3ph_old_{_pv}")
+            _old_rate = _p1_old
+            _prices = {"price_1ph_new": _p1_new, "price_1ph_old": _p1_old,
+                       "price_3ph_new": _p3_new, "price_3ph_old": _p3_old}
+            _saved = {"price_1ph_new": INCENTIVE_UNIT_RATE_1PH, "price_1ph_old": INCENTIVE_OLD_UNIT_RATE_1PH,
+                      "price_3ph_new": RATE_3PH_NEW, "price_3ph_old": RATE_3PH_OLD}
+            _changed = {k: v for k, v in _prices.items() if float(v) != float(_saved[k])}
+            st.caption(f"Survey on top: Rs. {INCENTIVE_FLAT_ADDON_1PH:,.0f} per 1PH, Rs. {SURVEY_3PH:,.0f} per 3PH. "
+                       "Changes show below at once; Save to use them everywhere — Dashboard billing, "
+                       "cost per site and the Excel download.")
+            if _changed and st.button(f"💾 Save pricing ({len(_changed)} changed)", type="primary",
+                                      width="stretch", key="price_save"):
+                if save_settings({k: float(v) for k, v in _prices.items()}):
+                    st.success("✅ Pricing saved — billing everywhere now uses it.")
+                    st.rerun()
+            ic2, ic3, ic4 = st.columns(3)
             with ic2:
                 _ret = st.number_input("Retention %", min_value=0.0, max_value=100.0, step=1.0,
                                        value=RETENTION_PCT * 100, key="inc_retention") / 100
@@ -8286,10 +8472,12 @@ with tab_exp:
                 f'x {_all:,} installs ({_n1ph:,} 1PH + {_n3ph:,} 3PH) = <b>Rs. {fmt_rs((_cpi or 0) * _all)}</b>'
                 f' (month total cost Rs. {fmt_rs(summ["total_cost"])}).</div>', unsafe_allow_html=True)
 
-            bill = calculate_1ph_incentive_billing(_n1ph, _n3ph)
-            bill3 = calculate_3ph_billing(_n3ph, _n1ph)
-            ps = profit_sharing_summary(_n1ph, _cpi or 0.0, _old_rate, INCENTIVE_UNIT_RATE_1PH,
-                                        INCENTIVE_FLAT_ADDON_1PH, _ret, _gst, _split, installs_3ph=_n3ph)
+            # At the prices above (saved or not yet saved); slabs on 1PH + 3PH together.
+            bill = calculate_billing(_n1ph, _p1_new, INCENTIVE_FLAT_ADDON_1PH, slab_total=_n1ph + _n3ph)
+            bill3 = calculate_billing(_n3ph, _p3_new, SURVEY_3PH, slab_total=_n1ph + _n3ph)
+            ps = profit_sharing_summary(_n1ph, _cpi or 0.0, _p1_old, _p1_new,
+                                        INCENTIVE_FLAT_ADDON_1PH, _ret, _gst, _split, installs_3ph=_n3ph,
+                                        old_rate_3ph=_p3_old, new_rate_3ph=_p3_new)
             render_stat_tiles([
                 ("bolt", f"{_n1ph:,} / {_n3ph:,}", "1PH / 3PH", "installs", "normal"),
                 ("wallet", fmt_rs(_cpi, 1), "Expense", "Rs./install", "normal"),
@@ -8302,28 +8490,106 @@ with tab_exp:
                 ("Old pricing base revenue", ps["old_base_revenue"]),
                 (f"Total expense ({fmt_rs(_cpi, 2)} x {_n1ph + _n3ph:,})", ps["expense_total"]),
                 ("Base profit (old pricing)", ps["base_profit"]),
-                (f"Retention held ({_ret * 100:.0f}%, 90 days)", ps["retention"]),
+                (f"Retention held on old base ({_ret * 100:.0f}%, 90 days)", ps["retention"]),
                 (f"GST on old base ({_gst * 100:.0f}%)", ps["gst_old"]),
                 ("Price hike amount", ps["price_hike"]),
                 ("Tiered slab incentive", ps["tier_incentive"]),
                 ("Additional amount (new pricing)", ps["additional"]),
                 ("GST on additional", ps["gst_additional"]),
+                (f"Retention held on additional ({_ret * 100:.0f}%, 90 days)", ps["retention_additional"]),
             ], columns=["Component", "Amount (Rs.)"])
             pool["Amount (Rs.)"] = pool["Amount (Rs.)"].round(0).astype(int)
             st.dataframe(pool, width="stretch", hide_index=True, height=dataframe_height(len(pool)))
 
+            # -- When the money arrives ------------------------------------------
+            sub_hdr("calendar", "Payment Schedule")
+            _y, _m = int(sel_month[:4]), int(sel_month[5:])
+            _inv_default = date(_y + (_m == 12), 1 if _m == 12 else _m + 1, 1)   # 1st of the next month
+            _inv_date = st.date_input("Invoice date", value=_inv_default, key=f"inc_inv_date_{sel_month}",
+                                      format="DD/MM/YYYY")
+            _net_on = _inv_date + timedelta(days=NET_PAY_DAYS)
+            _gst_on = _inv_date + timedelta(days=GST_PAY_DAYS)
+            _ret_on = _inv_date + timedelta(days=RETENTION_DAYS)
+            _fmt_d = lambda d: d.strftime("%d.%m.%Y")
+            _invoice = bill["total_cost"] + bill3["total_cost"]
+            _gst_total = _invoice * GST_INVOICE_PCT
+            _gst_kept = _invoice * _gst
+            sched = pd.DataFrame([
+                {"Paid on": _fmt_d(_net_on), "What": f"Net — invoice less {_ret * 100:.0f}% retention "
+                                                     f"and {TDS_PCT * 100:.0f}% TDS",
+                 "Amount (Rs.)": round(_invoice * (1 - _ret - TDS_PCT))},
+                {"Paid on": _fmt_d(_gst_on), "What": f"GST {GST_INVOICE_PCT * 100:.0f}% ({GST_PAY_DAYS} days after the invoice)",
+                 "Amount (Rs.)": round(_gst_total)},
+                {"Paid on": "", "What": f"  of which payable to government ({(GST_INVOICE_PCT - _gst) * 100:.0f}%)",
+                 "Amount (Rs.)": round(_gst_total - _gst_kept)},
+                {"Paid on": "", "What": f"  of which kept as profit — ITC available ({_gst * 100:.0f}%)",
+                 "Amount (Rs.)": round(_gst_kept)},
+                {"Paid on": _fmt_d(_ret_on), "What": f"Retention released ({_ret * 100:.0f}%)",
+                 "Amount (Rs.)": round(_invoice * _ret)},
+            ])
+            st.dataframe(sched, width="stretch", hide_index=True, height=dataframe_height(len(sched)))
+            st.markdown(
+                f'<div class="info-box">Invoice of Rs. {_invoice:,.0f} (before GST) dated {_fmt_d(_inv_date)}. '
+                f'<b>GST is received only {GST_PAY_DAYS} days after the invoice</b>, so the partners\' GST shares '
+                f'below are paid on {_fmt_d(_gst_on)}, not with the net on {_fmt_d(_net_on)}. TDS of '
+                f'Rs. {_invoice * TDS_PCT:,.0f} is not received in cash; it is claimed against income tax.</div>',
+                unsafe_allow_html=True)
+
             sub_hdr("users", "Partner-Wise")
             pw = ps["partners"].copy()
+            pw[f"Paid {_fmt_d(_net_on)}"] = pw["Base Profit Share"] + pw["Additional (New Pricing)"]
+            pw[f"GST Paid {_fmt_d(_gst_on)}"] = pw["GST On Old Base"] + pw["GST On Additional"]
+            pw[f"Retention Paid {_fmt_d(_ret_on)}"] = pw["Retention (after 90 days)"]
+            pw = pw[["Partner", "Base Profit Share", "Additional (New Pricing)", f"Paid {_fmt_d(_net_on)}",
+                     "GST On Old Base", "GST On Additional", f"GST Paid {_fmt_d(_gst_on)}",
+                     "Retention On Old Base", "Retention On Additional",
+                     f"Retention Paid {_fmt_d(_ret_on)}", "Grand Total"]]
             for c in pw.columns[1:]:
                 pw[c] = pw[c].round(0).astype(int)
             total_row = {"Partner": "TOTAL", **{c: int(pw[c].sum()) for c in pw.columns[1:]}}
             pw_disp = pd.concat([pw, pd.DataFrame([total_row])], ignore_index=True)
             st.dataframe(pw_disp, width="stretch", hide_index=True, height=dataframe_height(len(pw_disp)))
 
+            # -- The 9% GST kept, by partner pair --------------------------------
+            sub_hdr("receipt", f"GST {_gst * 100:.0f}% — Partner Breakup (paid {_fmt_d(_gst_on)})")
+            _pp = ps["partners"].set_index("Partner")
+            _pair_a, _pair_b = list(PARTNERS[2:]), list(PARTNERS[:2])
+            _lbl_a, _lbl_b = " & ".join(_pair_a), " & ".join(_pair_b)
+
+            def _pair_row(label, col):
+                a, b = float(_pp.loc[_pair_a, col].sum()), float(_pp.loc[_pair_b, col].sum())
+                return {"GST": label, _lbl_a: round(a), _lbl_b: round(b), "Total": round(a + b)}
+            gst_bk = pd.DataFrame([
+                _pair_row("On old base (shared equally by all four)", "GST On Old Base"),
+                _pair_row(f"On additional (new pricing — {_lbl_b} only)", "GST On Additional"),
+            ])
+            gst_bk = pd.concat([gst_bk, pd.DataFrame([{"GST": "TOTAL", **{c: int(gst_bk[c].sum())
+                                                                         for c in gst_bk.columns[1:]}}])],
+                               ignore_index=True)
+            st.dataframe(gst_bk, width="stretch", hide_index=True, height=dataframe_height(len(gst_bk)))
+            _each = {p: float(_pp.loc[p, "GST On Old Base"] + _pp.loc[p, "GST On Additional"]) for p in PARTNERS}
+            st.caption("Each: " + " · ".join(f"{p} Rs. {_each[p]:,.0f}" for p in _pair_a + _pair_b)
+                       + f". The Rs. {_gst_total - _gst_kept:,.0f} payable to the government is not shared.")
+
+            # -- The retention, by partner pair ----------------------------------
+            sub_hdr("clock", f"Retention {_ret * 100:.0f}% — Partner Breakup (paid {_fmt_d(_ret_on)})")
+            ret_bk = pd.DataFrame([
+                _pair_row("On old base (shared equally by all four)", "Retention On Old Base"),
+                _pair_row(f"On additional (new pricing + incentive — {_lbl_b} only)", "Retention On Additional"),
+            ])
+            ret_bk = pd.concat([ret_bk, pd.DataFrame([{"GST": "TOTAL", **{c: int(ret_bk[c].sum())
+                                                                         for c in ret_bk.columns[1:]}}])],
+                               ignore_index=True).rename(columns={"GST": "Retention"})
+            st.dataframe(ret_bk, width="stretch", hide_index=True, height=dataframe_height(len(ret_bk)))
+            _each_r = {p: float(_pp.loc[p, "Retention (after 90 days)"]) for p in PARTNERS}
+            st.caption("Each: " + " · ".join(f"{p} Rs. {_each_r[p]:,.0f}" for p in _pair_a + _pair_b)
+                       + f". Held back from the payment on {_fmt_d(_net_on)} and paid on {_fmt_d(_ret_on)}.")
+
             lazy_download_button(
                 "📥 Download Excel (Incentive + Profit Sharing)",
-                lambda: build_incentive_workbook(sel_month, _n1ph, _cpi or 0.0, _old_rate, _ret, _gst, _split,
-                                                 installs_3ph=_n3ph),
+                lambda: build_incentive_workbook(sel_month, _n1ph, _cpi or 0.0, _p1_old, _ret, _gst, _split,
+                                                 installs_3ph=_n3ph, new_rate=_p1_new,
+                                                 old_rate_3ph=_p3_old, new_rate_3ph=_p3_new),
                 f"1Ph_Incentive_Profit_{sel_month}.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "inc_xlsx")
@@ -8573,7 +8839,7 @@ with tab_liaison:
                     download_image_button(breakup, f"Liaisoning_Breakup_{l_month}.png", key="dl_img_liaison_bk",
                                           title=_title_l, label="📷 Breakup Image")
                 with dc3:
-                    st.download_button("📥 Breakup CSV", data=breakup.to_csv(index=False).encode("utf-8"),
+                    download_button("📥 Breakup CSV", data=breakup.to_csv(index=False).encode("utf-8"),
                                        file_name=f"liaisoning_breakup_{l_month}.csv", mime="text/csv",
                                        width="stretch", key="liaison_bk_csv", on_click="ignore")
 
@@ -8588,7 +8854,7 @@ with tab_liaison:
                 detail["Payable (Rs.)"] = detail["Payable (Rs.)"].round(0).astype(int)
                 st.dataframe(detail, width="stretch", hide_index=True,
                              height=dataframe_height(len(detail), max_px=520))
-                st.download_button("📥 Download CSV", data=detail.to_csv(index=False).encode("utf-8"),
+                download_button("📥 Download CSV", data=detail.to_csv(index=False).encode("utf-8"),
                                    file_name=f"liaisoning_{l_month}.csv", mime="text/csv",
                                    width="stretch", key="liaison_csv", on_click="ignore")
 
@@ -9506,7 +9772,7 @@ with tab_inv:
         else:
             inv_sorted = df_inv_t.iloc[::-1].reset_index(drop=True)
             inv_exp = inv_sorted.rename(columns={"date": "Date", "type": "Type", "qty": "Qty", "mrn": "MRN No", "make": "Make"})
-            st.download_button("⬇ Export Inventory CSV", inv_exp.to_csv(index=False).encode(), "inventory.csv", "text/csv", width="stretch", on_click="ignore")
+            download_button("⬇ Export Inventory CSV", inv_exp.to_csv(index=False).encode(), "inventory.csv", "text/csv", width="stretch", on_click="ignore")
 
             ITEMS_INV = 10
             total_inv_p = max(1, math.ceil(len(inv_sorted) / ITEMS_INV))
@@ -9755,7 +10021,7 @@ with tab_hr:
                             st.success("✅ Offer letter ready.")
             _f = st.session_state.get("hr_offer_file")
             if _f:
-                st.download_button(f"📥 Download {_f['label']}", data=_f["bytes"], file_name=_f["name"],
+                download_button(f"📥 Download {_f['label']}", data=_f["bytes"], file_name=_f["name"],
                                    mime=_f["mime"], key="hr_dl_offer", on_click="ignore", width="stretch")
 
         # ── Payslip ────────────────────────────────────────────────────────────
@@ -9856,7 +10122,7 @@ with tab_hr:
                             st.success("✅ Payslip ready.")
                 _pf = st.session_state.get("hr_slip_file")
                 if _pf:
-                    st.download_button(f"📥 Download {_pf['label']}", data=_pf["bytes"], file_name=_pf["name"],
+                    download_button(f"📥 Download {_pf['label']}", data=_pf["bytes"], file_name=_pf["name"],
                                        mime=_pf["mime"], key="hr_dl_slip", on_click="ignore", width="stretch")
 
         # ── Employees ──────────────────────────────────────────────────────────
@@ -10002,7 +10268,7 @@ with tab_admin:
             st.session_state["authenticated"] = False
             if "k" in st.query_params:
                 del st.query_params["k"]
-            st.components.v1.html("""
+            html_frame("""
         <script>
         try { window.parent.localStorage.removeItem('vja_remember_token'); } catch (e) {}
         </script>
@@ -10751,7 +11017,7 @@ with tab_admin:
                         st.rerun()
 
                 if not flagged.empty:
-                    st.download_button("📥 Download This Report", data=flagged.to_csv(index=False).encode("utf-8"),
+                    download_button("📥 Download This Report", data=flagged.to_csv(index=False).encode("utf-8"),
                                        file_name="installations_discrepancy_report.csv", mime="text/csv",
                                        width="stretch", on_click="ignore")
 
