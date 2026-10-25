@@ -42,9 +42,11 @@ the app creates and appends data automatically):
                            (older sheets without designation/phone are updated
                            automatically the first time the Liaisoning tab opens)
   UploadedInstallLog    - key, date, time, installer_id, tech_name, location, meter_type,
-                           sno, old_meter_no, new_meter_no, lat, long, source
+                           sno, old_meter_no, new_meter_no, lat, long, source, change_slip
   AnalyticsRaw          - key, date, time, installer_id, hour, location, meter_type,
-                           sno, old_meter_no, new_meter_no, lat, long
+                           sno, old_meter_no, new_meter_no, lat, long, change_slip
+                           (change_slip: the number from the MI file's Remarks
+                           column; the app adds the column on the next save)
   MapRecords            - key, date, time, installer_id, tech_name, location, sno,
                            old_meter_no, new_meter_no, lat, long
                            (Map tab ONLY — never touches Installations/inventory. Populated
@@ -2176,6 +2178,15 @@ def append_rows(worksheet: str, rows, columns) -> bool:
     back to the full rewrite."""
     if not rows:
         return True
+    # Appending sends values only; a column the sheet's header doesn't have yet
+    # (e.g. change_slip on an older sheet) would be written where nothing reads
+    # it. Then return False, so the caller rewrites the sheet with its header.
+    try:
+        have = set(get_data(worksheet).columns)
+    except Exception:
+        have = set()
+    if not have or any(c not in have for c in columns):
+        return False
     try:
         values = [[("" if r.get(c) is None else str(r.get(c, ""))) for c in columns] for r in rows]
         _worksheet(worksheet).append_rows(values, value_input_option="USER_ENTERED")
@@ -2270,6 +2281,9 @@ DETAIL_FIELD_HEADERS = {
     "new_meter_no": "New Meter Serial Number",
     "lat": "latitude",
     "long": "longitude",
+    # Column DJ of the "Old to SM Consumer MI" export. Installers type the
+    # change slip number here; only a plain number is kept (see change_slip_no).
+    "change_slip": "Remarks",
 }
 
 # Column headers required to parse a full installation record (bulk upload,
@@ -2314,6 +2328,8 @@ def extract_detail_fields(ws, row: int, optional_map: dict) -> dict:
         if key in ("lat", "long"):
             coord = normalize_coord_val(val)
             out[key] = coord if coord is not None else ""
+        elif key == "change_slip":
+            out[key] = change_slip_no(val)
         else:
             out[key] = str(val).strip() if val is not None else ""
     return out
@@ -2352,6 +2368,15 @@ def parse_install_rows(ws, header_row: int, col_map: dict, extra_map: dict, blan
         rec.update(extract_detail_fields(ws, r, extra_map))
         records.append(rec)
     return records, skipped_non_tl
+
+
+def change_slip_no(remark) -> str:
+    """The change slip number from an MI file's Remarks cell (column DJ): the
+    number only. Blank when the cell holds any text ("NO", "NO8") or nothing."""
+    s = "" if remark is None else str(remark).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s if s.isdigit() else ""
 
 
 def clean_id_value(v) -> str:
@@ -2750,22 +2775,24 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
     # Grouped by installer (each installer's installs together, in date and
     # time order), not mixed in the order they happened.
     df["_inst"] = df["installer_id"].astype(str).str.strip() if "installer_id" in df.columns else ""
+    # Each installer's installs together, earliest first (date, then time).
     listing = df.sort_values(["_inst", "_date"] + (["time"] if "time" in df.columns else []),
                              key=lambda c: c.str.upper() if c.name == "_inst" else c)
     records = [
-        (clean_id_value(r.get("sno", "")), str(r.get("installer_id", "")).strip())
+        (clean_id_value(r.get("sno", "")), str(r.get("installer_id", "")).strip(),
+         change_slip_no(r.get("change_slip", "")))
         for _, r in listing.iterrows()
     ]
-    records = [(s, i) for s, i in records if s]
+    records = [rec for rec in records if rec[0]]
 
     if records:
         N_BLOCKS = 3
         blk_gap = 4.0
         blk_w = (avail_w - blk_gap * (N_BLOCKS - 1)) / N_BLOCKS
-        w_sl, w_sno = blk_w * 0.16, blk_w * 0.47
-        w_inst = blk_w - w_sl - w_sno
+        w_sl, w_sno, w_inst = blk_w * 0.09, blk_w * 0.33, blk_w * 0.27
+        w_slip = blk_w - w_sl - w_sno - w_inst
         lh = 4.2          # line height
-        font_sz = 6.5
+        font_sz = 6.0
 
         def _list_header(x, y):
             pdf.set_xy(x, y)
@@ -2775,6 +2802,7 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
             pdf.cell(w_sl, lh, "#", border=1, align="C", fill=True)
             pdf.cell(w_sno, lh, "Consumer No", border=1, align="C", fill=True)
             pdf.cell(w_inst, lh, "Installer", border=1, align="C", fill=True)
+            pdf.cell(w_slip, lh, "Change Slip No", border=1, align="C", fill=True)
 
         def _start_list_page(first=False):
             if not first:
@@ -2813,7 +2841,7 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
                 x = pdf.l_margin + b * (blk_w + blk_gap)
                 _list_header(x, top_y)
                 y = top_y + lh
-                for j, (sno, inst) in enumerate(chunk):
+                for j, (sno, inst, slip) in enumerate(chunk):
                     serial = idx + b * rows_per_block + j + 1
                     pdf.set_xy(x, y)
                     pdf.set_font("Helvetica", "", font_sz)
@@ -2822,6 +2850,7 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
                     pdf.cell(w_sl, lh, str(serial), border=1, align="C", fill=True)
                     pdf.cell(w_sno, lh, sno, border=1, align="C", fill=True)
                     pdf.cell(w_inst, lh, inst, border=1, align="C", fill=True)
+                    pdf.cell(w_slip, lh, slip, border=1, align="C", fill=True)
                     y += lh
             idx += per_page
             if idx < len(records):
@@ -5874,7 +5903,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
         st.warning(f"⚠️ No {INSTALLER_ID_PREFIX} installer records to push.")
         return
 
-    detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
+    detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long", "change_slip"]
     df_log_existing = get_data_fresh("UploadedInstallLog")
     if df_log_existing.empty:
         df_log_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "tech_name", "source"] + detail_cols)
@@ -5919,6 +5948,7 @@ def _execute_push(parsed_records, source_label="install(s)"):
             "sno": rec.get("sno") or "", "old_meter_no": rec.get("old_meter_no") or "",
             "new_meter_no": rec.get("new_meter_no") or "",
             "lat": rec.get("lat") or "", "long": rec.get("long") or "",
+            "change_slip": rec.get("change_slip") or "",
             "source": source_label,
         })
         dates_with_new.add(rec["date"])
@@ -6111,7 +6141,7 @@ def get_data_fresh(worksheet: str) -> pd.DataFrame:
 # Details that can be completed on an install already in the log without
 # touching any count. Section and meter type are left alone: they decide which
 # Installations row and which of 1PH / 3PH an install was counted under.
-FILLABLE_DETAILS = ("sno", "old_meter_no", "new_meter_no", "lat", "long")
+FILLABLE_DETAILS = ("sno", "old_meter_no", "new_meter_no", "lat", "long", "change_slip")
 
 
 def _is_blank(v) -> bool:
@@ -6163,6 +6193,67 @@ def fill_log_details_from_analytics() -> int:
                                       "sno", "old_meter_no", "new_meter_no", "lat", "long")}
                            for _, r in rows.iterrows()])
     return len(changed_idx)
+
+
+SLIP_MIN_DIGITS = 6   # change slip numbers are 6 digits; anything shorter is a typing slip
+
+
+def change_slip_check(day_df: pd.DataFrame):
+    """Change slip entries to correct, for the installs being viewed: a slip
+    number used on more than one install (checked against every install on
+    record, not only that day), or one shorter than SLIP_MIN_DIGITS digits.
+    Returns (issues, per-installer summary); both empty when the installs
+    carry no change slip data yet."""
+    cols = ["key", "date", "time", "installer_id", "sno", "change_slip"]
+    if day_df.empty or "change_slip" not in day_df.columns:
+        return pd.DataFrame(), pd.DataFrame()
+    frames = [f[[c for c in cols if c in f.columns]] for f in (day_df, get_data("AnalyticsRaw"), install_log_prepared())
+              if not f.empty and has_col(f, "key", "change_slip")]
+    pool = pd.concat(frames, ignore_index=True).drop_duplicates("key")
+    for c in cols:
+        if c not in pool.columns:
+            pool[c] = ""
+    pool["slip"] = pool["change_slip"].map(change_slip_no)
+    pool = pool[pool["slip"] != ""]
+    # Only slips seen on two or more installs, so the lookup below stays small.
+    counts = pool["slip"].value_counts()
+    repeats = {sl: g.sort_values(["date", "time"]) for sl, g in pool[pool["slip"].isin(counts[counts > 1].index)].groupby("slip")}
+
+    day = day_df.copy()
+    day["slip"] = day["change_slip"].map(change_slip_no)
+    issues, summ = [], {}
+    for _, r in day.sort_values(["installer_id", "time"]).iterrows():
+        inst, sl = str(r["installer_id"]), r["slip"]
+        s_ = summ.setdefault(inst, {"Installer": inst, "Installs": 0, "Slip Entered": 0, "No Slip": 0,
+                                    "Repeated": 0, f"Under {SLIP_MIN_DIGITS} Digits": 0})
+        s_["Installs"] += 1
+        if not sl:
+            s_["No Slip"] += 1
+            continue
+        s_["Slip Entered"] += 1
+        probs = []
+        if len(sl) < SLIP_MIN_DIGITS:
+            probs.append(f"Only {len(sl)} digit(s)")
+            s_[f"Under {SLIP_MIN_DIGITS} Digits"] += 1
+        if sl in repeats:
+            others = repeats[sl][repeats[sl]["key"] != r["key"]]
+            if not others.empty:
+                o = others.iloc[0]
+                when = str(o["time"])[:5] if str(o["date"]) == str(r["date"]) else f'{o["date"]} {str(o["time"])[:5]}'
+                probs.append(f'Repeated — also on {clean_id_value(o["sno"]) or "another install"} '
+                             f'({o["installer_id"]}, {when})' + (f" +{len(others) - 1} more" if len(others) > 1 else ""))
+                s_["Repeated"] += 1
+        if probs:
+            issues.append({"Installer": inst, "Time": str(r["time"])[:5],
+                           "Consumer No": clean_id_value(r.get("sno", "")), "Change Slip No": sl,
+                           "Problem": "; ".join(probs)})
+    summary = pd.DataFrame(summ.values())
+    if not summary.empty:
+        summary = summary.sort_values("Installer", key=lambda c: c.str.upper()).reset_index(drop=True)
+        summary = pd.concat([summary, pd.DataFrame([{"Installer": "TOTAL", **{c: int(summary[c].sum())
+                                                                          for c in summary.columns[1:]}}])],
+                            ignore_index=True)
+    return pd.DataFrame(issues, columns=["Installer", "Time", "Consumer No", "Change Slip No", "Problem"]), summary
 
 
 def install_log_duplicate_fix() -> dict:
@@ -7352,7 +7443,7 @@ def process_analytics_upload(analytics_file) -> dict:
         st.warning("⚠️ No valid TL_ installer rows with a date and time were found in this file.")
         return {"ok": True, "wrote": False}
 
-    araw_detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]
+    araw_detail_cols = ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long", "change_slip"]
     df_araw_existing = get_data_fresh("AnalyticsRaw")
     if df_araw_existing.empty:
         df_araw_existing = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour"] + araw_detail_cols)
@@ -7638,7 +7729,7 @@ with tab_analytics:
                         if len(_missing) and st.button(f"Sync {len(_missing):,} install(s) from the install log into Analytics",
                                                        width="stretch", key=f"analytics_sync_{sel_date}"):
                             _cols = ["key", "date", "time", "installer_id", "hour", "location", "meter_type",
-                                     "sno", "old_meter_no", "new_meter_no", "lat", "long"]
+                                     "sno", "old_meter_no", "new_meter_no", "lat", "long", "change_slip"]
                             _rows = []
                             for _, r in _missing.iterrows():
                                 _t = str(r.get("time", ""))
@@ -7827,6 +7918,33 @@ with tab_analytics:
                 title=f"Active Pace / Installer — {sel_date}\n{analytics_img_meta}",
             )
 
+            # -- Change slip check (feedback for installers) --------------------
+            sec_hdr("receipt", "Change Slip Check")
+            slip_issues, slip_summary = change_slip_check(day_df)
+            if slip_summary.empty:
+                st.info("No change slip numbers on these records yet — they come from the Remarks column of the "
+                        "MI file, so they appear with the next upload.")
+            else:
+                st.caption(f"{sel_date}: each installer's change slip entries. Flagged: a slip number used on more "
+                           f"than one install (checked against every day on record), or one shorter than "
+                           f"{SLIP_MIN_DIGITS} digits. \"No Slip\" is a Remarks entry with text (e.g. NO) or nothing.")
+                render_scroll_table(slip_summary)
+                if slip_issues.empty:
+                    st.success("✅ No repeated or short change slip numbers.")
+                else:
+                    _who = ["All installers"] + sorted(slip_issues["Installer"].unique(), key=str.upper)
+                    _pick = st.selectbox("Entries to correct", _who, key=f"slip_check_who_{sel_date}",
+                                         help="Pick one installer to share just their list.")
+                    _show = slip_issues if _pick == "All installers" else slip_issues[slip_issues["Installer"] == _pick]
+                    render_scroll_table(_show)
+                    _scope_name = "All installers" if _pick == "All installers" else _pick
+                    download_image_button(
+                        _show, f"Change_Slip_Check_{sel_date}_{_scope_name.replace(' ', '_')}.png",
+                        key=f"dl_img_slip_{_scope_name}",
+                        title=(f"Change Slip Check — {sel_date}\n{_scope_name}   |   {len(_show)} entr"
+                               f"{'y' if len(_show) == 1 else 'ies'} to correct   |   Change slip numbers must be "
+                               f"{SLIP_MIN_DIGITS} digits and used once"))
+
             # -- Locked reset --------------------------------------------------
             st.divider()
             with st.expander("🔒 Reset Analytics Data (start a new day)"):
@@ -7835,7 +7953,7 @@ with tab_analytics:
                 if reset_pin == PIN_CODE:
                     confirm_reset = st.checkbox("I understand this will delete all Analytics data collected so far")
                     if st.button("🗑️ Reset Analytics Data", type="primary", disabled=not confirm_reset, width="stretch"):
-                        empty_df = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour", "location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"])
+                        empty_df = pd.DataFrame(columns=["key", "date", "time", "installer_id", "hour", "location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long", "change_slip"])
                         if safe_update("AnalyticsRaw", empty_df):
                             st.success("✅ Analytics data cleared. Ready for a new day.")
                             st.rerun()
@@ -7884,7 +8002,7 @@ with tab_analytics:
                 push_records = []
                 for _, r in _pending.iterrows():
                     rec = {"date": r["date"], "time": r["time"], "installer_id": r["installer_id"]}
-                    for col in ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long"]:
+                    for col in ["location", "meter_type", "sno", "old_meter_no", "new_meter_no", "lat", "long", "change_slip"]:
                         rec[col] = r[col] if col in _pending.columns else ""
                     push_records.append(rec)
                 if push_records:
