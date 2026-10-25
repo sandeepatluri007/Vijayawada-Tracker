@@ -2379,6 +2379,37 @@ def change_slip_no(remark) -> str:
     return s if s.isdigit() else ""
 
 
+def fill_slip_gaps(slips):
+    """Fill missing change slips from the installer's own series. `slips` is one
+    installer's slips in installation order ("" where none was entered).
+
+    A run of blanks is filled only when the slips either side leave exactly
+    room for it: 448089, "", 448091 -> 448090; 448089, "", "", 448092 ->
+    448090, 448091. Anything else — a jump (a new slip book, a skipped or
+    spoilt slip), a slip under SLIP_MIN_DIGITS digits, a different length —
+    is left blank. Returns (slips, filled flags)."""
+    out, filled = list(slips), [False] * len(slips)
+    n = len(out)
+    i = 0
+    while i < n:
+        if out[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and not out[j]:
+            j += 1
+        # blanks are out[i:j]; neighbours out[i-1] and out[j]
+        if i > 0 and j < n:
+            a, b = out[i - 1], out[j]
+            if (len(a) == len(b) >= SLIP_MIN_DIGITS and a.isdigit() and b.isdigit()
+                    and int(b) - int(a) == (j - i) + 1):
+                for k in range(i, j):
+                    out[k] = str(int(a) + (k - i) + 1).zfill(len(a))
+                    filled[k] = True
+        i = j
+    return out, filled
+
+
 def clean_id_value(v) -> str:
     """Strip the trailing ".0" Google Sheets adds to numeric cells, so meter and
     consumer numbers read as 643612600001 rather than 643612600001.0. Also
@@ -2784,6 +2815,20 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
         for _, r in listing.iterrows()
     ]
     records = [rec for rec in records if rec[0]]
+    # A missing slip between two that leave exactly room for it is filled from
+    # the installer's series (see fill_slip_gaps); shown in grey, and counted
+    # in a note under the list.
+    slip_filled = [False] * len(records)
+    start = 0
+    while start < len(records):
+        end = start
+        while end < len(records) and records[end][1] == records[start][1]:
+            end += 1
+        new, flags = fill_slip_gaps([r[2] for r in records[start:end]])
+        for k in range(start, end):
+            records[k] = (records[k][0], records[k][1], new[k - start])
+            slip_filled[k] = flags[k - start]
+        start = end
 
     if records:
         N_BLOCKS = 3
@@ -2826,7 +2871,8 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
             """Recomputed per page: page 1 shares space with the table and maps,
             later pages have the full height, so a fixed count would waste most
             of every continuation page."""
-            return max(1, int((pdf.h - pdf.b_margin - 10 - y - lh) // lh))
+            # 18 mm kept clear at the bottom for the total, the note and the footer.
+            return max(1, int((pdf.h - pdf.b_margin - 18 - y - lh) // lh))
 
         rows_per_block = _rows_that_fit(top_y)
         per_page = rows_per_block * N_BLOCKS
@@ -2842,6 +2888,7 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
                 _list_header(x, top_y)
                 y = top_y + lh
                 for j, (sno, inst, slip) in enumerate(chunk):
+                    was_filled = slip_filled[idx + b * rows_per_block + j]
                     serial = idx + b * rows_per_block + j + 1
                     pdf.set_xy(x, y)
                     pdf.set_font("Helvetica", "", font_sz)
@@ -2850,6 +2897,8 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
                     pdf.cell(w_sl, lh, str(serial), border=1, align="C", fill=True)
                     pdf.cell(w_sno, lh, sno, border=1, align="C", fill=True)
                     pdf.cell(w_inst, lh, inst, border=1, align="C", fill=True)
+                    if was_filled:
+                        pdf.set_text_color(120, 125, 135)
                     pdf.cell(w_slip, lh, slip, border=1, align="C", fill=True)
                     y += lh
             idx += per_page
@@ -2858,10 +2907,13 @@ def build_weekly_report_pdf(date_start, date_end, section_filter=None, meter_typ
                 rows_per_block = _rows_that_fit(top_y)
                 per_page = rows_per_block * N_BLOCKS
 
-        pdf.set_y(pdf.h - pdf.b_margin - 12)
+        pdf.set_y(pdf.h - pdf.b_margin - 16.5)
         pdf.set_font("Helvetica", "I", 7.5)
         pdf.set_text_color(120, 125, 135)
         pdf.cell(0, 4, f"Total: {len(records)} consumer service number(s) for the selected period and filters.", ln=1)
+        if any(slip_filled):
+            pdf.cell(0, 4, f"Change slip numbers in grey ({sum(slip_filled)}) were not entered; they are filled in "
+                           "from the installer's own slip series.", ln=1)
 
     _draw_footer()
     return bytes(pdf.output()), None
