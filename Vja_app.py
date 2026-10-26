@@ -7334,12 +7334,9 @@ with tab_dash:
                 site_rows = []
                 for _, r in loc_month.iterrows():
                     site, n1, n3 = str(r["location"]), int(r["qty_1ph"]), int(r["qty_3ph"])
-                    tg = site_target_for(site, mk)
                     c = by_cost.get(_loc_key(site), {})
                     site_rows.append({
                         "Site": site, "1PH": n1, "3PH": n3, "Total": n1 + n3,
-                        "Target": f"{tg:,}" if tg else "—",
-                        "% Of Target": f"{(n1 + n3) / tg * 100:.0f}%" if tg else "—",
                         # Billing by install date (incentive for the slab each
                         # day's installs reached) — adds up to the table above.
                         "Billing (Rs.)": round(c.get("bill", 0.0)),
@@ -7347,8 +7344,7 @@ with tab_dash:
                     })
                 site_df = pd.DataFrame(site_rows).sort_values("Total", ascending=False)
                 total_row = {"Site": "TOTAL", "1PH": int(site_df["1PH"].sum()), "3PH": int(site_df["3PH"].sum()),
-                             "Total": int(site_df["Total"].sum()), "Target": f"{month_target:,}",
-                             "% Of Target": f"{site_df['Total'].sum() / month_target * 100:.0f}%" if month_target else "—",
+                             "Total": int(site_df["Total"].sum()),
                              "Billing (Rs.)": int(site_df["Billing (Rs.)"].sum()),
                              "Cost / Install": fmt_rs(month_cost["total_per_install"], 2)}
                 site_df = pd.concat([site_df, pd.DataFrame([total_row])], ignore_index=True)
