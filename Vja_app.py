@@ -7749,14 +7749,10 @@ def run_analytics_upload(analytics_file, file_fp: str):
 with tab_analytics:
     if tab_analytics.open:   # only the open tab runs (tabs are created with on_change="rerun")
         tab_action_bar("analytics", show_upload=True)
-        _timers = ([f"Auto-refresh every {ANALYTICS_REFRESH_MIN} min"] if ANALYTICS_REFRESH_ON else []) + \
-                  ([f"Auto Update Installs every {AUTO_PUSH_MIN} min"] if AUTO_PUSH_ON else [])
-        if _timers:
+        if ANALYTICS_REFRESH_ON or AUTO_PUSH_ON:     # intervals are set in Admin
             _analytics_timers()
-            st.caption(" · ".join(_timers) + " — change in Admin.")
         else:
             st.session_state.pop("_analytics_ar_at", None)
-            st.caption("Auto-refresh and auto Update Installs are off — turn them on in Admin.")
 
         sec_hdr("upload", "Upload Progress File")
         up_col, go_col = st.columns([6, 1], vertical_alignment="center")
