@@ -5938,6 +5938,162 @@ def install_key(rec) -> str:
     return f"{rec['date']}||{rec['time']}||{rec['installer_id']}"
 
 
+# ── Lead & Lag ────────────────────────────────────────────────────────────────
+# Lag measure: installs (and what they earn). Lead measures, which the team
+# controls day to day and which move the lag:
+#   1. In the field by the start time (Settings ll_start_time, default 09:30).
+#   2. Installs per installer per day (Settings ll_daily_target, default 20).
+# Install times in the log are when an install was COMPLETED, so an installer
+# started work before the first one. Start = first install time - that day's
+# average time per install, where the average is (last - first) / (installs - 1)
+# over all the day's installs. Only for days with more than
+# LL_MIN_INSTALLS_FOR_START installs; on lighter days the average says too
+# little, so the start is left blank and the day adds no start-time gain.
+LL_MIN_INSTALLS_FOR_START = 8
+
+
+def _hhmm_to_min(v, default: float = 570.0) -> float:
+    try:
+        h, m = str(v).strip().split(":")[:2]
+        return int(h) * 60 + int(m)
+    except Exception:
+        return default
+
+
+def _min_to_hhmm(m) -> str:
+    if m is None or pd.isna(m):
+        return ""
+    m = int(round(float(m)))
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+LL_START_TARGET = _min_to_hhmm(_hhmm_to_min(get_setting("ll_start_time", "09:30")))
+LL_DAILY_TARGET = int(get_setting("ll_daily_target", 20))
+LL_ONTIME_TARGET_PCT = int(get_setting("ll_ontime_target_pct", 90))
+
+
+def lead_lag_days(log: pd.DataFrame, start_target: str = None, daily_target: int = None,
+                  min_installs: int = LL_MIN_INSTALLS_FOR_START) -> pd.DataFrame:
+    """One row per installer per day from the install log, with the lead
+    measures and what each day would have been with them met.
+
+    Columns: date, installer_id, name, supervisor, site, n, n3, first, last,
+    avg (min per install), start (est. minutes after midnight, NaN when not
+    measured), measured, on_time, late (min), gain_start, with_start, with_both.
+      gain_start = minutes started after the target / avg — the installs that
+                   time would have held at that day's own pace.
+      with_both  = with_start, lifted to the daily target if still below it
+                   (both leads counted once, never added twice)."""
+    cols = ["date", "installer_id", "name", "supervisor", "site", "n", "n3", "first", "last", "avg",
+            "start", "measured", "on_time", "late", "gain_start", "with_start", "with_both"]
+    if log is None or log.empty or not has_col(log, "date", "time", "installer_id"):
+        return pd.DataFrame(columns=cols)
+    tgt = _hhmm_to_min(start_target or LL_START_TARGET)
+    daily = LL_DAILY_TARGET if daily_target is None else daily_target
+    d = log[log["installer_id"].map(is_valid_installer_id)].copy()
+    t = pd.to_datetime(d["time"].astype(str).str.strip(), format="%H:%M:%S", errors="coerce")
+    d["_m"] = t.dt.hour * 60 + t.dt.minute + t.dt.second / 60.0
+    d["date"] = pd.to_datetime(d["date"], errors="coerce").dt.date
+    d = d.dropna(subset=["_m", "date"])
+    if d.empty:
+        return pd.DataFrame(columns=cols)
+    d["installer_id"] = d["installer_id"].astype(str).str.strip()
+    if "_site" not in d.columns:
+        d["_site"] = (d["location"].astype(str).str.strip().replace("", "Unspecified")
+                      if "location" in d.columns else "Unspecified")
+    if "_phase" not in d.columns:
+        d["_phase"] = meter_phases(d["meter_type"]) if "meter_type" in d.columns else "1PH"
+    _canon = _canonical_locations(d["_site"])
+    d["_site"] = d["_site"].map(lambda v: _canon.get(_loc_key(v), v))
+    d["_is3"] = (d["_phase"] == "3PH").astype(int)
+    g = d.groupby(["date", "installer_id"])
+    out = g.agg(n=("_m", "size"), n3=("_is3", "sum"), first=("_m", "min"), last=("_m", "max"),
+                site=("_site", lambda s: s.mode().iloc[0] if not s.mode().empty else "Unspecified")).reset_index()
+    out["avg"] = ((out["last"] - out["first"]) / (out["n"] - 1)).where(out["n"] > 1)
+    out["measured"] = (out["n"] > min_installs) & out["avg"].gt(0)
+    out["start"] = (out["first"] - out["avg"]).where(out["measured"])
+    out["on_time"] = (out["start"] <= tgt).where(out["measured"])
+    out["late"] = (out["start"] - tgt).clip(lower=0).where(out["measured"])
+    out["gain_start"] = (out["late"] / out["avg"]).where(out["measured"]).fillna(0.0)
+    out["with_start"] = out["n"] + out["gain_start"]
+    out["with_both"] = out["with_start"].clip(lower=daily)
+    out["name"] = out["installer_id"].map(tech_name_for)
+    out["supervisor"] = out["installer_id"].map(supervisor_of)
+    return out[cols].sort_values(["date", "name"]).reset_index(drop=True)
+
+
+def lead_lag_summary(days: pd.DataFrame, team_days: int, month_days: int) -> dict:
+    """The lead and lag figures for a group of installer-days.
+
+    Per-month figures scale the group's installs over the days the team
+    worked in the period (`team_days`) to a full month's working days, so an
+    installer's absences count against them exactly as they did."""
+    if days is None or days.empty:
+        return {"installers": 0, "idays": 0, "installs": 0}
+    scale = (month_days / team_days) if team_days else 0.0
+    m = days[days["measured"]]
+    n = int(days["n"].sum())
+    inst = int(days["installer_id"].nunique())
+    s = {
+        "installers": inst, "idays": len(days), "installs": n, "n3": int(days["n3"].sum()),
+        "measured": len(m), "ontime_days": int(m["on_time"].sum()) if len(m) else 0,
+        "ontime_pct": (float(m["on_time"].mean()) * 100) if len(m) else None,
+        "median_start": float(m["start"].median()) if len(m) else None,
+        "avg_late": float(m["late"].mean()) if len(m) else None,
+        "avg_min": float(days["avg"].dropna().mean()) if days["avg"].notna().any() else None,
+        "per_day": float(days["n"].mean()),
+        "per_day_start": float(days["with_start"].mean()),
+        "per_day_both": float(days["with_both"].mean()),
+        "below_target": int((days["n"] < LL_DAILY_TARGET).sum()),
+        "month_now": n * scale,
+        "month_start": float(days["with_start"].sum()) * scale,
+        "month_both": float(days["with_both"].sum()) * scale,
+    }
+    s["month_gain"] = s["month_both"] - s["month_now"]
+    s["per_inst_month_now"] = s["month_now"] / inst if inst else 0.0
+    s["per_inst_month_both"] = s["month_both"] / inst if inst else 0.0
+    s["per_inst_month_gain"] = s["month_gain"] / inst if inst else 0.0
+    s["share3"] = (s["n3"] / n) if n else 0.0
+    return s
+
+
+def _ll_billing(total: float, share3: float) -> float:
+    """A month's billing at `total` installs (1PH + 3PH at the given 3PH share),
+    slab incentive on the whole count — the same formula as the Expenses tab."""
+    total = int(round(max(0.0, total)))
+    if total <= 0:
+        return 0.0
+    n3 = int(round(total * share3))
+    n1 = total - n3
+    return (calculate_1ph_incentive_billing(n1, n3)["total_cost"]
+            + calculate_3ph_billing(n3, n1)["total_cost"])
+
+
+def lead_lag_money(now: float, with_: float, share3: float, fixed: float, rate1: float, rate3: float,
+                   project_now: float, project_share3: float) -> dict:
+    """Revenue, cost and profit a month for a group, now and with the leads met.
+
+    Revenue: the group's share of the project's billing now, plus what the
+    extra installs add on top — so the extra installs earn the slab incentive
+    the PROJECT's count reaches, not a slab worked out for the group alone.
+    Cost: the group's fixed cost stays the same; variable cost grows with
+    installs at the 1PH / 3PH rates."""
+    project_now = max(project_now, now)
+    base = _ll_billing(project_now, project_share3)
+    rev_now = base * (now / project_now) if project_now else 0.0
+    rev_with = rev_now + (_ll_billing(project_now + (with_ - now), project_share3) - base)
+    var_rate = rate1 * (1 - share3) + rate3 * share3
+    cost_now, cost_with = fixed + var_rate * now, fixed + var_rate * with_
+    per = lambda a, b: (a / b) if b else None
+    return {
+        "rev_now": rev_now, "rev_with": rev_with,
+        "cost_now": cost_now, "cost_with": cost_with,
+        "cpi_now": per(cost_now, now), "cpi_with": per(cost_with, with_),
+        "profit_now": rev_now - cost_now, "profit_with": rev_with - cost_with,
+        "ppi_now": per(rev_now - cost_now, now), "ppi_with": per(rev_with - cost_with, with_),
+    }
+
+
 def _execute_push(parsed_records, source_label="install(s)"):
     """The actual write logic — no double-count risk gating. Called either
     directly (no risk detected) or after the supervisor explicitly confirms
@@ -6986,8 +7142,8 @@ with head_search:
 # Only the open tab runs. Every tab used to run on every click — ticking a box
 # on one tab paid for all nine. Switching tabs now reruns the page and runs
 # just the tab being opened; the selection is kept under "main_tabs".
-tab_dash, tab_analytics, tab_map, tab_exp, tab_liaison, tab_inst, tab_inv, tab_hr, tab_admin = st.tabs([
-    "Dashboard", "Analytics", "Map", "Expenses", "Liaisoning", "Installs", "Store", "HR", "Admin"
+tab_dash, tab_analytics, tab_map, tab_exp, tab_ll, tab_inv, tab_liaison, tab_inst, tab_hr, tab_admin = st.tabs([
+    "Dashboard", "Analytics", "Map", "Expenses", "Lead & Lag", "Store", "Liaisoning", "Installs", "HR", "Admin"
 ], key="main_tabs", on_change="rerun")
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -8911,6 +9067,356 @@ with tab_exp:
                         st.warning(f"⚠️ {', '.join(blocked)} has costs on record, so it was marked inactive instead of deleted.")
                     st.success("✅ Vehicles updated.")
                     st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LEAD & LAG — the daily habits that drive installs (lead) and what they are
+#  worth in installs, revenue and profit a month (lag)
+# ═══════════════════════════════════════════════════════════════════════════════
+def _ll_card(title: str, value: str, note: str, tone: str = "--ink-900", bg: str = "--surface-100") -> str:
+    return (f'<div style="background:var({bg});border-radius:var(--radius-md);padding:11px;'
+            f'display:flex;flex-direction:column;gap:4px;">'
+            f'<div style="font-size:11px;font-weight:700;color:var(--ink-600);">{title}</div>'
+            f'<div style="font-size:18px;font-weight:800;color:var({tone});">{value}</div>'
+            f'<div style="font-size:11px;font-weight:600;color:var(--ink-600);">{note}</div></div>')
+
+
+def _ll_grid(cards, columns: int = 2):
+    st.markdown(f'<div style="display:grid;grid-template-columns:repeat({columns},minmax(0,1fr));'
+                f'gap:var(--space-3);margin-bottom:var(--space-4);">{"".join(cards)}</div>',
+                unsafe_allow_html=True)
+
+
+def _ll_bars(rows):
+    """rows = [(label, value_text, width_pct, tone_token, note)] — one bar each."""
+    out = []
+    for label, val, w, tone, note in rows:
+        out.append(
+            f'<div style="display:grid;grid-template-columns:92px 1fr 40px;gap:8px;align-items:center;">'
+            f'<div style="font-size:11px;font-weight:700;color:var(--ink-600);">{label}'
+            f'<div style="font-weight:600;font-size:10.5px;">{note}</div></div>'
+            f'<div style="height:12px;border-radius:999px;background:var(--surface-200);overflow:hidden;">'
+            f'<div style="width:{max(0, min(100, w)):.0f}%;height:100%;background:var({tone});"></div></div>'
+            f'<div style="font-size:13px;font-weight:800;text-align:right;">{val}</div></div>')
+    st.markdown(f'<div style="background:var(--surface-100);border-radius:var(--radius-md);padding:11px;'
+                f'display:flex;flex-direction:column;gap:9px;margin-bottom:var(--space-4);">{"".join(out)}</div>',
+                unsafe_allow_html=True)
+
+
+def _ll_n(v, d: int = 1) -> str:
+    return "—" if v is None or pd.isna(v) else f"{v:,.{d}f}"
+
+
+def _ll_signed(v, d: int = 0, prefix: str = "") -> str:
+    if v is None or pd.isna(v):
+        return "—"
+    sign = "+" if v >= 0 else "−"
+    return f"{sign}{prefix}{abs(v):,.{d}f}"
+
+
+def _ll_group_rows(days, key, team_days, month_days):
+    """A comparison table, one row per supervisor / site."""
+    rows = []
+    for name, g in days.groupby(key):
+        s = lead_lag_summary(g, team_days, month_days)
+        rows.append({
+            key.title(): name, "Installers": s["installers"],
+            "On-time": f"{s['ontime_pct']:.0f}%" if s["ontime_pct"] is not None else "—",
+            "Median start": _min_to_hhmm(s["median_start"]) or "—",
+            "Per day now": f"{s['per_day']:.1f}", "Per day with": f"{s['per_day_both']:.1f}",
+            "Month now": round(s["month_now"]), "Month with": round(s["month_both"]),
+            "Gain / month": round(s["month_gain"]),
+            "Gain / installer": round(s["per_inst_month_gain"]),
+        })
+    return pd.DataFrame(rows).sort_values("Gain / month", ascending=False) if rows else pd.DataFrame()
+
+
+with tab_ll:
+    if tab_ll.open:   # only the open tab runs (tabs are created with on_change="rerun")
+        tab_action_bar("ll")
+        _ll_days_all = lead_lag_days(install_log_prepared())
+        if _ll_days_all.empty:
+            st.info("No installs with times in the install log yet. Upload an MI file on the "
+                    "Installs or Analytics tab and the lead and lag measures appear here.")
+        else:
+            _tgt_min = _hhmm_to_min(LL_START_TARGET)
+            _last = max(_ll_days_all["date"])
+            _first = min(_ll_days_all["date"])
+
+            # -- Filters ----------------------------------------------------------
+            sec_hdr("search", "Filters")
+            _rng = st.date_input("Dates", value=(max(_first, _last.replace(day=1)), _last),
+                                 min_value=_first, max_value=max(_last, today_ist()),
+                                 format="DD/MM/YYYY", key="ll_dates")
+            _d0, _d1 = date_range_bounds(_rng)
+            _d0, _d1 = _d0 or _first, _d1 or _last
+            _in_range = _ll_days_all[(_ll_days_all["date"] >= _d0) & (_ll_days_all["date"] <= _d1)]
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                _sites = ["All sites"] + sorted(_in_range["site"].unique(), key=str.upper)
+                _site = st.selectbox("Site", _sites, key="ll_site")
+            _scope = _in_range if _site == "All sites" else _in_range[_in_range["site"] == _site]
+            with fc2:
+                _sups = ["All supervisors"] + sorted(_scope["supervisor"].unique(), key=str.upper)
+                _sup = st.selectbox("Supervisor", _sups, key="ll_sup")
+            _grp = _scope if _sup == "All supervisors" else _scope[_scope["supervisor"] == _sup]
+            _names = ["All installers"] + sorted(_grp["name"].astype(str).unique(), key=str.upper)
+            _inst = st.selectbox("Installer", _names, key="ll_inst")
+            if _inst != "All installers":
+                _grp = _grp[_grp["name"].astype(str) == _inst]
+            st.caption(f"Start = first install − that day's average time per install, on days with more than "
+                       f"{LL_MIN_INSTALLS_FOR_START} installs · on time = started by {LL_START_TARGET} · "
+                       f"target {LL_DAILY_TARGET} installs per installer-day")
+
+            if _grp.empty:
+                st.info("No installs for these filters.")
+            else:
+                # Per-month basis: the days the team at this site worked in the
+                # period, scaled to this month's working days (Admin window,
+                # less holidays).
+                _team_days = int(_scope["date"].nunique())
+                _all_days = int(_in_range["date"].nunique())
+                _month_days = working_days_in_month(_d1.year, _d1.month)
+                S = lead_lag_summary(_grp, _team_days, _month_days)
+
+                # -- Lag hero ----------------------------------------------------
+                _pct = (S["month_gain"] / S["month_now"] * 100) if S["month_now"] else 0
+                _who = _inst if _inst != "All installers" else (_sup if _sup != "All supervisors" else _site)
+                st.markdown(f"""
+                <div style="border-radius:var(--radius-lg);padding:var(--space-6);margin-bottom:var(--space-5);
+                    background:linear-gradient(135deg,var(--brand-500),var(--brand-700));color:var(--on-brand);
+                    display:flex;flex-direction:column;gap:4px;">
+                  <div style="font-size:11px;font-weight:700;opacity:0.92;letter-spacing:0.3px;">
+                    LAG · INSTALLS PER MONTH · {_who.upper()}</div>
+                  <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;">
+                    {S['month_now']:,.0f} &rarr; {S['month_both']:,.0f}</div>
+                  <div style="font-size:11px;font-weight:600;opacity:0.95;">Now &rarr; with both lead measures met ·
+                    {_ll_signed(S['month_gain'])} installs a month ({_ll_signed(_pct)}%) ·
+                    {S['installers']} installer(s), {S['idays']} installer-days, {S['installs']:,} installs</div>
+                </div>""", unsafe_allow_html=True)
+
+                # -- Lead scorecards --------------------------------------------
+                _ot = S["ontime_pct"]
+                render_stat_tiles([
+                    ("clock", f"{_ot:.0f}%" if _ot is not None else "—", "On-time start",
+                     f"Target {LL_ONTIME_TARGET_PCT}%",
+                     "danger" if _ot is not None and _ot < LL_ONTIME_TARGET_PCT else "normal"),
+                    ("clock", _min_to_hhmm(S["median_start"]) or "—", "Median start", f"Target {LL_START_TARGET}",
+                     "danger" if S["median_start"] is not None and S["median_start"] > _tgt_min else "normal"),
+                    ("bolt", f"{S['per_day']:.1f}", "Per installer-day", f"Target {LL_DAILY_TARGET}",
+                     "danger" if S["per_day"] < LL_DAILY_TARGET else "normal"),
+                ])
+
+                # -- Lead 1: in the field by the start time ----------------------
+                sec_hdr("clock", f"Lead 1 · In the field by {LL_START_TARGET}")
+                _m = _grp[_grp["measured"]]
+                if _m.empty:
+                    st.info(f"No day here had more than {LL_MIN_INSTALLS_FOR_START} installs, so no start time "
+                            "could be worked out.")
+                else:
+                    sub_hdr("chart", "Installs per installer-day, by start time")
+                    _edges = [-1e9, _tgt_min, _tgt_min + 30, _tgt_min + 60, _tgt_min + 90, 1e9]
+                    _labels = [f"By {LL_START_TARGET}",
+                               f"{_min_to_hhmm(_tgt_min)}–{_min_to_hhmm(_tgt_min + 30)}",
+                               f"{_min_to_hhmm(_tgt_min + 30)}–{_min_to_hhmm(_tgt_min + 60)}",
+                               f"{_min_to_hhmm(_tgt_min + 60)}–{_min_to_hhmm(_tgt_min + 90)}",
+                               f"After {_min_to_hhmm(_tgt_min + 90)}"]
+                    _b = pd.cut(_m["start"], _edges, labels=_labels, right=True)
+                    _bk = _m.groupby(_b, observed=False)["n"].agg(["mean", "size"])
+                    _top = max(_bk["mean"].max(), 1)
+                    _ll_bars([
+                        (lab, _ll_n(r["mean"]) if r["size"] else "—", (r["mean"] / _top * 100) if r["size"] else 0,
+                         "--brand-500" if i == 0 else ("--warning-700" if i < 3 else "--danger-700"),
+                         f"{int(r['size'])} day(s)")
+                        for i, (lab, r) in enumerate(_bk.iterrows())])
+                    _on, _late_d = _m[_m["on_time"] == True], _m[_m["on_time"] == False]  # noqa: E712
+                    _g1 = S["per_day_start"] - S["per_day"]
+                    _ll_grid([
+                        _ll_card("Now", f"{S['per_day']:.1f} / day",
+                                 f"Starts {_ll_n(S['avg_late'], 0)} min after {LL_START_TARGET} on average"),
+                        _ll_card(f"Starting by {LL_START_TARGET}", f"{S['per_day_start']:.1f} / day",
+                                 f"{_ll_signed(_g1, 1)} a day · {_ll_signed(_g1 * S['idays'] / max(S['installers'], 1) * _month_days / max(_team_days, 1))} per installer a month",
+                                 "--brand-700", "--brand-050"),
+                        _ll_card(f"Actual: days started by {LL_START_TARGET}",
+                                 f"{_on['n'].mean():.1f} / day" if len(_on) else "—", f"{len(_on)} installer-day(s)"),
+                        _ll_card("Actual: days started later",
+                                 f"{_late_d['n'].mean():.1f} / day" if len(_late_d) else "—",
+                                 f"{len(_late_d)} installer-day(s)"),
+                    ])
+                    st.caption(f"Starting on time adds the late minutes ÷ that day's own time per install "
+                               f"({_ll_n(S['avg_min'])} min on average here). {S['idays'] - S['measured']} of "
+                               f"{S['idays']} installer-days had {LL_MIN_INSTALLS_FOR_START} installs or fewer — "
+                               "no start time for those, and no start-time gain counted.")
+
+                # -- Lead 2: installs per installer per day ----------------------
+                sec_hdr("bolt", "Lead 2 · Installs per installer per day")
+                _bands = [("Under 10", _grp["n"] < 10, "--danger-700"),
+                          ("10–14", (_grp["n"] >= 10) & (_grp["n"] < 15), "--warning-700"),
+                          (f"15–{LL_DAILY_TARGET - 1}", (_grp["n"] >= 15) & (_grp["n"] < LL_DAILY_TARGET), "--warning-700"),
+                          (f"{LL_DAILY_TARGET}+", _grp["n"] >= LL_DAILY_TARGET, "--success-700")]
+                _ll_grid([_ll_card(lab, f"{int(mask.sum())}", "installer-days", tone) for lab, mask, tone in _bands], 4)
+                _g2 = float(_grp["n"].clip(lower=LL_DAILY_TARGET).mean()) - S["per_day"]
+                _ll_grid([
+                    _ll_card("Now", f"{S['per_day']:.1f} / day",
+                             f"{S['below_target']} of {S['idays']} days under {LL_DAILY_TARGET}"),
+                    _ll_card(f"Every day at {LL_DAILY_TARGET}+", f"{S['per_day'] + _g2:.1f} / day",
+                             f"{_ll_signed(_g2, 1)} a day · {_ll_signed(_g2 * S['idays'] / max(S['installers'], 1) * _month_days / max(_team_days, 1))} per installer a month",
+                             "--brand-700", "--brand-050"),
+                ])
+
+                # -- Now vs with ----------------------------------------------
+                sec_hdr("target", "Now vs with lead measures")
+                render_scroll_table(pd.DataFrame([
+                    {"Measure": "Per installer-day", "Now": f"{S['per_day']:.1f}",
+                     f"Start by {LL_START_TARGET}": f"{S['per_day_start']:.1f}", "Both leads": f"{S['per_day_both']:.1f}",
+                     "Gain": _ll_signed(S['per_day_both'] - S['per_day'], 1)},
+                    {"Measure": "Per installer-month", "Now": f"{S['per_inst_month_now']:,.0f}",
+                     f"Start by {LL_START_TARGET}": f"{S['month_start'] / max(S['installers'], 1):,.0f}",
+                     "Both leads": f"{S['per_inst_month_both']:,.0f}", "Gain": _ll_signed(S['per_inst_month_gain'])},
+                    {"Measure": "Installs per month", "Now": f"{S['month_now']:,.0f}",
+                     f"Start by {LL_START_TARGET}": f"{S['month_start']:,.0f}", "Both leads": f"{S['month_both']:,.0f}",
+                     "Gain": _ll_signed(S['month_gain'])},
+                    {"Measure": "On-time starts", "Now": f"{_ot:.0f}%" if _ot is not None else "—",
+                     f"Start by {LL_START_TARGET}": "100%", "Both leads": "100%",
+                     "Gain": _ll_signed(100 - _ot, 0) + " pts" if _ot is not None else "—"},
+                ]))
+                st.caption(f"Both leads = starting by {LL_START_TARGET}, then at least {LL_DAILY_TARGET} a day — "
+                           f"counted once, not added together. A month = {_month_days} working days "
+                           f"({month_label(month_key(_d1))}); the period's {_team_days} worked day(s) are scaled to it, "
+                           "so days an installer was absent count as they did.")
+
+                # -- By supervisor / site ---------------------------------------
+                if _inst == "All installers":
+                    sec_hdr("users", "By supervisor")
+                    render_scroll_table(_ll_group_rows(_grp, "supervisor", _team_days, _month_days))
+                    if _site == "All sites":
+                        sec_hdr("pin", "By site")
+                        _site_rows = []
+                        for _sn, _sg in _grp.groupby("site"):
+                            _site_rows.append(_ll_group_rows(_sg.assign(site=_sn), "site",
+                                                             int(_in_range.loc[_in_range["site"] == _sn, "date"].nunique()),
+                                                             _month_days))
+                        render_scroll_table(pd.concat(_site_rows).sort_values("Gain / month", ascending=False))
+
+                # -- By installer ----------------------------------------------
+                sec_hdr("list", "By installer · biggest gain first")
+                _irows = []
+                for _iid, _ig in _grp.groupby("installer_id"):
+                    _s = lead_lag_summary(_ig, _team_days, _month_days)
+                    _irows.append({
+                        "Installer": _ig["name"].iloc[0], "Supervisor": _ig["supervisor"].iloc[0],
+                        "Days": _s["idays"], "Days timed": _s["measured"],
+                        "On-time": f"{_s['ontime_pct']:.0f}%" if _s["ontime_pct"] is not None else "—",
+                        "Median start": _min_to_hhmm(_s["median_start"]) or "—",
+                        "Late (min)": round(_s["avg_late"]) if _s["avg_late"] is not None else "—",
+                        "Min / install": f"{_s['avg_min']:.1f}" if _s["avg_min"] is not None else "—",
+                        "Per day now": f"{_s['per_day']:.1f}", "Per day with": f"{_s['per_day_both']:.1f}",
+                        "Month now": round(_s["month_now"]), "Month with": round(_s["month_both"]),
+                        "Gain / month": round(_s["month_gain"]),
+                    })
+                render_scroll_table(pd.DataFrame(_irows).sort_values("Gain / month", ascending=False))
+
+                # -- Day by day ------------------------------------------------
+                sec_hdr("calendar", "Day by day")
+                _drows = []
+                for _dd, _dg in _grp.groupby("date"):
+                    _dm = _dg[_dg["measured"]]
+                    _drows.append({
+                        "Date": _dd.strftime("%d %b"), "Installers": int(_dg["installer_id"].nunique()),
+                        "Installs": int(_dg["n"].sum()), "Per installer": f"{_dg['n'].mean():.1f}",
+                        "On-time": f"{_dm['on_time'].mean() * 100:.0f}%" if len(_dm) else "—",
+                        "Median start": _min_to_hhmm(_dm["start"].median()) if len(_dm) else "—",
+                        "With leads": round(float(_dg["with_both"].sum())),
+                    })
+                render_scroll_table(pd.DataFrame(_drows))
+
+                # -- Commercial impact -----------------------------------------
+                sec_hdr("rupee", "Commercial impact · per month")
+                _df_exp = load_expenses()
+                _cm, _es = None, None
+                _try = month_key(_d1)
+                for _ in range(3):           # this month's costs, else the latest of the two before
+                    _n1m, _n3m = month_installs(df_installations_master, _try)
+                    _e = expense_summary(_df_exp, _try, _n1m, _n3m)
+                    if _e["has_entries"] or _es is None:
+                        _cm, _es = _try, _e
+                    if _e["has_entries"]:
+                        break
+                    _try = prev_month_key(_try)
+                if not _es["has_entries"]:
+                    st.info("No costs entered on the Expenses tab for this month or the two before it, so cost and "
+                            "profit can't be worked out yet. Revenue is shown below.")
+                _cb = site_cost_breakdown(_df_exp, _cm)
+                if _site == "All sites":
+                    _fixed_scope = float(_es["fixed_total"])
+                else:
+                    _fixed_scope = next((float(x["fixed"]) for x in _cb["sites"]
+                                         if _loc_key(x["site"]) == _loc_key(_site)), 0.0)
+                _scope_s = lead_lag_summary(_scope, _team_days, _month_days)
+                _proj_s = lead_lag_summary(_in_range, _all_days, _month_days)
+                # The group carries its share of the scope's fixed cost (by
+                # installs now); that amount stays put as installs rise.
+                _fixed_grp = (_fixed_scope * S["month_now"] / _scope_s["month_now"]) if _scope_s["month_now"] else 0.0
+                M = lead_lag_money(S["month_now"], S["month_both"], S["share3"], _fixed_grp,
+                                   _cb["rate1"], _cb["rate3"], _proj_s["month_now"], _proj_s["share3"])
+                _cards = [_ll_card("Revenue", f"Rs. {M['rev_now']:,.0f}",
+                                   f"with leads Rs. {M['rev_with']:,.0f} · {_ll_signed(M['rev_with'] - M['rev_now'], 0, 'Rs. ')}")]
+                if _es["has_entries"]:
+                    _cards += [
+                        _ll_card("Cost per install", f"Rs. {_ll_n(M['cpi_now'])}",
+                                 f"with leads Rs. {_ll_n(M['cpi_with'])} · "
+                                 f"{_ll_signed((M['cpi_with'] or 0) - (M['cpi_now'] or 0), 1, 'Rs. ')}"),
+                        _ll_card("Profit", f"Rs. {M['profit_now']:,.0f}",
+                                 f"with leads Rs. {M['profit_with']:,.0f} · "
+                                 f"{_ll_signed(M['profit_with'] - M['profit_now'], 0, 'Rs. ')}",
+                                 "--danger-700" if M["profit_now"] < 0 else "--ink-900"),
+                        _ll_card("Profit per install", f"Rs. {_ll_n(M['ppi_now'])}",
+                                 f"with leads Rs. {_ll_n(M['ppi_with'])} · "
+                                 f"{_ll_signed((M['ppi_with'] or 0) - (M['ppi_now'] or 0), 1, 'Rs. ')}"),
+                    ]
+                _ll_grid(_cards)
+                st.caption(f"Revenue uses the Expenses-tab prices and the slab incentive on the project's whole "
+                           f"month ({_proj_s['month_now']:,.0f} installs now at this pace), before GST. Costs are "
+                           f"{month_label(_cm)}'s from the Expenses tab: fixed Rs. {_fixed_grp:,.0f} a month for "
+                           f"this selection stays the same; variable Rs. {_cb['rate1']:,.1f} (1PH) / "
+                           f"Rs. {_cb['rate3']:,.1f} (3PH) per install grows with installs.")
+
+                if _inst == "All installers" and _sup == "All supervisors" and _es["has_entries"]:
+                    sub_hdr("users", "By supervisor")
+                    _mrows = []
+                    for _sn, _sg in _grp.groupby("supervisor"):
+                        _ss = lead_lag_summary(_sg, _team_days, _month_days)
+                        _fx = (_fixed_scope * _ss["month_now"] / _scope_s["month_now"]) if _scope_s["month_now"] else 0.0
+                        _mm = lead_lag_money(_ss["month_now"], _ss["month_both"], _ss["share3"], _fx,
+                                             _cb["rate1"], _cb["rate3"], _proj_s["month_now"], _proj_s["share3"])
+                        _mrows.append({
+                            "Supervisor": _sn, "Revenue now": round(_mm["rev_now"]), "Revenue with": round(_mm["rev_with"]),
+                            "Cost / install now": _ll_n(_mm["cpi_now"]),
+                            "Cost / install with": _ll_n(_mm["cpi_with"]),
+                            "Profit now": round(_mm["profit_now"]), "Profit with": round(_mm["profit_with"]),
+                            "Profit gain": round(_mm["profit_with"] - _mm["profit_now"]),
+                        })
+                    render_scroll_table(pd.DataFrame(_mrows).sort_values("Profit gain", ascending=False))
+                    st.caption("Each supervisor's team carries the fixed cost in proportion to its installs now.")
+
+            # -- Targets ----------------------------------------------------------
+            with st.expander("Targets"):
+                with st.form("ll_targets"):
+                    tc1, tc2, tc3 = st.columns(3)
+                    with tc1:
+                        _t_start = st.time_input("In the field by", value=dtime(int(_tgt_min) // 60, int(_tgt_min) % 60),
+                                                 step=900, key="ll_t_start")
+                    with tc2:
+                        _t_daily = st.number_input("Installs / installer-day", min_value=1, max_value=60,
+                                                   value=LL_DAILY_TARGET, step=1, key="ll_t_daily")
+                    with tc3:
+                        _t_ot = st.number_input("On-time days %", min_value=1, max_value=100,
+                                                value=LL_ONTIME_TARGET_PCT, step=5, key="ll_t_ot")
+                    if st.form_submit_button("Save targets", width="stretch"):
+                        if save_settings({"ll_start_time": _t_start.strftime("%H:%M"),
+                                          "ll_daily_target": int(_t_daily), "ll_ontime_target_pct": int(_t_ot)}):
+                            st.success("✅ Targets saved.")
+                            st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
