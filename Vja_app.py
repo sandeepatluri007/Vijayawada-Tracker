@@ -7589,24 +7589,42 @@ with tab_dash:
 #  ANALYTICS  (fully independent of Installations/Inventory/Technicians —
 #  purely for live installer-performance tracking on the phone while traveling)
 # ═══════════════════════════════════════════════════════════════════════════════
-ANALYTICS_REFRESH_SEC = 180   # Analytics auto-refresh interval
+# Both timers are set in Admin (Settings sheet) and run only while the
+# Analytics tab is open on some phone or PC.
+#   analytics_refresh_on / analytics_refresh_min — reload the install sheets
+#   auto_push_on / auto_push_min                 — run Update Installs
+AUTO_PUSH_MIN_FLOOR = 5   # minutes. Every push reads and writes Google Sheets;
+# with several devices open, anything shorter risks Google's per-minute limit.
+ANALYTICS_REFRESH_ON = _truthy(get_setting("analytics_refresh_on", "1"))
+ANALYTICS_REFRESH_MIN = max(1, int(get_setting("analytics_refresh_min", 3)))
+AUTO_PUSH_ON = _truthy(get_setting("auto_push_on", "0"))
+AUTO_PUSH_MIN = max(AUTO_PUSH_MIN_FLOOR, int(get_setting("auto_push_min", 10)))
+TIMER_TICK_SEC = 60       # how often the timers check whether one is due
 
 
-@st.fragment(run_every=ANALYTICS_REFRESH_SEC)
-def _analytics_autorefresh():
+@st.fragment(run_every=TIMER_TICK_SEC)
+def _analytics_timers():
     """Keeps the Analytics tab current while it is open. Uploads from the PC
     auto-loader go straight to Google Sheets, so this page can't know about
-    them: every few minutes it drops the cached copies of the install sheets
-    and redraws, without anyone pressing Refresh."""
-    started = st.session_state.get("_analytics_ar_at")
-    now_ = time.time()
-    # The fragment also runs as part of every normal page run — only a timer
-    # tick (a run at least one interval after the last refresh) refreshes.
-    if started is None or now_ - started < ANALYTICS_REFRESH_SEC - 10:
-        if started is None:
-            st.session_state["_analytics_ar_at"] = now_
+    them: on the Admin intervals it drops the cached copies of the install
+    sheets and redraws (auto-refresh), and pushes any new Analytics installs
+    into the install log (auto Update Installs) — without anyone pressing a
+    button. A tick with nothing due draws nothing and costs nothing."""
+    ss, now_ = st.session_state, time.time()
+    # The fragment also runs as part of every normal page run; the first one
+    # starts the clocks.
+    if "_analytics_ar_at" not in ss:
+        ss["_analytics_ar_at"] = ss["_auto_push_at"] = now_
         return
-    st.session_state["_analytics_ar_at"] = now_
+    refresh_due = ANALYTICS_REFRESH_ON and now_ - ss["_analytics_ar_at"] >= ANALYTICS_REFRESH_MIN * 60 - 10
+    push_due = AUTO_PUSH_ON and now_ - ss.get("_auto_push_at", now_) >= AUTO_PUSH_MIN * 60 - 10
+    if not (refresh_due or push_due):
+        return
+    ss["_analytics_ar_at"] = now_          # a push reloads the sheets too
+    if push_due:
+        ss["_auto_push_at"] = now_
+        ss["trigger_analytics_push"] = True
+        ss["_auto_push_run"] = True
     for _ws in ("AnalyticsRaw", "Installations", "UploadedInstallLog"):
         _bump_sheet_version(_ws)
     st.rerun()
@@ -7731,12 +7749,14 @@ def run_analytics_upload(analytics_file, file_fp: str):
 with tab_analytics:
     if tab_analytics.open:   # only the open tab runs (tabs are created with on_change="rerun")
         tab_action_bar("analytics", show_upload=True)
-        if st.toggle(f"Auto-refresh every {ANALYTICS_REFRESH_SEC // 60} min", value=True,
-                     key="analytics_autorefresh",
-                     help="Picks up files loaded by the PC auto-loader without pressing Refresh."):
-            _analytics_autorefresh()
+        _timers = ([f"Auto-refresh every {ANALYTICS_REFRESH_MIN} min"] if ANALYTICS_REFRESH_ON else []) + \
+                  ([f"Auto Update Installs every {AUTO_PUSH_MIN} min"] if AUTO_PUSH_ON else [])
+        if _timers:
+            _analytics_timers()
+            st.caption(" · ".join(_timers) + " — change in Admin.")
         else:
             st.session_state.pop("_analytics_ar_at", None)
+            st.caption("Auto-refresh and auto Update Installs are off — turn them on in Admin.")
 
         sec_hdr("upload", "Upload Progress File")
         up_col, go_col = st.columns([6, 1], vertical_alignment="center")
@@ -8199,6 +8219,10 @@ with tab_analytics:
                                   type="primary", width="stretch")
             if st.session_state.pop("trigger_analytics_push", False):
                 _push_now = True
+            # A timed push with nothing new stays silent and writes nothing.
+            _auto_run = st.session_state.pop("_auto_push_run", False)
+            if _push_now and _auto_run and _pending.empty:
+                _push_now = False
             if _push_now:
                 # First complete installs already in the log whose Consumer No
                 # etc. arrived later in Analytics (they are never pushed again).
@@ -11218,6 +11242,32 @@ with tab_admin:
                 if save_settings({"holidays": _json.dumps(dict(sorted(_hols.items())))}):
                     st.success("✅ Holidays updated.")
                     st.rerun()
+
+        # ── Analytics timers ─────────────────────────────────────────────────
+        sub_hdr("clock", "Analytics Auto-Refresh & Auto Update Installs")
+        st.markdown(
+            '<div class="info-box">Both run only while the Analytics tab is open on a phone or PC. '
+            'Auto-refresh reloads the latest installs from Google Sheets. Auto Update Installs adds any new '
+            'Analytics installs to the install log, the same as pressing Update Installs, and does nothing when '
+            f'there are none. Its shortest interval is {AUTO_PUSH_MIN_FLOOR} min, as every update reads and writes '
+            'Google Sheets.</div>', unsafe_allow_html=True)
+        tm1, tm2 = st.columns(2)
+        with tm1:
+            _ar_on = st.toggle("Auto-refresh", value=ANALYTICS_REFRESH_ON, key="adm_ar_on")
+            _ar_min = st.number_input("Every (minutes)", min_value=1, max_value=120, step=1,
+                                      value=ANALYTICS_REFRESH_MIN, key="adm_ar_min", disabled=not _ar_on)
+        with tm2:
+            _ap_on = st.toggle("Auto Update Installs", value=AUTO_PUSH_ON, key="adm_ap_on")
+            _ap_min = st.number_input("Every (minutes)", min_value=AUTO_PUSH_MIN_FLOOR, max_value=240, step=1,
+                                      value=AUTO_PUSH_MIN, key="adm_ap_min", disabled=not _ap_on)
+        if st.button("Save", type="primary", width="stretch", key="save_timers"):
+            if save_settings({"analytics_refresh_on": int(_ar_on), "analytics_refresh_min": int(_ar_min),
+                              "auto_push_on": int(_ap_on), "auto_push_min": int(_ap_min)}):
+                st.success("✅ Saved — "
+                           + (f"auto-refresh every {int(_ar_min)} min" if _ar_on else "auto-refresh off") + ", "
+                           + (f"auto Update Installs every {int(_ap_min)} min" if _ap_on else "auto Update Installs off")
+                           + ".")
+                st.rerun()
 
         st.divider()
 
