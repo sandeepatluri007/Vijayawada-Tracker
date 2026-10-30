@@ -7330,7 +7330,17 @@ with tab_dash:
             else:
                 mk = month_key(today)
                 by_cost = {_loc_key(x["site"]): x for x in cost_model["sites"]}
-                loc_month = this_month.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
+                # One name per location, exactly as the billing and cost model
+                # name it (Admin Locations, then Store-tab mappings). Grouping
+                # by the raw MI spelling ("R.R.NAGAR") missed a site mapped to
+                # another name, showing it at Rs. 0 and leaving it out of TOTAL.
+                _lm = this_month[["location", "qty_1ph", "qty_3ph"]].copy()
+                _lm["location"] = _lm["location"].astype(str).str.strip().replace("", "Unspecified")
+                _lcanon = _canonical_locations(_lm["location"])
+                _lm["location"] = _lm["location"].map(lambda v: _lcanon.get(_loc_key(v), v))
+                for _qc in ("qty_1ph", "qty_3ph"):
+                    _lm[_qc] = pd.to_numeric(_lm[_qc], errors="coerce").fillna(0)
+                loc_month = _lm.groupby("location")[["qty_1ph", "qty_3ph"]].sum().reset_index()
                 site_rows = []
                 for _, r in loc_month.iterrows():
                     site, n1, n3 = str(r["location"]), int(r["qty_1ph"]), int(r["qty_3ph"])
