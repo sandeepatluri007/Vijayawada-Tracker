@@ -2232,8 +2232,20 @@ def safe_int(val, default: int = 0) -> int:
         return default
 
 
+def to_number(series) -> pd.Series:
+    """Numbers as Google Sheets returns them. Values are read as the sheet
+    DISPLAYS them, so 1000 in a column formatted with separators arrives as
+    "1,000" — which pd.to_numeric can't read and used to count as 0: an inward
+    entry of 1,000 meters simply vanished from stock. Separators, spaces and a
+    rupee sign are dropped first."""
+    s_ = pd.Series(series)
+    if not pd.api.types.is_numeric_dtype(s_):
+        s_ = s_.astype(str).str.replace(r"[,\s₹]", "", regex=True)
+    return pd.to_numeric(s_, errors="coerce").fillna(0)
+
+
 def safe_numeric_col(df: pd.DataFrame, col: str) -> pd.Series:
-    return pd.to_numeric(df[col], errors="coerce").fillna(0)
+    return to_number(df[col])
 
 
 def has_col(df: pd.DataFrame, *cols) -> bool:
@@ -3238,6 +3250,7 @@ VEHICLE_COLS = ["reg_no", "description", "is_active"]
 # pending overstates what is actually on hand.
 #   Returns sheet: date, type, qty, location, dc_no, remarks
 RETURN_COLS = ["date", "type", "qty", "location", "dc_no", "remarks"]
+INVENTORY_COLS = ["date", "type", "qty", "mrn", "make", "location"]
 METER_TYPES = ("1 PH", "3 PH")
 
 
@@ -3256,9 +3269,10 @@ def load_transfers() -> pd.DataFrame:
     for c in TRANSFER_COLS:
         if c not in df.columns:
             df[c] = ""
-    df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
+    df["qty"] = to_number(df["qty"]).astype(int)
     for c in ("type", "from_location", "to_location", "dc_no", "remarks", "date"):
         df[c] = df[c].astype(str).str.strip()
+    df["type"] = df["type"].map(stock_type)
     return df
 
 
@@ -3288,9 +3302,10 @@ def load_returns() -> pd.DataFrame:
     for c in RETURN_COLS:
         if c not in df.columns:
             df[c] = ""
-    df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
+    df["qty"] = to_number(df["qty"]).astype(int)
     for c in ("type", "location", "dc_no", "remarks", "date"):
         df[c] = df[c].astype(str).str.strip()
+    df["type"] = df["type"].map(stock_type)
     return df
 
 
@@ -3344,9 +3359,31 @@ def _canonical_locations(*series) -> dict:
     return names
 
 
+def stock_type(v) -> str:
+    """A Store entry's meter type as "1 PH" / "3 PH" whatever its spelling —
+    "1PH", "1 ph", "Single Phase" typed in the sheet were matched exactly
+    before, so they dropped out of the totals. Anything unreadable is kept as
+    typed (and shows up in the Stock Check)."""
+    return {"1PH": "1 PH", "3PH": "3 PH"}.get(classify_meter_type(v), str(v).strip())
+
+
+def load_inventory() -> pd.DataFrame:
+    """Inventory with readable quantities and meter types."""
+    df = get_data("Inventory")
+    if df.empty or not has_col(df, "type", "qty"):
+        return pd.DataFrame(columns=INVENTORY_COLS)
+    df = df.copy()
+    for c in INVENTORY_COLS:
+        if c not in df.columns:
+            df[c] = ""
+    df["qty"] = to_number(df["qty"]).astype(int)
+    df["type"] = df["type"].map(stock_type)
+    return df
+
+
 def stock_summary() -> dict:
     """Overall stock per meter type: received, installed, returned, pending."""
-    df_inv, df_inst, df_ret = get_data("Inventory"), get_data("Installations"), load_returns()
+    df_inv, df_inst, df_ret = load_inventory(), get_data("Installations"), load_returns()
     out = {}
     for t, qty_col in zip(METER_TYPES, ("qty_1ph", "qty_3ph")):
         received = int(safe_numeric_col(df_inv[df_inv["type"] == t], "qty").sum()) \
@@ -3363,7 +3400,7 @@ def stock_by_location() -> pd.DataFrame:
     """Same figures split by location. Inward entries recorded before locations
     were captured carry no location, so they show as Unspecified rather than
     being dropped or guessed at."""
-    df_inv, df_inst, df_ret = get_data("Inventory"), get_data("Installations"), load_returns()
+    df_inv, df_inst, df_ret = load_inventory(), get_data("Installations"), load_returns()
     df_tr = load_transfers()
     rows = {}
     canon = _canonical_locations(
@@ -3448,9 +3485,128 @@ def stock_by_location() -> pd.DataFrame:
         out = out.drop(columns=["Borrowed In", "Lent Out"])
     # Once the legacy pool is used up it has nothing left to say, so it drops
     # out of the table rather than sitting there at zero for ever.
-    spent = (out["Location"] == "Unspecified") & (out["Pending"] <= 0)
+    # A NEGATIVE pool is kept: hiding it made the sites add up to more stock
+    # than the overall total.
+    spent = (out["Location"] == "Unspecified") & (out["Pending"] == 0)
     out = out[~spent]
     return out.sort_values(["Location", "Type"]).reset_index(drop=True)
+
+
+def stock_check() -> dict:
+    """Everything that can make the app's stock differ from the meters on the
+    shelf, found in the data rather than guessed:
+
+      short    — installs in the install log that Installations (what stock
+                 counts as installed) doesn't have: e.g. the log was saved but
+                 the Installations write after it failed. Stock shows TOO HIGH.
+      extra    — Installations above the install log for the same technician,
+                 day and location: manual entries or double counts. Stock
+                 shows TOO LOW.
+      manual   — Installations rows with no uploads behind them at all.
+      untyped  — logged installs with no readable meter type: counted in
+                 neither 1PH nor 3PH, so missing from stock. TOO HIGH.
+      unpushed — installs in Analytics not yet pushed with Update Installs.
+                 Not installed yet as far as stock knows. TOO HIGH until pushed.
+      inv_bad  — inward entries whose quantity or type can't be read.
+      inv_dup  — the same MRN and type entered more than once. TOO HIGH.
+      ret_dup  — the same return entered more than once. TOO LOW.
+    """
+    out = {}
+    inst = get_data("Installations")
+    log = get_data("UploadedInstallLog")
+    keys = ["date", "tech_name", "location"]
+    if not log.empty and has_col(log, *keys, "meter_type"):
+        # Only TL_ installers' installs are ever counted, so only theirs can be missing.
+        lg = log[log["installer_id"].apply(is_valid_installer_id)].copy() if "installer_id" in log.columns else log.copy()
+        ph = meter_phases(lg["meter_type"])
+        lg["l1"], lg["l3"], lg["lu"] = (ph == "1PH").astype(int), (ph == "3PH").astype(int), (ph == "").astype(int)
+        lagg = lg.groupby(keys)[["l1", "l3", "lu"]].sum().reset_index()
+        out["untyped"] = lg[ph == ""][["date", "time", "installer_id", "location", "meter_type"]]
+    else:
+        lagg = pd.DataFrame(columns=keys + ["l1", "l3", "lu"])
+        out["untyped"] = pd.DataFrame()
+    if not inst.empty and has_col(inst, *keys, "qty_1ph", "qty_3ph"):
+        ia = inst[keys].copy()
+        ia["i1"], ia["i3"] = safe_numeric_col(inst, "qty_1ph").astype(int), safe_numeric_col(inst, "qty_3ph").astype(int)
+        iagg = ia.groupby(keys)[["i1", "i3"]].sum().reset_index()
+    else:
+        iagg = pd.DataFrame(columns=keys + ["i1", "i3"])
+    m = lagg.merge(iagg, on=keys, how="outer")
+    for c in ("l1", "l3", "lu", "i1", "i3"):
+        m[c] = to_number(m[c]).astype(int)
+    m["s1"], m["s3"] = (m["l1"] - m["i1"]).clip(lower=0), (m["l3"] - m["i3"]).clip(lower=0)
+    m["e1"], m["e3"] = (m["i1"] - m["l1"]).clip(lower=0), (m["i3"] - m["l3"]).clip(lower=0)
+    has_log = (m["l1"] + m["l3"] + m["lu"]) > 0
+    out["short"] = m[(m["s1"] + m["s3"]) > 0].sort_values("date")
+    out["extra"] = m[has_log & ((m["e1"] + m["e3"]) > 0)].sort_values("date")
+    out["manual"] = m[~has_log & ((m["i1"] + m["i3"]) > 0)].sort_values("date")
+
+    araw = get_data("AnalyticsRaw")
+    if not araw.empty and has_col(araw, "key", "installer_id"):
+        logk = set(log["key"]) if not log.empty and "key" in log.columns else set()
+        v = araw[araw["installer_id"].apply(is_valid_installer_id)]
+        out["unpushed"] = v[~v["key"].isin(logk)]
+    else:
+        out["unpushed"] = pd.DataFrame()
+
+    raw_inv = get_data("Inventory")
+    if not raw_inv.empty and has_col(raw_inv, "type", "qty"):
+        q = to_number(raw_inv["qty"])
+        t = raw_inv["type"].map(stock_type)
+        bad = (q <= 0) | ~t.isin(METER_TYPES)
+        out["inv_bad"] = raw_inv[bad]
+        inv = raw_inv.assign(type=t, qty=q.astype(int))
+        mrn = inv["mrn"].astype(str).str.strip().str.upper() if "mrn" in inv.columns else pd.Series("", index=inv.index)
+        dup = (mrn != "") & inv.assign(_m=mrn).duplicated(["_m", "type"], keep=False)
+        out["inv_dup"] = inv[dup].sort_values(["mrn", "date"]) if dup.any() else pd.DataFrame()
+    else:
+        out["inv_bad"] = out["inv_dup"] = pd.DataFrame()
+    ret = load_returns()
+    out["ret_dup"] = (ret[ret.duplicated(["date", "type", "qty", "location", "dc_no"], keep=False)]
+                      if not ret.empty else pd.DataFrame())
+    return out
+
+
+def add_missing_installs(short: pd.DataFrame) -> int:
+    """Bring Installations up to the install log where it has fewer: the
+    installs are logged (one row per meter, with its time) but were never
+    counted. Reads Installations fresh; never lowers a figure."""
+    if short is None or short.empty:
+        return 0
+    inst = get_data_fresh("Installations")
+    cols = ["date", "tech_name", "installer_id", "location", "qty_1ph", "qty_3ph"]
+    if inst.empty:
+        inst = pd.DataFrame(columns=cols)
+    inst = inst.copy()
+    for c in cols:
+        if c not in inst.columns:
+            inst[c] = ""
+    for c in ("qty_1ph", "qty_3ph"):
+        inst[c] = safe_numeric_col(inst, c).astype(int)
+    log = get_data("UploadedInstallLog")
+    added = 0
+    for _, r in short.iterrows():
+        mask = (inst["date"] == r["date"]) & (inst["tech_name"] == r["tech_name"]) & (inst["location"] == r["location"])
+        have1, have3 = int(inst.loc[mask, "qty_1ph"].sum()), int(inst.loc[mask, "qty_3ph"].sum())
+        d1, d3 = max(0, int(r["l1"]) - have1), max(0, int(r["l3"]) - have3)
+        if not (d1 or d3):
+            continue
+        if mask.any():
+            first = inst.index[mask][0]
+            inst.loc[first, "qty_1ph"] += d1
+            inst.loc[first, "qty_3ph"] += d3
+        else:
+            lid = ""
+            if not log.empty and "installer_id" in log.columns:
+                _m = log[(log["date"] == r["date"]) & (log["tech_name"] == r["tech_name"])]
+                lid = str(_m["installer_id"].iloc[0]) if not _m.empty else ""
+            inst = pd.concat([inst, pd.DataFrame([{"date": r["date"], "tech_name": r["tech_name"],
+                                                   "installer_id": lid, "location": r["location"],
+                                                   "qty_1ph": d1, "qty_3ph": d3}])], ignore_index=True)
+        added += d1 + d3
+    if added and not safe_update("Installations", inst):
+        return -1
+    return added
 
 
 def unmatched_location_names() -> list:
@@ -10294,11 +10450,23 @@ with tab_inv:
             if not imrn.strip():
                 st.error("❌ MRN No. is required.")
             else:
-                df_inv_exist = get_data("Inventory")
-                new_inv = pd.DataFrame([{"date": str(idate), "type": str(itype), "qty": str(iqty),
-                                         "mrn": imrn.strip(), "make": str(imake), "location": str(iloc)}])
-                updated_inv = pd.concat([df_inv_exist, new_inv], ignore_index=True) if not df_inv_exist.empty else new_inv
-                if safe_update("Inventory", updated_inv):
+                _new_row = {"date": str(idate), "type": str(itype), "qty": str(iqty),
+                            "mrn": imrn.strip(), "make": str(imake), "location": str(iloc)}
+                # Append just this row. Rewriting the whole sheet from this
+                # phone's copy (up to 10 min old) could wipe an entry another
+                # phone had saved in the meantime — stock that then vanished.
+                _same_mrn = load_inventory()
+                _same_mrn = _same_mrn[(_same_mrn["mrn"].astype(str).str.strip().str.upper() == imrn.strip().upper())
+                                      & (_same_mrn["type"] == itype)] if not _same_mrn.empty else _same_mrn
+                if not _same_mrn.empty:
+                    st.warning(f"⚠️ MRN {imrn.strip()} ({itype}) was already entered "
+                               f"{len(_same_mrn)} time(s) — saved anyway; check the Stock Check below if this is a repeat.")
+                _ok = append_rows("Inventory", [_new_row], INVENTORY_COLS)
+                if not _ok:
+                    _fresh = get_data_fresh("Inventory")
+                    _ok = safe_update("Inventory", pd.concat([_fresh, pd.DataFrame([_new_row])], ignore_index=True)
+                                      if not _fresh.empty else pd.DataFrame([_new_row]))
+                if _ok:
                     st.success(f"✅ Inwarded {iqty} × {itype} ({imake}) — MRN {imrn.strip()}")
                     st.rerun()
 
@@ -10357,6 +10525,89 @@ with tab_inv:
             {"Type": t, "Received": v["received"], "Installed": v["installed"],
              "Returned": v["returned"], "Pending": v["pending"]} for t, v in _ss.items()])
         render_scroll_table(stock_tbl)
+
+        # -- Stock Check: why the app can differ from the shelf ---------------
+        _sc = stock_check()
+        _sum1 = lambda df, a, b: int(df[a].sum() + df[b].sum()) if not df.empty else 0
+        _n_short, _n_extra = _sum1(_sc["short"], "s1", "s3"), _sum1(_sc["extra"], "e1", "e3")
+        _n_manual = _sum1(_sc["manual"], "i1", "i3")
+        _n_untyped, _n_unpushed = len(_sc["untyped"]), len(_sc["unpushed"])
+        # Meters in the repeated entries beyond the first of each MRN.
+        _inv_dup_extra = (int(_sc["inv_dup"].assign(_m=_sc["inv_dup"]["mrn"].astype(str).str.strip().str.upper())
+                              .pipe(lambda d: d[d.duplicated(["_m", "type"])])["qty"].sum())
+                          if not _sc["inv_dup"].empty else 0)
+        _issues = sum(bool(x) for x in (_n_short, _n_extra, _n_untyped, _n_unpushed, len(_sc["inv_bad"]),
+                                        len(_sc["inv_dup"]), len(_sc["ret_dup"])))
+        with st.expander(f"Stock Check — {_issues} thing(s) to look at" if _issues else "Stock Check — all clear",
+                         expanded=bool(_issues)):
+            st.markdown(
+                '<div class="info-box">Pending = Received − Installed − Returned. Installed is the '
+                '<b>Installations</b> sheet (1PH + 3PH). Each line below is a way the app can differ from '
+                'the meters actually in stock, worked out from your data.</div>', unsafe_allow_html=True)
+            render_scroll_table(pd.DataFrame([
+                {"Check": "Logged installs missing from Installations", "Meters": _n_short,
+                 "Effect on app stock": "Too high" if _n_short else "—"},
+                {"Check": "Logged installs with no meter type (not counted)", "Meters": _n_untyped,
+                 "Effect on app stock": "Too high" if _n_untyped else "—"},
+                {"Check": "Analytics installs not yet pushed (Update Installs)", "Meters": _n_unpushed,
+                 "Effect on app stock": "Too high until pushed" if _n_unpushed else "—"},
+                {"Check": "Same MRN entered more than once", "Meters": _inv_dup_extra,
+                 "Effect on app stock": "Too high, if a repeat" if _inv_dup_extra else "—"},
+                {"Check": "Inward entries with unreadable qty / type", "Meters": len(_sc["inv_bad"]),
+                 "Effect on app stock": "Not counted" if len(_sc["inv_bad"]) else "—"},
+                {"Check": "Installations above the install log", "Meters": _n_extra,
+                 "Effect on app stock": "Too low, if double counted" if _n_extra else "—"},
+                {"Check": "Same return entered more than once", "Meters": len(_sc["ret_dup"]),
+                 "Effect on app stock": "Too low, if a repeat" if len(_sc["ret_dup"]) else "—"},
+                {"Check": "Manual entries (no uploads behind them)", "Meters": _n_manual,
+                 "Effect on app stock": "Counted — check they are real" if _n_manual else "—"},
+            ]))
+            if _n_short:
+                sub_hdr("alert", "Logged installs missing from Installations")
+                render_scroll_table(_sc["short"].rename(columns={
+                    "date": "Date", "tech_name": "Technician", "location": "Location",
+                    "l1": "Log 1PH", "l3": "Log 3PH", "i1": "Inst 1PH", "i3": "Inst 3PH",
+                    "s1": "Missing 1PH", "s3": "Missing 3PH"})[
+                    ["Date", "Technician", "Location", "Log 1PH", "Inst 1PH", "Missing 1PH",
+                     "Log 3PH", "Inst 3PH", "Missing 3PH"]], max_height=360)
+                st.caption("Each install is in the install log (one row per meter, with its time) but was never "
+                           "added to the Installations count — usually a save that stopped half-way.")
+                if st.button(f"Add the {_n_short:,} missing install(s) to Installations", type="primary",
+                             width="stretch", key="stock_add_missing"):
+                    _added = add_missing_installs(_sc["short"])
+                    if _added > 0:
+                        st.success(f"✅ Added {_added:,} install(s) to Installations — stock updated.")
+                        st.rerun()
+                    elif _added < 0:
+                        st.error("❌ Couldn't save Installations — try again.")
+            if _n_untyped:
+                sub_hdr("alert", "Logged installs with no meter type")
+                render_scroll_table(_sc["untyped"].rename(columns={
+                    "date": "Date", "time": "Time", "installer_id": "Installer", "location": "Location",
+                    "meter_type": "Meter type in file"}), max_height=300)
+                st.caption("Not counted as 1PH or 3PH, so stock still holds them. Re-upload the MI file that "
+                           "has their meter type, or tell me what these meter-type values mean.")
+            if _n_unpushed:
+                st.caption(f"{_n_unpushed:,} install(s) in Analytics aren't in the install log yet — press "
+                           "Update Installs on the Analytics tab (or switch on auto Update Installs in Admin).")
+            if not _sc["inv_dup"].empty:
+                sub_hdr("alert", "Same MRN entered more than once")
+                render_scroll_table(_sc["inv_dup"][[c for c in INVENTORY_COLS if c in _sc["inv_dup"].columns]]
+                                    .rename(columns=str.title), max_height=300)
+                st.caption("If one MRN was really received in two lots this is fine; if it is a repeat, delete "
+                           "the extra entry in the Inventory Log below.")
+            if not _sc["inv_bad"].empty:
+                sub_hdr("alert", "Inward entries the app can't read")
+                render_scroll_table(_sc["inv_bad"], max_height=300)
+                st.caption("Quantity must be a number above 0 and Type 1 PH or 3 PH — fix these in the sheet "
+                           "or the Inventory Log below.")
+            if _n_extra:
+                st.caption(f"Installations is {_n_extra:,} above the install log on "
+                           f"{len(_sc['extra'])} technician-day(s) — review and fix with Admin → Data "
+                           "Maintenance → Check For Possible Double-Counted Installs.")
+            if not _sc["ret_dup"].empty:
+                sub_hdr("alert", "Same return entered more than once")
+                render_scroll_table(_sc["ret_dup"], max_height=300)
 
         sub_hdr("pin", "Stock By Location")
 
@@ -10587,49 +10838,89 @@ with tab_inv:
                 with st.form("edit_inv_form"):
                     ei1, ei2, ei3 = st.columns(3)
                     with ei1:
-                        e_qty = st.number_input("Quantity", min_value=1, step=1, value=safe_int(inv_row.get("qty", 1), 1))
+                        _d0 = pd.to_datetime(inv_row.get("date", ""), errors="coerce")
+                        e_date = st.date_input("Received Date", value=_d0.date() if not pd.isna(_d0) else today_ist())
+                        e_qty = st.number_input("Quantity", min_value=1, step=1,
+                                                value=max(1, int(to_number(pd.Series([inv_row.get("qty", 1)])).iloc[0])))
                     with ei2:
+                        _t0 = stock_type(inv_row.get("type", ""))
+                        e_type = st.selectbox("Type", METER_TYPES,
+                                              index=list(METER_TYPES).index(_t0) if _t0 in METER_TYPES else 0)
                         e_mrn = st.text_input("MRN No.", value=str(inv_row.get("mrn", "")))
                     with ei3:
                         make_opts = ["Schneider", "Genus", "Other"]
                         curr_make = inv_row.get("make", "Schneider")
                         mk_idx = make_opts.index(curr_make) if curr_make in make_opts else 0
                         e_make = st.selectbox("Make", make_opts, index=mk_idx)
+                        _loc_opts = list(dict.fromkeys(list(active_locs) + ["Unspecified"]))
+                        _l0 = str(inv_row.get("location", "")).strip() or "Unspecified"
+                        _l0 = next((l for l in _loc_opts if _loc_key(l) == _loc_key(_l0)), _l0)
+                        if _l0 not in _loc_opts:
+                            _loc_opts.append(_l0)
+                        e_loc = st.selectbox("Location", _loc_opts, index=_loc_opts.index(_l0),
+                                             help="Set the real location on stock received before locations were recorded.")
                     ib1, ib2 = st.columns(2)
                     with ib1:
                         inv_do_update = st.form_submit_button("✏️ Update", type="primary")
                     with ib2:
                         inv_do_delete = st.form_submit_button("🗑️ Delete")
 
+                # The row is found again in the sheet as it is NOW, by its
+                # contents — not by its position in this phone's copy, which
+                # pointed at the wrong row once another phone had added one.
+                _sig = {c: str(inv_row.get(c, "")) for c in INVENTORY_COLS if c in inv_sorted.columns}
+
+                def _find_inv_row(df):
+                    if df.empty:
+                        return None
+                    m_ = pd.Series(True, index=df.index)
+                    for c_, v_ in _sig.items():
+                        if c_ in df.columns:
+                            m_ &= df[c_].astype(str) == v_
+                    return df.index[m_][0] if m_.any() else None
+
                 if inv_do_update:
                     if not e_mrn.strip():
                         st.error("❌ MRN No. cannot be empty.")
                     else:
-                        orig_df = df_inv_t.copy()
-                        orig_inv_idx = len(orig_df) - 1 - inv_idx
-                        orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("qty")] = str(e_qty)
-                        orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("mrn")] = e_mrn.strip()
-                        orig_df.iloc[orig_inv_idx, orig_df.columns.get_loc("make")] = e_make
-                        if safe_update("Inventory", orig_df):
-                            st.success("✅ Inventory entry updated.")
-                            st.rerun()
+                        orig_df = get_data_fresh("Inventory").copy()
+                        ri = _find_inv_row(orig_df)
+                        if ri is None:
+                            st.error("❌ This entry was changed on another device — press Refresh and try again.")
+                        else:
+                            for c_ in INVENTORY_COLS:
+                                if c_ not in orig_df.columns:
+                                    orig_df[c_] = ""
+                            orig_df.loc[ri, ["date", "type", "qty", "mrn", "make", "location"]] = [
+                                str(e_date), e_type, str(int(e_qty)), e_mrn.strip(), e_make, e_loc]
+                            if safe_update("Inventory", orig_df):
+                                st.success("✅ Inventory entry updated.")
+                                st.rerun()
 
                 if inv_do_delete:
-                    st.session_state["pending_inv_del"] = inv_idx
+                    st.session_state["pending_inv_del"] = _sig
 
             if "pending_inv_del" in st.session_state:
-                del_inv_idx = st.session_state["pending_inv_del"]
+                _del_sig = st.session_state["pending_inv_del"]
                 st.markdown('<div class="warn-box">⚠️ Confirm delete? This will affect stock totals.</div>', unsafe_allow_html=True)
                 iy, inv_n = st.columns(2)
                 with iy:
                     if st.button("✅ Yes, Delete", key="conf_del_inv"):
-                        orig_df = df_inv_t.copy()
-                        orig_inv_ri = len(orig_df) - 1 - del_inv_idx
-                        orig_df = orig_df.drop(index=orig_inv_ri).reset_index(drop=True)
-                        if safe_update("Inventory", orig_df):
+                        orig_df = get_data_fresh("Inventory").copy()
+                        _m = pd.Series(isinstance(_del_sig, dict), index=orig_df.index)
+                        if isinstance(_del_sig, dict):
+                            for c_, v_ in _del_sig.items():
+                                if c_ in orig_df.columns:
+                                    _m &= orig_df[c_].astype(str) == v_
+                        if not _m.any():
                             del st.session_state["pending_inv_del"]
-                            st.success("Deleted.")
-                            st.rerun()
+                            st.error("❌ This entry was changed on another device — press Refresh and try again.")
+                        else:
+                            orig_df = orig_df.drop(index=orig_df.index[_m][0]).reset_index(drop=True)
+                            if safe_update("Inventory", orig_df):
+                                del st.session_state["pending_inv_del"]
+                                st.success("Deleted.")
+                                st.rerun()
                 with inv_n:
                     if st.button("❌ Cancel", key="cancel_del_inv"):
                         del st.session_state["pending_inv_del"]
