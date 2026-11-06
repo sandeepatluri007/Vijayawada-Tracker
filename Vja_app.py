@@ -69,6 +69,7 @@ import functools
 import calendar
 import difflib as _difflib
 import json as _json
+import html as _html_mod
 import re as _re
 import threading
 from datetime import timezone as _tz
@@ -9563,26 +9564,12 @@ with tab_exp:
                 st.markdown(f'<div class="warn-box">{len(_gen)} expense(s) (Rs. {_gen["amount"].sum():,.0f}) '
                             'have no site yet — counted in the month total but in no site. Edit each one below '
                             'and choose who it is for.</div>', unsafe_allow_html=True)
-            render_scroll_table(pd.DataFrame({
-                "Category": mrows["_cat"].values, "Type": mrows["category"].values,
-                "Kind": mrows["cost_type"].values,
-                "Rs.": [_value_text(r) for _, r in mrows.iterrows()],
-                "Applies to": mrows["site"].map(scope_label).values,
-                "Repeats": [_repeat_text(r) for _, r in mrows.iterrows()],
-                "Vehicle": mrows["vehicle_reg"].astype(str).values,
-                "Description": mrows["item"].astype(str).values,
-            }), max_height=520)
             st.caption(f"Fixed total Rs. {mrows.loc[mrows['cost_type'] == 'Fixed', 'amount'].sum():,.0f} for "
-                       f"{month_label(sel_month)}. Per-install rates with no saved rate use the standard rate.")
+                       f"{month_label(sel_month)}, by who it is for. Tap a location to see its expenses; "
+                       "Edit or Delete any one of them. Per-install rates with no saved rate use the standard rate.")
 
-            # -- Edit / delete one expense ----------------------------------
-            sub_hdr("file", "Edit or delete")
-            _lbl = {eid: f"{t} · {_value_text(r)} · {scope_label(r['site'])} · {_repeat_text(r)}"
-                    + (f" · {r['item']}" if str(r["item"]).strip() else "")
-                    for eid, t, (_, r) in zip(mrows["expense_id"], mrows["category"], mrows.iterrows())}
-            e_pick = st.selectbox("Expense", ["-- Select --"] + list(_lbl), format_func=lambda k: _lbl.get(k, k),
-                                  key=f"exp_edit_pick_{sel_month}_{_sheet_version('Expenses')}")
-            if e_pick != "-- Select --":
+            def _edit_panel(e_pick):
+                """Edit / delete form for one expense, shown under its row."""
                 er = mrows[mrows["expense_id"] == e_pick].iloc[0]
                 e_kind = str(er["cost_type"])
                 e_rec = _truthy(er["recurring"])
@@ -9669,6 +9656,7 @@ with tab_exp:
                                        "recurring": "1", "end_month": base.get("end_month", "")}
                                 cur_df = pd.concat([cur_df, pd.DataFrame([new])], ignore_index=True)
                             if save_expenses(cur_df):
+                                st.session_state.pop("exp_edit_id", None)
                                 st.success("✅ Expense updated.")
                                 st.rerun()
                 if e_del:
@@ -9693,12 +9681,64 @@ with tab_exp:
                                 cur_df = cur_df[cur_df["expense_id"] != e_pick]
                             if save_expenses(cur_df):
                                 st.session_state.pop("exp_pending_del", None)
+                                st.session_state.pop("exp_edit_id", None)
                                 st.success("✅ Expense deleted.")
                                 st.rerun()
                     with dn:
                         if st.button("❌ Cancel", width="stretch", key=f"{ek}_dno"):
                             st.session_state.pop("exp_pending_del", None)
+                            st.session_state.pop("exp_edit_id", None)
                             st.rerun()
+
+
+            # -- By location: each expense with its own Edit / Delete --------
+            _canon_e = _canonical_locations([x for v in mrows["site"] for x in expense_scope(v)[1]])
+
+            def _group_of(v):
+                k, ss = expense_scope(v)
+                if k == SCOPE_SITE:
+                    return (1, _canon_e.get(_loc_key(ss[0]), ss[0]))
+                if k == SCOPE_SELECTED:
+                    return (2, " + ".join(_canon_e.get(_loc_key(x), x) for x in ss))
+                if k == ALL_SITES:
+                    return (3, ALL_SITES)
+                return (0, "Not assigned")
+
+            mrows["_grp"] = mrows["site"].map(_group_of)
+            _open_id = st.session_state.get("exp_edit_id")
+            if _open_id not in set(mrows["expense_id"]):
+                _open_id = None
+            for (_order, _label), g in sorted(mrows.groupby("_grp"), key=lambda x: (x[0][0], x[0][1].upper())):
+                _fx = g.loc[g["cost_type"] == "Fixed", "amount"].sum()
+                _nv = int((g["cost_type"] == "Variable").sum())
+                _title = (f"{'⚠️ ' if _order == 0 else ''}{_label} — Rs. {_fx:,.0f} a month · {len(g)} expense(s)"
+                          + (f" incl. {_nv} per-install rate(s)" if _nv else ""))
+                with st.expander(_title, expanded=(_open_id in set(g["expense_id"])) or _order == 0):
+                    for _, r in g.iterrows():
+                        eid = r["expense_id"]
+                        _bits = [r["_cat"] if r["_cat"] != r["category"] else "", _repeat_text(r),
+                                 str(r["vehicle_reg"]).strip(), str(r["item"]).strip()]
+                        with st.container(border=True):
+                            st.markdown(
+                                f'<div style="display:flex;justify-content:space-between;gap:8px;">'
+                                f'<span style="font-weight:700;">{_html_mod.escape(str(r["category"]))}</span>'
+                                f'<span style="font-weight:800;">Rs. {_html_mod.escape(_value_text(r))}</span></div>'
+                                f'<div style="font-size:12px;color:var(--ink-600);font-weight:600;">'
+                                f'{_html_mod.escape(" · ".join(b_ for b_ in _bits if b_))}</div>',
+                                unsafe_allow_html=True)
+                            _editing = _open_id == eid
+                            with st.container(horizontal=True):
+                                if st.button("Close" if _editing else "✏️ Edit", key=f"exp_row_edit_{eid}",
+                                             width="content"):
+                                    st.session_state["exp_edit_id"] = None if _editing else eid
+                                    st.session_state.pop("exp_pending_del", None)
+                                    st.rerun()
+                                if not _editing and st.button("🗑️ Delete", key=f"exp_row_del_{eid}", width="content"):
+                                    st.session_state["exp_edit_id"] = eid
+                                    st.session_state["exp_pending_del"] = eid
+                                    st.rerun()
+                            if _editing:
+                                _edit_panel(eid)
 
         # -- Manage categories -------------------------------------------------
         with st.expander("Manage categories"):
