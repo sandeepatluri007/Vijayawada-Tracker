@@ -7035,6 +7035,19 @@ def install_log_duplicate_fix() -> dict:
             "inst_new": inst, "changes": pd.DataFrame(changes)}
 
 
+def apply_install_log_duplicate_fix(plan: dict) -> bool:
+    """Carry out an install_log_duplicate_fix() plan: the install log with each
+    install once, Installations matching it, and the map without repeats."""
+    if not plan:
+        return True
+    ok = safe_update("UploadedInstallLog", plan["log_clean"])
+    ok = ok and safe_update("Installations", plan["inst_new"])
+    mp = get_data_fresh("MapRecords")
+    if ok and not mp.empty and "key" in mp.columns and mp["key"].duplicated().any():
+        safe_update("MapRecords", mp.drop_duplicates("key", keep="first"))
+    return ok
+
+
 def push_parsed_records_to_installations(parsed_records, source_label="install(s)"):
     """Entry point used by all upload paths (Installs bulk upload, Legacy Data
     upload, Analytics 'Update Installs'). Before writing anything, checks for
@@ -7251,6 +7264,16 @@ def sync_analytics_to_log() -> dict:
         added = _execute_push(_push_records_from(P["ready"]), "install(s) from Analytics", rerun=False)
         if added < 0:
             st.error("❌ Couldn't save the new installs to the install log — it will try again in a minute.")
+    # Only the copy of the app that uploaded retries a failed save (see the
+    # Analytics tab), so two copies never record the same installs at once.
+    st.session_state["_sync_retry"] = added < 0
+    # Self-heal: if an install did get saved twice (two uploads landing at the
+    # same moment), keep one copy and set Installations to match the log.
+    if added > 0:
+        _fix = install_log_duplicate_fix()
+        if _fix and apply_install_log_duplicate_fix(_fix):
+            st.info(f"ℹ️ Removed {_fix['n_dups']:,} install(s) saved twice in the install log "
+                    f"({', '.join(_fix['dates'])}) and corrected Installations.")
     held = len(P["sno_repeat"]) + len(P["manual"])
     if held:
         st.warning(f"⚠️ {held:,} install(s) are waiting for review on the Analytics tab (Install Log) — "
@@ -8493,11 +8516,14 @@ with tab_analytics:
             if go_clicked:
                 run_analytics_upload(analytics_file, file_fp)
 
-        # ── Catch-up: record installs still waiting (a save that failed, or
-        # installs uploaded by a copy of the app running older code). Retried at
+        # ── Retry a save that failed — ONLY in the copy of the app that did the
+        # upload. A copy that is just viewing (a phone with Analytics open, the
+        # auto-refresh) never records installs by itself: when it did, it
+        # raced the PC auto-loader recording the same new installs, and both
+        # saved them — the same install twice in the install log. Retried at
         # most once a minute, so a failing save can't hammer Google Sheets.
-        if (time.time() - st.session_state.get("_sync_at", 0) > SYNC_RETRY_SEC
-                and not analytics_pending()["ready"].empty):
+        if (st.session_state.get("_sync_retry")
+                and time.time() - st.session_state.get("_sync_at", 0) > SYNC_RETRY_SEC):
             if sync_analytics_to_log()["added"] > 0:
                 st.rerun()
 
@@ -8651,11 +8677,7 @@ with tab_analytics:
                                         render_scroll_table(_plan["changes"])
                                     if st.button("Remove duplicates and correct Installations", type="primary",
                                                  width="stretch", key="dup_fix_apply"):
-                                        _ok = safe_update("UploadedInstallLog", _plan["log_clean"])
-                                        _ok = _ok and safe_update("Installations", _plan["inst_new"])
-                                        _mp = get_data_fresh("MapRecords")
-                                        if _ok and not _mp.empty and "key" in _mp.columns and _mp["key"].duplicated().any():
-                                            safe_update("MapRecords", _mp.drop_duplicates("key", keep="first"))
+                                        _ok = apply_install_log_duplicate_fix(_plan)
                                         st.session_state.pop("_dup_fix", None)
                                         if _ok:
                                             st.success(f"✅ Removed {_plan['n_dups']:,} duplicate record(s) and corrected Installations.")
@@ -8909,7 +8931,13 @@ with tab_analytics:
                            + (f" ({_P['discarded']:,} repeat(s) discarded on review)" if _P["discarded"] else "")
                            + ". New installs are recorded automatically as soon as they are uploaded.")
             elif not _P["ready"].empty:
-                st.caption(f"{len(_P['ready']):,} install(s) are being recorded…")
+                st.caption(f"{len(_P['ready']):,} Analytics install(s) aren't in the install log yet. They are "
+                           "recorded by the device that uploaded them; if that save didn't finish, record them "
+                           "here.")
+                if st.button(f"Record {len(_P['ready']):,} waiting install(s)", width="stretch",
+                             key="sync_waiting"):
+                    if sync_analytics_to_log()["added"] >= 0:
+                        st.rerun()
             if not has_col(day_df, "location") or not has_col(day_df, "meter_type") or (day_df["location"].eq("").all() and day_df["meter_type"].eq("").all()):
                 st.caption("No Location/Meter Type on these records — they are recorded as 'Unspecified', "
                            "not counted in 1PH/3PH.")
