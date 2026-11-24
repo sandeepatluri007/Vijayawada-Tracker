@@ -230,7 +230,7 @@ def replay_carried_messages():
 LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAGsAAABgCAYAAAAaeIzPAAAs90lEQVR42u19eXxcxZXud07V7VWr5QXvxixmsdnkBQzEMgaDE7OEQWLmQUKA4AwkwJCQhVVSmBBmAnmByUYCA0mGQCSYQAKBYPKTgknCYoHBLPJuvMm2rH3r5Vad98e9t7slS7ZkyHvJPBW/Nm139+3uOnXO+c53vqoGDjJEhBYtWqQBaAx/6EWLFunKykrG6PjYBg31QE1NjaqoqDCZJxLBWstbt24d/+STT4497rjjPtnU1CREROFwOP3MM888dfPNN6fmz5/fxcw9IpJ5aWVlpaqqqjJEJKNT/jEaq7Kykqurqy0AFBQUYPXq1QWPPPLIlxobG8/at2/fCbFYbFwqlUJeXh6YOTAiUqkUjDEQkZSIrJo8efLTl1xyyW8qKiq2JRKJQRfA6PgIxqqsrNTV1dVuQUEBfvzjH19SV1d3+6ZNm453HEdPmTKlcdy4cb8sKytbv3Dhwrfz8/PzAOQBsAB6e3t7JzY0NOS9+eabJ27evHn52rVrpyul8iKRyJ8uvfTSX15++eU/I6Ke8vJyVVtbO2qwj2gsBmAbGhqOvP32278XDoc/NXbs2M1Lly69s7y8/NW1a9eOv/POO482xly+adOm8LHHHntmJBIBAHR0dPStW7fu9eOPP96Nx+Mv3XjjjW/Pmzfv7eeee+6Empqab3Z2ds4jonW33HLLVfPnz//zokWL9B//+Ed3dPoPwViVlZV8zz332EceeeSa73znO/dOmDAhffvtt994+umnP3/XXXfdtHLlys9Fo9EpRJSeMGHCxjlz5tCWLVseI6K9SiluampS1trDS0pKPrV+/fqxjuOMBdA7e/bsf/vud7/7w3Xr1i352te+dndra+vMpUuX/sOdd97536MedgijsrJSA8BTTz11zic/+Un54he/+HpJSQmeeuqpU5cuXdp6/vnny0033fTEq6++epGIFEUiEYRCoUGvFYlEICLqrbfeOv2666770QUXXCBnnnlm509/+tPzRERfd911vznhhBPkvvvu+zQRYRQtHoJ3iciYM888c2dFRcWbIhK57bbbzj711FPlnHPO+XVfX98RzP3mlAGwD80zNx/a8wDYf8Lll1/+wpIlS+QXv/jFjVprXHTRRa8sWbIkJSL5QWkwaoIRjNtuu+3apUuXyiuvvDJXRPIuuOACe+65576Un5+fqZtqamrUcCZWREhEuLy8POT/fer111//2rJlyxKbNm2asGrVqpmzZ8/uuvXWW78NAH4NNzqGOwoKCu5cvnz53vz8fNx1111Xnn322fLOO++UAsCDDz7oHOp1a2pqQgCwY8eOWQsWLEh//etfv5aZsXz58qZly5bVExFGWGz/fz0YABzHiWzYsGFdV1eX+vDDDwu11mbOnDm7y8vL1YoVKw4ZBLz33ntueXm5mjx58sZkMpnSWs82xnBJSYlqb2/v9Y01OkZirI6Ojq6JEyeekpeXZ84666y/dHd3q6qqqstqa2sNER0SbVRZWcmvvfaaU1tbax5++OHblVKxlpaWh6LRqN2wYQOi0SjlsByjY7ijsLDwy8XFxfK9733vahEJl5eXP3fiiSfKI488cl44HA6epiorK3VdXZ3281K/GwCqqalRPthQAMDMePnll887/fTT5ZJLLnmFiPDAAw9cXFJSYpctW1Yb5MNRC4xgFBcXf3nq1Kkyf/781K9//etSEclfvnz5cyeddJJccsklP+rt7Z0WFMDDGVpriMika6+99rsLFy6U888//y0R0du2bVu0aNGi3smTJ8sFF1zw5KixDqEojsfj35w/f/5yrXX7+++/P+eLX/ziFbfccsvq++67767nn39+hYiAiP57/PjxtV/60pfchQsXvgAgFQDA4DobNmwoe+yxx8Y2NjZetnv37k9qrTFlypQ7H3300XueffbZim9961v/NWPGjJ35+flt69at27Fq1aplIqIBjLIZwzXW+PHjvx2NRudt3bp1+dVXX71648aNxx922GErf/WrX30OgHz729/+5zfffPOqRCIxJRaLYd++fQiFQigqKgIRobOzE93d3Rg3bhySySRCoVBbaWlpzS233PJdAHT55Zff3dTUdHFRUdH7Tz31VPk111zzm02bNm2pr68/Z9RYwx8aAIwxNh6Px4koISIL77777iufffbZO+bMmbOzoKDghXPPPfeh2traBQBmNjY2Hv3WW28d0dDQgL1796p0Oo0jjjjCHn/88XTyySe3zJs37xUAiccff3z2woUL74hGo5cbY7B8+fJ7b7755lsdx0l//vOfjxtjRqmmQ/GskpKSb40dO3ZRY2PjmT6cFhEp+MY3vnHDtm3bvtrZ2VnQ0dGB/Pz81paWlmdO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"
 LOGO_PRINT_B64 = "iVBORw0KGgoAAAANSUhEUgAAAIYAAAB4CAIAAAC4gx2vAAArdElEQVR42u29eZRe1XUn+tv73PtNNUtVmifEJAZj4xXAxoBjOs96jbGxeW0nuLPS0DybZy/n5dl+HWd18kzyPHstzyFuY6eh4yQPkhA7dJzGgY4xbQYDjQ0CmUFIQkhIKpVKNX/DvWf/3h/n3ltflWqSRF7jt+qsWlqlr747nX329Nu/fa6QxBIG2wYAERGR9j9J28DyOIUhC4uEpJmJiKou8YwkvfequvRDlseSRGJmJJ1z4b+Tk5N79ux58sknDx48ODg4ODw83Gq1zMw5t3LlylWrVq1ateq8884766yz+vr62sWpqst6c6oiCWoR5vHgwYN333333//93+/YsaPValUqlfXr169bt663t7ezszOO44mJiaGhocHBwX379tXrdVU988wzr7zyyve9731nnXVWccJljTl5kXjvg2bcf//9t9xyy8MPP9zX13fZZZdt3779kksuWbt27QLnGhkZeeyxx+699977779/375955577k033fTe975XVdvFvDyWKpLCbz/99NO/+7u/+8QTT2zfvv0DH/jAZZddFr6wa9euhx56aMeOHUNDQ0ePHm02m0mSdHZ2rlixoru7e9u2bW9+85svvPDC8OVnnnnmO9/5zp133jkwMPC5z33uqquuCpdYlspSRRKiJlX90pe+dPPNN1999dWf+tSnzjzzTACPPvrot771rfvvv39kZGTVqlVr1qw5/fTTV61a1dnZKSITExPDw8N79+7dt2/fkSNH4jh+05vedOONNwYZHDly5FOf+tR3vvOdG2644Wtf+1oURctSWVKAZGZpmpL84Ac/WKlU/vIv/zJI6KGHHrryyisHBgauuuqqW2+99dlnn/Xec/7x0ksv3Xnnndddd93q1asvvPDCv/3bvw2fP/DAA/39/VdffXWj0fDeh8Bhecw3spiV5Cc/+clyufz444+HP/zhH/5hrVa76aabnn/++fYDvPfe+/S40f6dwcHB3/u93+vu7r7hhhvq9XqQ1qpVq6677rricstjXpGE2Xz00UcBfP/73w9K87GPfaxcLv/gBz8oxJCm6cIL3MwKUYVPHnvssYGBgWuvvTZJEpI//elPAdxxxx3LUllEJGF23v3ud19xxRVhsu66664QcZFMkuQkps/Mghh27dpVrVa//OUvh8+vv/76Cy64IE3TZdu1iOEaGxvr6+u79dZbw0q/6KKLbrzxRpKtVutUTh0O//znP79hw4apqSkzu//++6vV6rPPPrusKAsMBVCv1+v1+tatW0VkbGxsz54973jHO049vwvpyNve9rbh4eH9+/eLyJYtW5xzQ0NDy1HVQvMWchFVDcs2iqIoio4dO6aqS0QkF4jlRGR0dNR7Xy6XAQS9ieN4ed4XEYmq1uv1HTt2iEhnZ+dll112yy23FMv8VOQhIl//+te3bdu2bt06kjt37pyamipws+Ux79wNDQ1FUXTBBReEvOGpp56KougjH/lI4RJOyO4Xvp3k1772NQA//OEPgz9/xzveAeCJJ55Y9iWLuPfDhw8H+PYP/uAPwqd/93d/JyLvfe97Dx48GD4J0W1ISmyuMSsCbjQaH/3oRwH8yZ/8Sfjk29/+NoBKpfLYY48ti2QRkRw8eHDVqlUf/vCHReQLX/hCkbqfe+65fX19f/RHf7Rv376ln3FkZOTWW2/dtGnTwMDA3/zN34QP77rrLhH56Ec/umXLlgcffHBZJIuIZHBwsFKpPPzww7fffjuAD33oQ+Pj4yTr9frnPve5zZs39/T0XHXVVV/60pfuu+++l19+eXJystAGM2s0GkNDQ48//vhtt932m7/5m6tXr+7r6/vQhz50+PDhkNl8+tOfBvD7v//74+PjAwMDDz/88LJIFhdJtVr94Q9/SPLuu+/u7+/ftGnTn/3ZnxVf+v73v3/DDTecc84569evX7t27caNG88555xLLrnk0ksvPf/887ds2bJ27dq1a9du3rz53e9+97e//e3h4eFw4D333HPRRRfVarVvfvObQR37+/uXRbLwiKYxYREze+c73/ncc8/dfPPNN91002c+85nrr7/+uuuuu+aaa6655hoAR48effbZZw8cOHDs2LGxsTHvfa1WGxgYWLly5ZlnnnnaaaeFU42Ojt5222233nrrE088cc0119xxxx1bt24tYrDlkGrxiCtoyb333kuy2WwGWe3atesjH/nI6tWru7q6Lrvssk984hPf+9739uzZU3xhFhZ56NChH/3oR5/97Ge3b9/e39/f39///ve//6GHHgpfCDHYwYMHBwYGwofLWrK4loTE0DkXPMTpp5/+jW9847Of/eyPf/zje+6557777vvud787MTFRq9VWrFhRq9VCvWRycjL4kqmpqWq1unLlyosuuui3fuu33v72t/f394cqbzhtUMSC47I85hvRHFUtEedcyCS6urquvvrqq6++GsDg4ODevXtffvnlAwcOjI+PT05OqmoURT09PRs2bNi4ceOGDRs2bNjQXsMP+WYh73Dy5Uk/YZEUCFVR4ArLPNBQLr744oXP6L0Phx8PkYW0ZlkqSxVJMO5zakyxzAuzE3x1Ua5v/3dOvCR8v16vt1qtZbbK4hhXd3f3ypUrH3rooQXWbwiWVNU555yLoij8G35xzgW1mO8MwQw+8sgjzrnNmzcvz/tCIgkw7bXXXnv77bc3Go1i7b+6QV2Q6Fe/+tUrrrhizZo1y8yuRUy/mR08eLCrq+t3fud3Apz1Klb9ChTyi1/8IoCnnnoqAGLLwe7idIi//uu/BlBgXKcumIL4QvK2224DEHL4ZXksLpJimgLGdeONN05MTBSCObnaeyHRVqv18Y9/HMBXvvKVZXmcgEjC7JO877771q1bt2bNmu9+97vt2GIBzgcofpYA2sH59r/eddddZ5111ooVK773ve8ty+OERVJI5dixY7/9279dqVS2bdv2la985aWXXppTD4IM5jRur7zyyi233PLGN76xUqlcf/31ARKexfVaHvON2fFVEQvt3r37m9/85p133jkxMXHeeee95S1vufTSS88+++yBgYHu7u4omoHEjIyMHDlyZPfu3Q8++OCDDz741FNPdXZ2vutd77rpppvOO+88tLG/l8dSOcHHU1LDDE5OTj7wwAP/8A//8JOf/OTw4cPj4+NdXV1dXV29vb21Wi1UDycnJ4eHh0dHR7u6ulavXn355Zdv3779yiuvrNVqmNkasTxOUiTtyV370j506NDevXv37t27f//+oaGhsbGxQJ/o7+/fsGHD1q1bN27cuG7dujkxruXxKoikXWPCzC5xpRcY17Jm/LOIZJbetGO6xyMumNlWujz+2UWyPP6/gx2Xx7JIlseySJZFsjxOZUSvnVvJ6pXA4hHbAlHdksOV12xk+MsacYWblmUt+WcdPzk29OTUlIs8LEtxCFCmZSACU5RTf/WK9atLZQNdLpSgW6NM7xs9coTQiEYQoiKBKpClVgI1uhRnxeUrulfKskgWslkif/vS7j/ev0c6InhlnngWvziB0Cxi98TkaZddtaZUljmAA/zFvhcf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"
 COMPANY_NAME = "Touchlight Infra Services"
-APP_VERSION = "2026.11.24k"  # bump on each deploy; shown in Admin to confirm which build is live
+APP_VERSION = "2026.11.24m"  # bump on each deploy; shown in Admin to confirm which build is live
 
 
 def _secret(key: str, default=""):
@@ -1487,8 +1487,8 @@ def tab_action_bar(key: str):
         refresh_button(key)
 
 
-def refresh_button(key: str):
-    if st.button("Refresh", width="stretch", key=f"refresh_{key}"):
+def refresh_button(key: str, label: str = "Refresh"):
+    if st.button(label, width="stretch", key=f"refresh_{key}", help="Refresh"):
         # Nothing to confirm, so nothing should be carried into the
         # reloaded page — this is what flooded it with notices.
         st.session_state.pop("_carry_messages", None)
@@ -1601,6 +1601,29 @@ def render_colored_metric(label: str, value: int, red_max: int, yellow_max: int)
         <div style="font-size:1.7rem;font-weight:800;letter-spacing:-.3px;">{value}</div>
     </div>
     """, unsafe_allow_html=True)
+
+
+def render_glance_tiles(items):
+    """Small tiles in ONE row (4-up even on a phone). items = [(label, value, coloured)];
+    coloured tiles use the grand-total thresholds."""
+    cells = []
+    for label, value, coloured in items:
+        bg, fg = "var(--surface-0, #fff)", "var(--ink-900, #14181d)"
+        if coloured and isinstance(value, (int, float)):
+            if value < GRAND_TOTAL_RED_MAX:
+                bg, fg = CF_RED_BG, CF_RED_FONT
+            elif value <= GRAND_TOTAL_YELLOW_MAX:
+                bg, fg = CF_YELLOW_BG, CF_YELLOW_FONT
+            else:
+                bg, fg = CF_GREEN_BG, CF_GREEN_FONT
+        v = f"{value:,}" if isinstance(value, int) else str(value)
+        cells.append(f'<div style="background:{bg};color:{fg};border:1px solid rgba(0,0,0,.08);border-radius:12px;'
+                     f'padding:7px 9px;min-width:0;">'
+                     f'<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;'
+                     f'opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{label}</div>'
+                     f'<div style="font-size:20px;font-weight:800;line-height:1.2;white-space:nowrap;">{v}</div></div>')
+    st.markdown(f'<div style="display:grid;grid-template-columns:repeat({len(items)},minmax(0,1fr));gap:6px;'
+                f'margin:2px 0 4px;">{"".join(cells)}</div>', unsafe_allow_html=True)
 
 
 # ── CSS – Fintech-Inspired Theme (single accent, segmented tabs) ────────────
@@ -1813,6 +1836,17 @@ hr { margin: 0.9rem 0 !important; }
 .st-key-analytics_uploader section { padding: 0 !important; }
 .st-key-analytics_go button { font-weight: 800 !important; letter-spacing: .5px; }
 
+/* Style-only blocks (CSS injected with st.markdown) take no space of their
+   own but still add a flex gap each — hide them; their CSS still applies. */
+[data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"] [data-testid="stMarkdownContainer"] > style:only-child) { display: none !important; }
+
+/* Rows that must stay one line on a phone (st.container(key="row_…")):
+   Streamlit stacks columns below 640 px; these keep their ratios instead. */
+[class*="st-key-row_"] [data-testid="stHorizontalBlock"] { flex-wrap: nowrap !important; gap: 6px !important; }
+[class*="st-key-row_"] [data-testid="stColumn"] { min-width: 0 !important; width: auto !important; }
+[class*="st-key-row_"] .stButton>button, [class*="st-key-row_"] [data-testid="stPopover"] button {
+    padding-left: 4px !important; padding-right: 4px !important; white-space: nowrap; }
+
 /* ── Mobile ──────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
     .block-container { padding-left: 0.7rem !important; padding-right: 0.7rem !important; }
@@ -1836,7 +1870,8 @@ hr { margin: 0.9rem 0 !important; }
 # Banner on the left, quick search on the right — the search sits ABOVE the
 # tabs so it is reachable from every tab. This row renders on every run, so it
 # never shifts the tabs (which would reset the selected tab).
-head_l, head_search = st.columns([8, 1], vertical_alignment="center")
+with st.container(key="row_head"):
+    head_l, head_search = st.columns([8, 1.1], vertical_alignment="center")
 with head_l:
     st.markdown(f"""
 <div class="top-banner">
@@ -5232,16 +5267,6 @@ def render_daily_calendar(mkey: str):
              "danger" if missed_days else "normal"),
             ("calendar", f"{_declared}", "Holidays", "declared", "normal"),
         ])
-
-    sub_hdr("pin", f"Section-Wise On {picked}")
-    breakup = day_section_breakup(picked)
-    if breakup.empty:
-        st.info("No records for that date.")
-    else:
-        render_scroll_table(breakup)
-        download_image_button(breakup, f"Sections_{picked}.png", key="dl_img_cal_day",
-                              title=f"Section-Wise Installs — {picked}")
-
 
 
 
@@ -8919,23 +8944,26 @@ def _chart_df_bullet(rows: list, mkey: str, as_of: date, finished: bool, month_t
 
 
 def chart_bullet(df: pd.DataFrame) -> alt.Chart:
-    """Installs (bar) on the target (grey track), tick = where it should be today."""
-    y = alt.Y("Name:N", sort=alt.SortField("Order"), title=None, axis=alt.Axis(labelLimit=140))
+    """Installs (bar) on the target (grey track), tick = where it should be today.
+    Compact: thin rows, no legend (colour + the ± label say on track / behind)."""
+    y = alt.Y("Name:N", sort=alt.SortField("Order"), title=None,
+              axis=alt.Axis(labelLimit=110, ticks=False, domain=False, labelPadding=6))
     tip = [alt.Tooltip("Name:N", title="Site"), alt.Tooltip("Installs:Q", format=","),
            alt.Tooltip("Target:Q", format=","), alt.Tooltip("Tick:Q", title="Due by today", format=",.0f"),
            alt.Tooltip("Diff:Q", title="vs today", format="+,"), alt.Tooltip("Source:N", title="Target from")]
     base = alt.Chart(df)
-    xmax = float(df["End"].max() or 1) * 1.45   # room for the label at the end
-    track = base.mark_bar(color=CH_GREY, opacity=0.35, size=20, cornerRadiusEnd=3).encode(
-        x=alt.X("Target:Q", title="Installs", scale=alt.Scale(domain=[0, xmax], nice=False),
-                axis=alt.Axis(tickCount=4)), y=y, tooltip=tip)
-    bar = base.mark_bar(size=11, cornerRadiusEnd=3).encode(
+    xmax = float(df["End"].max() or 1) * 1.5   # room for the label at the end
+    track = base.mark_bar(color=CH_GREY, opacity=0.35, size=12, cornerRadiusEnd=3).encode(
+        x=alt.X("Target:Q", title=None, scale=alt.Scale(domain=[0, xmax], nice=False),
+                axis=alt.Axis(tickCount=3, grid=False, labels=False, ticks=False, domain=False)),
+        y=y, tooltip=tip)
+    bar = base.mark_bar(size=7, cornerRadiusEnd=3).encode(
         x="Installs:Q", y=y, tooltip=tip,
         color=alt.Color("Status:N", scale=alt.Scale(domain=["On track", "Behind"], range=[CH_BLUE, CH_RED]),
-                        legend=alt.Legend(title=None)))
-    tick = base.mark_tick(color="black", thickness=2, size=22).encode(x="Tick:Q", y=y, tooltip=tip)
-    txt = base.mark_text(align="left", dx=6, fontSize=CH_FONT).encode(x="End:Q", y=y, text="Label:N")
-    return _ch_cfg(alt.layer(track, bar, tick, txt), 34 * max(len(df), 1) + 105)
+                        legend=None))
+    tick = base.mark_tick(color="black", thickness=2, size=14).encode(x="Tick:Q", y=y, tooltip=tip)
+    txt = base.mark_text(align="left", dx=5, fontSize=CH_FONT - 1).encode(x="End:Q", y=y, text="Label:N")
+    return _ch_cfg(alt.layer(track, bar, tick, txt), 24 * max(len(df), 1) + 16)
 
 
 # 2. Analytics · Today at a glance — running total ----------------------------
@@ -9626,7 +9654,7 @@ with tab_dash:
                     {"Type": "3PH", "Installs": m_3ph, "Billing (Rs.)": round(billing3["total_cost"]),
                      "Billed / Install": fmt_rs(billing3["blended_per_install"] if m_3ph else None, 2),
                      "Cost / Install": fmt_rs(cost_model["cpi3"], 2)},
-                    {"Type": f"Check meters (Rs. {CHECK_METER_RATE:,.0f} extra each)", "Installs": m_cm,
+                    {"Type": "Check meters", "Installs": m_cm,
                      "Billing (Rs.)": round(m_cm * CHECK_METER_RATE),
                      "Billed / Install": fmt_rs(CHECK_METER_RATE if m_cm else None, 2),
                      "Cost / Install": ""},
@@ -9709,7 +9737,6 @@ with tab_dash:
                 _bl = _chart_df_bullet(list(zip(site_df["Site"], site_df["Total"])), mk, ov_day,
                                        not ov_current, target_for_month(mk),
                                        target_of=lambda _s: site_target_for(_s, mk))
-                show_chart(chart_bullet(_bl), key="ch_bullet_site")
                 _sup_rows = []
                 for _sr in supervisor_records():
                     if SUPERVISOR_MODE and _sr["id"] != st.session_state.get("_sup_id"):
@@ -9720,11 +9747,18 @@ with tab_dash:
                     _keys = {_loc_key(x) for x in _sr["locations"]}
                     _sup_rows.append((_sr["name"] or _sr["id"], int(site_df.loc[
                         site_df["Site"].map(_loc_key).isin(_keys), "Total"].sum()), _st))
+                # One chart at a time: Sites, or Supervisors (when any has a target).
+                _bview = "Sites"
                 if _sup_rows:
+                    _bview = st.segmented_control("Show", ["Sites", "Supervisors"], default="Sites",
+                                                  key="bullet_view", label_visibility="collapsed") or "Sites"
+                if _bview == "Supervisors":
                     _sup_t = {n_: t_ for n_, _, t_ in _sup_rows}
                     _bs = _chart_df_bullet([(n_, i_) for n_, i_, _ in _sup_rows], mk, ov_day, not ov_current,
                                            0, target_of=lambda _n: _sup_t.get(_n))
                     show_chart(chart_bullet(_bs), key="ch_bullet_sup")
+                else:
+                    show_chart(chart_bullet(_bl), key="ch_bullet_site")
                 site_df = pd.concat([site_df, pd.DataFrame([total_row])], ignore_index=True)
                 # Compact: the 1PH / 3PH / check-meter split is in Money → Costs → By Site.
                 site_df = site_df.drop(columns=["1PH", "3PH", "Check Meters"], errors="ignore")
@@ -9751,8 +9785,8 @@ with tab_dash:
         # ± transfers). The full Received/Installed/Returned split lives in Store.
         _dash_avail = site_available_stock(stock_by_location())
         if not _dash_avail.empty:
-            sec_hdr("box", "Available Stock by Site")
-            render_scroll_table(_dash_avail)
+            with st.expander(f"Available stock by site — {len(_dash_avail)} site(s)"):
+                render_scroll_table(_dash_avail)
         if pending_1ph < 0 or pending_3ph < 0:
             deficits = [t for t, v in (("1PH", pending_1ph), ("3PH", pending_3ph)) if v < 0]
             st.markdown(f'<div class="danger-box">More {" and ".join(deficits)} meters installed than received — check Inventory entries.</div>', unsafe_allow_html=True)
@@ -9820,7 +9854,6 @@ with tab_dash:
             m3.metric("Grand Total", sum_1ph + sum_3ph)
 
             if not filtered.empty:
-                sec_hdr("users", "Technician Breakdown")
                 group_df = filtered.groupby(["tech_name", "location"])[["qty_1ph", "qty_3ph"]].sum().reset_index()
                 group_df["Total"] = group_df["qty_1ph"] + group_df["qty_3ph"]
                 # Same rule as the filters: no card for a technician/location with
@@ -9832,13 +9865,13 @@ with tab_dash:
                 for _qc in ["1PH", "3PH", "Total"]:
                     group_df[_qc] = group_df[_qc].astype(int)
                 group_df = group_df.sort_values("Total", ascending=False)
-                st.caption(f"{len(group_df)} technician(s) · sorted by total")
-                render_scroll_table(group_df)
-                download_image_button(
-                    group_df, "Technician_Breakdown.png", key="dl_img_group_df",
-                    color_grid=build_single_col_color_grid(group_df, "Total", lambda v: tier_colors(v, INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)),
-                    title="Technician Breakdown",
-                )
+                with st.expander(f"Technician breakdown — {len(group_df)} technician(s)"):
+                    render_scroll_table(group_df)
+                    download_image_button(
+                        group_df, "Technician_Breakdown.png", key="dl_img_group_df",
+                        color_grid=build_single_col_color_grid(group_df, "Total", lambda v: tier_colors(v, INSTALLER_TOTAL_RED_MAX, INSTALLER_TOTAL_YELLOW_MIN, INSTALLER_TOTAL_YELLOW_MAX)),
+                        title="Technician Breakdown",
+                    )
 
                 sec_hdr("download", "Export & Share")
                 export_df = group_df.copy()
@@ -10131,18 +10164,19 @@ with tab_analytics:
         if SUPERVISOR_MODE:
             tab_action_bar("analytics")
         else:
-            # One compact row: Refresh · upload · GO.
+            # One row, even on a phone: ↻ · upload · GO.
             st.markdown("""<style>
                 .st-key-analytics_uploader [data-testid="stFileUploaderDropzone"] {
-                    padding: 2px 6px; min-height: 0; height: 44px; align-items: center; justify-content: flex-start; }
+                    padding: 2px 6px; min-height: 0; height: 42px; align-items: center; justify-content: flex-start; }
                 .st-key-analytics_uploader [data-testid="stFileUploaderDropzone"] button {
                     min-height: 34px; padding: 0 12px; }
                 .st-key-analytics_uploader [data-testid="stFileUploaderDropzoneInstructions"] { display: none; }
                 .st-key-analytics_uploader section { padding: 0; }
             </style>""", unsafe_allow_html=True)
-            rf_col, up_col, go_col, _ = st.columns([1.5, 3.2, 1, 2.5], vertical_alignment="top")
+            with st.container(key="row_an_top"):
+                rf_col, up_col, go_col = st.columns([1, 4.2, 1.3], vertical_alignment="top")
             with rf_col:
-                refresh_button("analytics")
+                refresh_button("analytics", label="↻")
         if ANALYTICS_REFRESH_ON:     # interval is set in Admin
             _analytics_timers()
         else:
@@ -10195,8 +10229,6 @@ with tab_analytics:
                 if sync_analytics_to_log()["added"] > 0:
                     st.rerun()
 
-        # ── Build analytics tables from stored raw data ─────────────────────────
-        st.divider()
         # Each install counted once: copies of the same consumer on the same
         # day (saved again under a new time) are left out.
         df_araw = analytics_counted(get_data("AnalyticsRaw"))
@@ -10206,165 +10238,82 @@ with tab_analytics:
         else:
             avail_dates = sorted(df_araw["date"].unique(), reverse=True)
 
-            # Display order is glance -> "work until" -> date/supervisor, but the
-            # logic needs the reverse: the pickers decide which installs the glance
-            # counts. So reserve the three spots in display order now, and fill
-            # them below in the order the logic needs.
-            sec_hdr("target", "Today At A Glance")
-            glance_slot = st.container()
-            until_slot = st.container()
-            picker_slot = st.container()
+            # -- Filters: date and site always in view; supervisor and the
+            # forecast's end time under "More" (one row, even on a phone).
+            with st.container(key="row_an_filt"):
+                fc1, fc2, fc3 = st.columns([1.2, 1.65, 1.05], vertical_alignment="top")
+            with fc1:
+                sel_date = st.selectbox("Viewing date", avail_dates, index=0, label_visibility="collapsed",
+                                        format_func=lambda d: pd.to_datetime(d).strftime("%d %b"))
+            day_df = df_araw[df_araw["date"] == sel_date].copy()
+            day_df["hour_int"] = pd.to_numeric(day_df["hour"], errors="coerce")
+            day_df["supervisor"] = day_df["installer_id"].apply(supervisor_of)
+            # Site = the Section on each uploaded record, so a technician helping
+            # another site is counted where the work was actually done.
+            day_df["site"] = (day_df["location"].astype(str).str.strip().replace("", "Unspecified")
+                              if "location" in day_df.columns else "Unspecified")
+            day_df["phase"] = (meter_phases(day_df["meter_type"])
+                               if "meter_type" in day_df.columns else "")
 
-            with picker_slot:
-                vc1, vc2, vc3 = st.columns(3)
-                with vc1:
-                    sel_date = st.selectbox("Viewing date", avail_dates, index=0)
-                day_df = df_araw[df_araw["date"] == sel_date].copy()
-                day_df["hour_int"] = pd.to_numeric(day_df["hour"], errors="coerce")
-                day_df["supervisor"] = day_df["installer_id"].apply(supervisor_of)
-                # Site = the Section on each uploaded record, so a technician helping
-                # another site is counted where the work was actually done.
-                day_df["site"] = (day_df["location"].astype(str).str.strip().replace("", "Unspecified")
-                                  if "location" in day_df.columns else "Unspecified")
-                day_df["phase"] = (meter_phases(day_df["meter_type"])
-                                   if "meter_type" in day_df.columns else "")
+            # Unscoped copy for the Installs push, taken BEFORE any filter: the
+            # site and supervisor filters are VIEW choices and must never decide
+            # which installs get recorded.
+            day_df_all = day_df.copy()
 
-                # Unscoped copy for the Installs push, taken BEFORE any filter: the
-                # site and supervisor filters are VIEW choices and must never decide
-                # which installs get recorded.
-                day_df_all = day_df.copy()
+            sites_today = sorted(day_df["site"].unique())
+            with fc2:
+                sel_site = st.selectbox("Site", ["All sites"] + sites_today, key="analytics_site",
+                                        label_visibility="collapsed")
+            if sel_site != "All sites":
+                day_df = day_df[day_df["site"] == sel_site]
 
-                # Site first, then the supervisors who worked at that site, so a
-                # supervisor with no installs there can't be picked.
-                sites_today = sorted(day_df["site"].unique())
-                with vc2:
-                    sel_site = st.selectbox("Site", ["All sites"] + sites_today, key="analytics_site")
-                if sel_site != "All sites":
-                    day_df = day_df[day_df["site"] == sel_site]
-
-                sups_today = sorted(day_df["supervisor"].unique())
-                # A supervisor sees their own team: the installers assigned to
-                # their ID (Admin → Technicians). Admin can pick any.
-                _my_sup = current_user_name() if SUPERVISOR_MODE else None
-                _sup_opts = ([_my_sup] if _my_sup in sups_today else []) if SUPERVISOR_MODE \
-                    else ["All supervisors"] + sups_today
-                with vc3:
-                    # Keyed on the site: the list changes with it, and a supervisor
-                    # chosen for one site may not exist in another.
-                    if SUPERVISOR_MODE and not _sup_opts:
-                        # No installs by their own team that day: show their sites.
-                        sel_supervisor = "All supervisors"
-                        st.selectbox("Supervisor", ["All teams at your sites"], disabled=True,
-                                     key=f"analytics_supervisor_none_{sel_site}")
-                    else:
-                        sel_supervisor = st.selectbox("Supervisor", _sup_opts, key=f"analytics_supervisor_{sel_site}",
-                                                      disabled=SUPERVISOR_MODE)
-                if sel_supervisor != "All supervisors":
-                    day_df = day_df[day_df["supervisor"] == sel_supervisor]
-
-                # (No empty-guard needed: sups_today is derived from day_df itself, so
-                # selecting any listed supervisor always leaves at least one record.)
-                installers = sorted(day_df["installer_id"].unique())
-                if not SUPERVISOR_MODE and UNASSIGNED_SUPERVISOR in sups_today and sel_supervisor == "All supervisors":
-                    unassigned_ids = sorted(day_df.loc[day_df["supervisor"] == UNASSIGNED_SUPERVISOR, "installer_id"].unique())
-                    st.caption(f"⚠️ Not mapped to a supervisor: {', '.join(unassigned_ids)} — set their Supervisor in Admin → Technicians.")
-
-            with until_slot:
+            sups_today = sorted(day_df["supervisor"].unique())
+            # A supervisor sees their own team: the installers assigned to
+            # their ID (Admin → Technicians). Admin can pick any.
+            _my_sup = current_user_name() if SUPERVISOR_MODE else None
+            _sup_opts = ([_my_sup] if _my_sup in sups_today else []) if SUPERVISOR_MODE \
+                else ["All supervisors"] + sups_today
+            with fc3:
+                _more = st.popover("More", width="stretch")
+            with _more:
+                # Keyed on the site: the list changes with it, and a supervisor
+                # chosen for one site may not exist in another.
+                if SUPERVISOR_MODE and not _sup_opts:
+                    # No installs by their own team that day: show their sites.
+                    sel_supervisor = "All supervisors"
+                    st.selectbox("Supervisor", ["All teams at your sites"], disabled=True,
+                                 key=f"analytics_supervisor_none_{sel_site}")
+                else:
+                    sel_supervisor = st.selectbox("Supervisor", _sup_opts, key=f"analytics_supervisor_{sel_site}",
+                                                  disabled=SUPERVISOR_MODE)
                 day_end_choice = st.selectbox(
                     "Assume work continues until", ["17:00", "18:00", "19:00", "20:00", "21:00"],
                     index=1, key="forecast_day_end",
-                    help="Used only for the forecast. If installs are still coming in past this time, the forecast extends automatically.",
-                )
+                    help="Used only for the forecast. If installs are still coming in past this time, "
+                         "the forecast extends automatically.")
+            if sel_supervisor != "All supervisors":
+                day_df = day_df[day_df["supervisor"] == sel_supervisor]
+                if not SUPERVISOR_MODE:
+                    st.caption(f"Supervisor: {sel_supervisor}")
+
+            # (No empty-guard needed: sups_today is derived from day_df itself, so
+            # selecting any listed supervisor always leaves at least one record.)
+            installers = sorted(day_df["installer_id"].unique())
+            if not SUPERVISOR_MODE and UNASSIGNED_SUPERVISOR in sups_today and sel_supervisor == "All supervisors":
+                unassigned_ids = sorted(day_df.loc[day_df["supervisor"] == UNASSIGNED_SUPERVISOR, "installer_id"].unique())
+                st.caption(f"⚠️ Not mapped to a supervisor: {', '.join(unassigned_ids)} — set their Supervisor in Admin → Technicians.")
+
             forecast_total, rate_per_hour, effective_end = (
                 forecast_total_installs(day_df, installers, f"{day_end_choice}:00")
                 if installers else (None, 0.0, f"{day_end_choice}:00")
             )
-            with glance_slot:
-                g1, g2, g3, g4 = st.columns(4)
-                with g1:
-                    render_colored_metric("Total Installs", len(day_df), GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
-                g2.metric("Active Installers", len(installers))
-                g3.metric("Avg / Installer", round(len(day_df) / len(installers), 1) if installers else 0)
-                with g4:
-                    if forecast_total is not None:
-                        render_colored_metric("Forecasted Total", forecast_total, GRAND_TOTAL_RED_MAX, GRAND_TOTAL_YELLOW_MAX)
-                    else:
-                        st.metric("Forecasted Total", "—")
-                _p = day_df["phase"] if "phase" in day_df.columns else pd.Series(dtype=str)
-                render_stat_tiles([
-                    ("bolt", f"{int((_p == '1PH').sum()):,}", "1PH", "installs", "normal"),
-                    ("bolt", f"{int((_p == '3PH').sum()):,}", "3PH", "installs", "normal"),
-                    ("pin", f"{day_df['site'].nunique() if 'site' in day_df.columns else 0}", "Sites", "working", "normal"),
-                ])
-                _run = _chart_df_running(day_df, forecast_total, effective_end) if installers else pd.DataFrame()
-                if not _run.empty:
-                    show_chart(chart_running(_run, _chart_df_running_refs(len(installers), forecast_total)),
-                               key="ch_running")
-                if forecast_total is None:
-                    st.caption("Not enough data yet to project.")
-
-                # -- Analytics vs the install log (what the calendar counts) ------
-                # Analytics only knows what was uploaded here; an MDMS "Download"
-                # holds just the latest 100 rows per site, so installs from earlier
-                # in the day can reach the install log (via a full file uploaded in
-                # Installs) without ever reaching Analytics. Say so, and offer to
-                # copy them across, so both show the same day.
-                _log = install_log_prepared()
-                # Admin-only: a supervisor can't act on it, and it would mix in
-                # the count of a whole-log repair.
-                if not SUPERVISOR_MODE and not _log.empty and has_col(_log, "date", "key"):
-                    _log_day = _log[_log["date"].astype(str) == str(sel_date)]
-                    _a_keys = set(day_df_all["key"]) if "key" in day_df_all.columns else set()
-                    _l_keys = set(_log_day["key"])
-                    # The same install recorded twice (two copies of the app pushing
-                    # at once) — the calendar counts rows, so these inflate it.
-                    _dupkeys = int(_log_day["key"].duplicated().sum())
-                    _dup_all = int(_log["key"].duplicated().sum())
-                    _missing = _log_day[~_log_day["key"].isin(_a_keys)]
-                    _unpushed = len(_a_keys - _l_keys)
-                    # The same consumer recorded twice in the log (different times)
-                    # would be a real double count in installs and billing.
-                    _dups = 0
-                    if "sno" in _log_day.columns:
-                        _sn = _log_day["sno"].astype(str).str.strip()
-                        _sn = _sn[(_sn != "") & (_sn.str.lower() != "nan")]
-                        _dups = int(_sn.duplicated().sum())
-                    if len(_missing) or _unpushed or _dups or _dupkeys or _dup_all:
-                        _bits = [f"Install log (calendar): <b>{len(_log_day):,}</b> · Analytics: <b>{len(_a_keys):,}</b>."]
-                        if _dupkeys:
-                            _bits.append(f"<b>{_dupkeys:,} install(s) are recorded twice</b> in the install log for this day "
-                                         "— the same date, time and installer saved again.")
-                        if len(_missing):
-                            _bits.append(f"{len(_missing):,} install(s) are in the install log but not in Analytics "
-                                         "— usually earlier ones beyond the latest 100 rows an MDMS Download holds.")
-                        if _unpushed:
-                            _bits.append(f"{_unpushed:,} Analytics record(s) aren't in the install log yet "
-                                         "— they are recorded automatically (or are waiting for review under Install Log).")
-                        if _dups and _dups > _dupkeys:
-                            _bits.append(f"<b>{_dups - _dupkeys} consumer number(s) appear twice</b> with different times "
-                                         "— check them in Admin → Duplicate check.")
-                        st.markdown('<div class="warn-box">' + " ".join(_bits) + '</div>', unsafe_allow_html=True)
-                        if _dup_all:
-                            st.caption(f"{_dup_all:,} duplicate record(s) in the install log — fix them in "
-                                       "Admin → Data Maintenance → Duplicate check.")
-                        if len(_missing) and st.button(f"Sync {len(_missing):,} install(s) from the install log into Analytics",
-                                                       width="stretch", key=f"analytics_sync_{sel_date}"):
-                            _cols = ["key", "date", "time", "installer_id", "hour", "location", "meter_type",
-                                     "sno", "old_meter_no", "new_meter_no", "lat", "long", "change_slip", "check_meter"]
-                            _rows = []
-                            for _, r in _missing.iterrows():
-                                _t = str(r.get("time", ""))
-                                _rows.append({c: ("" if pd.isna(r.get(c, "")) else str(r.get(c, ""))) for c in _cols
-                                              if c != "hour"} | {"hour": _t.split(":")[0] if _t else ""})
-                            _ex = get_data_fresh("AnalyticsRaw")
-                            _cols_all = list(_ex.columns) if not _ex.empty else _cols
-                            for c in _cols:
-                                if c not in _cols_all:
-                                    _cols_all.append(c)
-                            if append_rows("AnalyticsRaw", _rows, _cols_all) or safe_update(
-                                    "AnalyticsRaw", pd.concat([_ex, pd.DataFrame(_rows)], ignore_index=True)):
-                                st.success(f"✅ Added {len(_rows):,} install(s) to Analytics for {sel_date}.")
-                                st.rerun()
+            # -- Today at a glance: four small tiles in one row ------------------
+            render_glance_tiles([
+                ("Installs", len(day_df), True),
+                ("Installers", len(installers), False),
+                ("Avg", round(len(day_df) / len(installers), 1) if installers else 0, False),
+                ("Forecast", forecast_total if forecast_total is not None else "—", forecast_total is not None),
+            ])
 
             # -- Hourly table --------------------------------------------------
             # One header for every Analytics image export — the same figures as the
@@ -10445,6 +10394,90 @@ with tab_analytics:
 
             # One table for the scope chosen above (Site / Supervisor pickers).
             _render_hourly_block(day_df, _scope_txt, "single")
+
+            # Then one per site (when the scope covers more than one), each with
+            # its own image to share with that site's team.
+            if has_col(day_df, "location"):
+                _site_of = day_df["location"].astype(str).str.strip().replace("", "Unspecified")
+                _sites_hr = _site_of.value_counts()
+                if len(_sites_hr) > 1:
+                    for _i, (_sn, _cnt) in enumerate(_sites_hr.items()):
+                        _sdf = day_df[_site_of == _sn]
+                        with st.expander(f"{_sn} — {_cnt:,} installs · {_sdf['installer_id'].nunique()} installer(s)"):
+                            _render_hourly_block(_sdf, f"Site: {_sn}", f"site_{_i}")
+
+            # -- Running total (after the tables) and install-log checks ---------
+            sub_hdr("chart", "Running total")
+            _run = _chart_df_running(day_df, forecast_total, effective_end) if installers else pd.DataFrame()
+            if not _run.empty:
+                show_chart(chart_running(_run, _chart_df_running_refs(len(installers), forecast_total)),
+                           key="ch_running")
+            if forecast_total is None:
+                st.caption("Not enough data yet to project.")
+
+            # -- Analytics vs the install log (what the calendar counts) ------
+            # Analytics only knows what was uploaded here; an MDMS "Download"
+            # holds just the latest 100 rows per site, so installs from earlier
+            # in the day can reach the install log (via a full file uploaded in
+            # Installs) without ever reaching Analytics. Say so, and offer to
+            # copy them across, so both show the same day.
+            _log = install_log_prepared()
+            # Admin-only: a supervisor can't act on it, and it would mix in
+            # the count of a whole-log repair.
+            if not SUPERVISOR_MODE and not _log.empty and has_col(_log, "date", "key"):
+                _log_day = _log[_log["date"].astype(str) == str(sel_date)]
+                _a_keys = set(day_df_all["key"]) if "key" in day_df_all.columns else set()
+                _l_keys = set(_log_day["key"])
+                # The same install recorded twice (two copies of the app pushing
+                # at once) — the calendar counts rows, so these inflate it.
+                _dupkeys = int(_log_day["key"].duplicated().sum())
+                _dup_all = int(_log["key"].duplicated().sum())
+                _missing = _log_day[~_log_day["key"].isin(_a_keys)]
+                _unpushed = len(_a_keys - _l_keys)
+                # The same consumer recorded twice in the log (different times)
+                # would be a real double count in installs and billing.
+                _dups = 0
+                if "sno" in _log_day.columns:
+                    _sn = _log_day["sno"].astype(str).str.strip()
+                    _sn = _sn[(_sn != "") & (_sn.str.lower() != "nan")]
+                    _dups = int(_sn.duplicated().sum())
+                if len(_missing) or _unpushed or _dups or _dupkeys or _dup_all:
+                    _bits = [f"Install log (calendar): <b>{len(_log_day):,}</b> · Analytics: <b>{len(_a_keys):,}</b>."]
+                    if _dupkeys:
+                        _bits.append(f"<b>{_dupkeys:,} install(s) are recorded twice</b> in the install log for this day "
+                                     "— the same date, time and installer saved again.")
+                    if len(_missing):
+                        _bits.append(f"{len(_missing):,} install(s) are in the install log but not in Analytics "
+                                     "— usually earlier ones beyond the latest 100 rows an MDMS Download holds.")
+                    if _unpushed:
+                        _bits.append(f"{_unpushed:,} Analytics record(s) aren't in the install log yet "
+                                     "— they are recorded automatically (or are waiting for review under Install Log).")
+                    if _dups and _dups > _dupkeys:
+                        _bits.append(f"<b>{_dups - _dupkeys} consumer number(s) appear twice</b> with different times "
+                                     "— check them in Admin → Duplicate check.")
+                    st.markdown('<div class="warn-box">' + " ".join(_bits) + '</div>', unsafe_allow_html=True)
+                    if _dup_all:
+                        st.caption(f"{_dup_all:,} duplicate record(s) in the install log — fix them in "
+                                   "Admin → Data Maintenance → Duplicate check.")
+                    if len(_missing) and st.button(f"Sync {len(_missing):,} install(s) from the install log into Analytics",
+                                                   width="stretch", key=f"analytics_sync_{sel_date}"):
+                        _cols = ["key", "date", "time", "installer_id", "hour", "location", "meter_type",
+                                 "sno", "old_meter_no", "new_meter_no", "lat", "long", "change_slip", "check_meter"]
+                        _rows = []
+                        for _, r in _missing.iterrows():
+                            _t = str(r.get("time", ""))
+                            _rows.append({c: ("" if pd.isna(r.get(c, "")) else str(r.get(c, ""))) for c in _cols
+                                          if c != "hour"} | {"hour": _t.split(":")[0] if _t else ""})
+                        _ex = get_data_fresh("AnalyticsRaw")
+                        _cols_all = list(_ex.columns) if not _ex.empty else _cols
+                        for c in _cols:
+                            if c not in _cols_all:
+                                _cols_all.append(c)
+                        if append_rows("AnalyticsRaw", _rows, _cols_all) or safe_update(
+                                "AnalyticsRaw", pd.concat([_ex, pd.DataFrame(_rows)], ignore_index=True)):
+                            st.success(f"✅ Added {len(_rows):,} install(s) to Analytics for {sel_date}.")
+                            st.rerun()
+
 
 
             # -- Section-wise summary (combines every section's uploaded file for this date) --
