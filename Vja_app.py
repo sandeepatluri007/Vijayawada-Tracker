@@ -230,7 +230,7 @@ def replay_carried_messages():
 LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAGsAAABgCAYAAAAaeIzPAAAs90lEQVR42u19eXxcxZXud07V7VWr5QXvxixmsdnkBQzEMgaDE7OEQWLmQUKA4AwkwJCQhVVSmBBmAnmByUYCA0mGQCSYQAKBYPKTgknCYoHBLPJuvMm2rH3r5Vad98e9t7slS7ZkyHvJPBW/Nm139+3uOnXO+c53vqoGDjJEhBYtWqQBaAx/6EWLFunKykrG6PjYBg31QE1NjaqoqDCZJxLBWstbt24d/+STT4497rjjPtnU1CREROFwOP3MM888dfPNN6fmz5/fxcw9IpJ5aWVlpaqqqjJEJKNT/jEaq7Kykqurqy0AFBQUYPXq1QWPPPLIlxobG8/at2/fCbFYbFwqlUJeXh6YOTAiUqkUjDEQkZSIrJo8efLTl1xyyW8qKiq2JRKJQRfA6PgIxqqsrNTV1dVuQUEBfvzjH19SV1d3+6ZNm453HEdPmTKlcdy4cb8sKytbv3Dhwrfz8/PzAOQBsAB6e3t7JzY0NOS9+eabJ27evHn52rVrpyul8iKRyJ8uvfTSX15++eU/I6Ke8vJyVVtbO2qwj2gsBmAbGhqOvP32278XDoc/NXbs2M1Lly69s7y8/NW1a9eOv/POO482xly+adOm8LHHHntmJBIBAHR0dPStW7fu9eOPP96Nx+Mv3XjjjW/Pmzfv7eeee+6Empqab3Z2ds4jonW33HLLVfPnz//zokWL9B//+Ed3dPoPwViVlZV8zz332EceeeSa73znO/dOmDAhffvtt994+umnP3/XXXfdtHLlys9Fo9EpRJSeMGHCxjlz5tCWLVseI6K9SiluampS1trDS0pKPrV+/fqxjuOMBdA7e/bsf/vud7/7w3Xr1i352te+dndra+vMpUuX/sOdd97536MedgijsrJSA8BTTz11zic/+Un54he/+HpJSQmeeuqpU5cuXdp6/vnny0033fTEq6++epGIFEUiEYRCoUGvFYlEICLqrbfeOv2666770QUXXCBnnnlm509/+tPzRERfd911vznhhBPkvvvu+zQRYRQtHoJ3iciYM888c2dFRcWbIhK57bbbzj711FPlnHPO+XVfX98RzP3mlAGwD80zNx/a8wDYf8Lll1/+wpIlS+QXv/jFjVprXHTRRa8sWbIkJSL5QWkwaoIRjNtuu+3apUuXyiuvvDJXRPIuuOACe+65576Un5+fqZtqamrUcCZWREhEuLy8POT/fer111//2rJlyxKbNm2asGrVqpmzZ8/uuvXWW78NAH4NNzqGOwoKCu5cvnz53vz8fNx1111Xnn322fLOO++UAsCDDz7oHOp1a2pqQgCwY8eOWQsWLEh//etfv5aZsXz58qZly5bVExFGWGz/fz0YABzHiWzYsGFdV1eX+vDDDwu11mbOnDm7y8vL1YoVKw4ZBLz33ntueXm5mjx58sZkMpnSWs82xnBJSYlqb2/v9Y01OkZirI6Ojq6JEyeekpeXZ84666y/dHd3q6qqqstqa2sNER0SbVRZWcmvvfaaU1tbax5++OHblVKxlpaWh6LRqN2wYQOi0SjlsByjY7ijsLDwy8XFxfK9733vahEJl5eXP3fiiSfKI488cl44HA6epiorK3VdXZ3281K/GwCqqalRPthQAMDMePnll887/fTT5ZJLLnmFiPDAAw9cXFJSYpctW1Yb5MNRC4xgFBcXf3nq1Kkyf/781K9//etSEclfvnz5cyeddJJccsklP+rt7Z0WFMDDGVpriMika6+99rsLFy6U888//y0R0du2bVu0aNGi3smTJ8sFF1zw5KixDqEojsfj35w/f/5yrXX7+++/P+eLX/ziFbfccsvq++67767nn39+hYiAiP57/PjxtV/60pfchQsXvgAgFQDA4DobNmwoe+yxx8Y2NjZetnv37k9qrTFlypQ7H3300XueffbZim9961v/NWPGjJ35+flt69at27Fq1aplIqIBjLIZwzXW+PHjvx2NRudt3bp1+dVXX71648aNxx922GErf/WrX30OgHz729/+5zfffPOqRCIxJRaLYd++fQiFQigqKgIRobOzE93d3Rg3bhySySRCoVBbaWlpzS233PJdAHT55Zff3dTUdHFRUdH7Tz31VPk111zzm02bNm2pr68/Z9RYwx8aAIwxNh6Px4koISIL77777iufffbZO+bMmbOzoKDghXPPPfeh2traBQBmNjY2Hv3WW28d0dDQgL1796p0Oo0jjjjCHn/88XTyySe3zJs37xUAiccff3z2woUL74hGo5cbY7B8+fJ7b7755lsdx0l//vOfjxtjRqmmQ/GskpKSb40dO3ZRY2PjmT6cFhEp+MY3vnHDtm3bvtrZ2VnQ0dGB/Pz81paWlmdO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"
 LOGO_PRINT_B64 = "iVBORw0KGgoAAAANSUhEUgAAAIYAAAB4CAIAAAC4gx2vAAArdElEQVR42u29eZRe1XUn+tv73PtNNUtVmifEJAZj4xXAxoBjOs96jbGxeW0nuLPS0DybZy/n5dl+HWd18kzyPHstzyFuY6eh4yQPkhA7dJzGgY4xbQYDjQ0CmUFIQkhIKpVKNX/DvWf/3h/n3ltflWqSRF7jt+qsWlqlr747nX329Nu/fa6QxBIG2wYAERGR9j9J28DyOIUhC4uEpJmJiKou8YwkvfequvRDlseSRGJmJJ1z4b+Tk5N79ux58sknDx48ODg4ODw83Gq1zMw5t3LlylWrVq1ateq8884766yz+vr62sWpqst6c6oiCWoR5vHgwYN333333//93+/YsaPValUqlfXr169bt663t7ezszOO44mJiaGhocHBwX379tXrdVU988wzr7zyyve9731nnXVWccJljTl5kXjvg2bcf//9t9xyy8MPP9zX13fZZZdt3779kksuWbt27QLnGhkZeeyxx+699977779/375955577k033fTe975XVdvFvDyWKpLCbz/99NO/+7u/+8QTT2zfvv0DH/jAZZddFr6wa9euhx56aMeOHUNDQ0ePHm02m0mSdHZ2rlixoru7e9u2bW9+85svvPDC8OVnnnnmO9/5zp133jkwMPC5z33uqquuCpdYlspSRRKiJlX90pe+dPPNN1999dWf+tSnzjzzTACPPvrot771rfvvv39kZGTVqlVr1qw5/fTTV61a1dnZKSITExPDw8N79+7dt2/fkSNH4jh+05vedOONNwYZHDly5FOf+tR3vvOdG2644Wtf+1oURctSWVKAZGZpmpL84Ac/WKlU/vIv/zJI6KGHHrryyisHBgauuuqqW2+99dlnn/Xec/7x0ksv3Xnnndddd93q1asvvPDCv/3bvw2fP/DAA/39/VdffXWj0fDeh8Bhecw3spiV5Cc/+clyufz444+HP/zhH/5hrVa76aabnn/++fYDvPfe+/S40f6dwcHB3/u93+vu7r7hhhvq9XqQ1qpVq6677rricstjXpGE2Xz00UcBfP/73w9K87GPfaxcLv/gBz8oxJCm6cIL3MwKUYVPHnvssYGBgWuvvTZJEpI//elPAdxxxx3LUllEJGF23v3ud19xxRVhsu66664QcZFMkuQkps/Mghh27dpVrVa//OUvh8+vv/76Cy64IE3TZdu1iOEaGxvr6+u79dZbw0q/6KKLbrzxRpKtVutUTh0O//znP79hw4apqSkzu//++6vV6rPPPrusKAsMBVCv1+v1+tatW0VkbGxsz54973jHO049vwvpyNve9rbh4eH9+/eLyJYtW5xzQ0NDy1HVQvMWchFVDcs2iqIoio4dO6aqS0QkF4jlRGR0dNR7Xy6XAQS9ieN4ed4XEYmq1uv1HTt2iEhnZ+dll112yy23FMv8VOQhIl//+te3bdu2bt06kjt37pyamipws+Ux79wNDQ1FUXTBBReEvOGpp56KougjH/lI4RJOyO4Xvp3k1772NQA//OEPgz9/xzveAeCJJ55Y9iWLuPfDhw8H+PYP/uAPwqd/93d/JyLvfe97Dx48GD4J0W1ISmyuMSsCbjQaH/3oRwH8yZ/8Sfjk29/+NoBKpfLYY48ti2QRkRw8eHDVqlUf/vCHReQLX/hCkbqfe+65fX19f/RHf7Rv376ln3FkZOTWW2/dtGnTwMDA3/zN34QP77rrLhH56Ec/umXLlgcffHBZJIuIZHBwsFKpPPzww7fffjuAD33oQ+Pj4yTr9frnPve5zZs39/T0XHXVVV/60pfuu+++l19+eXJystAGM2s0GkNDQ48//vhtt932m7/5m6tXr+7r6/vQhz50+PDhkNl8+tOfBvD7v//74+PjAwMDDz/88LJIFhdJtVr94Q9/SPLuu+/u7+/ftGnTn/3ZnxVf+v73v3/DDTecc84569evX7t27caNG88555xLLrnk0ksvPf/887ds2bJ27dq1a9du3rz53e9+97e//e3h4eFw4D333HPRRRfVarVvfvObQR37+/uXRbLwiKYxYREze+c73/ncc8/dfPPNN91002c+85nrr7/+uuuuu+aaa6655hoAR48effbZZw8cOHDs2LGxsTHvfa1WGxgYWLly5ZlnnnnaaaeFU42Ojt5222233nrrE088cc0119xxxx1bt24tYrDlkGrxiCtoyb333kuy2WwGWe3atesjH/nI6tWru7q6Lrvssk984hPf+9739uzZU3xhFhZ56NChH/3oR5/97Ge3b9/e39/f39///ve//6GHHgpfCDHYwYMHBwYGwofLWrK4loTE0DkXPMTpp5/+jW9847Of/eyPf/zje+6557777vvud787MTFRq9VWrFhRq9VCvWRycjL4kqmpqWq1unLlyosuuui3fuu33v72t/f394cqbzhtUMSC47I85hvRHFUtEedcyCS6urquvvrqq6++GsDg4ODevXtffvnlAwcOjI+PT05OqmoURT09PRs2bNi4ceOGDRs2bNjQXsMP+WYh73Dy5Uk/YZEUCFVR4ArLPNBQLr744oXP6L0Phx8PkYW0ZlkqSxVJMO5zakyxzAuzE3x1Ua5v/3dOvCR8v16vt1qtZbbK4hhXd3f3ypUrH3rooQXWbwiWVNU555yLoij8G35xzgW1mO8MwQw+8sgjzrnNmzcvz/tCIgkw7bXXXnv77bc3Go1i7b+6QV2Q6Fe/+tUrrrhizZo1y8yuRUy/mR08eLCrq+t3fud3Apz1Klb9ChTyi1/8IoCnnnoqAGLLwe7idIi//uu/BlBgXKcumIL4QvK2224DEHL4ZXksLpJimgLGdeONN05MTBSCObnaeyHRVqv18Y9/HMBXvvKVZXmcgEjC7JO877771q1bt2bNmu9+97vt2GIBzgcofpYA2sH59r/eddddZ5111ooVK773ve8ty+OERVJI5dixY7/9279dqVS2bdv2la985aWXXppTD4IM5jRur7zyyi233PLGN76xUqlcf/31ARKexfVaHvON2fFVEQvt3r37m9/85p133jkxMXHeeee95S1vufTSS88+++yBgYHu7u4omoHEjIyMHDlyZPfu3Q8++OCDDz741FNPdXZ2vutd77rpppvOO+88tLG/l8dSOcHHU1LDDE5OTj7wwAP/8A//8JOf/OTw4cPj4+NdXV1dXV29vb21Wi1UDycnJ4eHh0dHR7u6ulavXn355Zdv3779yiuvrNVqmNkasTxOUiTtyV370j506NDevXv37t27f//+oaGhsbGxQJ/o7+/fsGHD1q1bN27cuG7dujkxruXxKoikXWPCzC5xpRcY17Jm/LOIZJbetGO6xyMumNlWujz+2UWyPP6/gx2Xx7JIlseySJZFsjxOZUSvnVvJ6pXA4hHbAlHdksOV12xk+MsacYWblmUt+WcdPzk29OTUlIs8LEtxCFCmZSACU5RTf/WK9atLZQNdLpSgW6NM7xs9coTQiEYQoiKBKpClVgI1uhRnxeUrulfKskgWslkif/vS7j/ev0c6InhlnngWvziB0Cxi98TkaZddtaZUljmAA/zFvhcf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"
 COMPANY_NAME = "Touchlight Infra Services"
-APP_VERSION = "2026.11.24j"  # bump on each deploy; shown in Admin to confirm which build is live
+APP_VERSION = "2026.11.24k"  # bump on each deploy; shown in Admin to confirm which build is live
 
 
 def _secret(key: str, default=""):
@@ -5266,9 +5266,9 @@ RATE_3PH_OLD = float(get_setting("price_3ph_old", RATE_3PH_OLD))
 # earns this much MORE per check meter, whatever its type. Billed on the same
 # invoice; in profit sharing it is part of the Additional amount.
 CHECK_METER_RATE = float(get_setting("check_meter_rate", 50.0))
-RETENTION_PCT = 0.15                  # held 90 days on the old base amount
-GST_PCT = 0.09
-PRIMARY_SPLIT = 0.50                  # Sandeep's share of the Sandeep+Raghu pool
+RETENTION_PCT = float(get_setting("retention_pct", 0.15))   # held 90 days on the old base amount
+GST_PCT = float(get_setting("gst_pct", 0.09))                # GST kept as profit (ITC)
+PRIMARY_SPLIT = float(get_setting("primary_split", 0.50))    # Sandeep's share of the Sandeep+Raghu pool
 PARTNERS = ("Sandeep", "Raghu", "Kiran", "Manju")   # first two are primary
 # When an invoice is paid. Invoice dated 01.10.2026: the net (invoice less the
 # 15% retention and 2% TDS) is paid by 30.10.2026; the 18% GST on 25.11.2026,
@@ -5462,7 +5462,7 @@ def build_incentive_workbook(mkey: str, installs: int, cost_per_install: float,
             ps[f"{c}{r}"]._style = ps[f"E{r}"]._style
 
     ps["B10"] = round(float(cost_per_install), 2)  # <- from the Expenses tab
-    ps["C10"] = f"From the Expenses tab — {month_label(mkey)} total cost / install (1PH + 3PH)"
+    ps["C10"] = f"From Money → Costs — {month_label(mkey)} total cost / install (1PH + 3PH)"
     ps["B11"] = retention_pct
     ps["B12"] = gst_pct
     ps["B13"] = split
@@ -6598,41 +6598,22 @@ def cost_at_installs(fixed_total: float, variable_rate: float, n_installs: int) 
 
 @st.fragment
 def render_cost_slider(fixed_total: float, variable_rate: float, actual_installs: int, sel_month: str):
-    """The install-count slider and its curve.
-
-    A fragment: dragging reruns ONLY this section. Without it every drag
-    re-executes all seven tabs — rebuilding the map's pins and the analytics
-    tables each time — which made the slider feel sluggish and burned cache
-    refreshes (and so quota) for nothing."""
+    """Cost per install at any install count (starts at the month's target).
+    A fragment: dragging reruns only this section."""
     sub_hdr("gauge", "Cost At Any Install Count")
     slider_max = EXPENSE_SLIDER_MAX
-    default_n = int(actual_installs or MONTHLY_TARGET)
+    default_n = int(target_for_month(sel_month) or actual_installs or MONTHLY_TARGET)
     picked = st.slider("Installs in the month", min_value=0, max_value=slider_max,
-                       value=min(default_n, slider_max), step=25, key=f"exp_slider_{sel_month}",
-                       help="Drag to see how the cost per install changes with volume.")
+                       value=min(default_n, slider_max), step=25, key=f"exp_slider_{sel_month}")
     at_pick = cost_at_installs(fixed_total, variable_rate, picked)
+    now = (fixed_total / actual_installs + variable_rate) if actual_installs else None
+    drop = (at_pick["total_per_install"] - now) if (now is not None and at_pick["total_per_install"] is not None) else None
     render_stat_tiles([
-        ("bolt", f"{picked:,}", "Installs", "chosen", "normal"),
         ("wallet", fmt_rs(at_pick["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
         ("gauge", fmt_rs(at_pick["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
         ("target", fmt_rs(at_pick["total_per_install"], 1), "Total", "Rs./install", "normal"),
+        ("chart", "—" if drop is None else f"{drop:+,.1f}", "vs now", "Rs./install", "normal"),
     ])
-    st.markdown(
-        f'<div class="info-box">At {picked:,} installs the month costs Rs. {at_pick["total_cost"]:,.0f}'
-        + (f' — Rs. {at_pick["total_per_install"]:,.2f} per install.</div>'
-           if at_pick["total_per_install"] is not None else ' — no installs to divide by.</div>'),
-        unsafe_allow_html=True)
-
-    # The curve behind the slider: fixed cost per install falls as volume
-    # rises, while variable stays flat.
-    pts = [x for x in range(100, slider_max + 1, max(25, slider_max // 40))]
-    if pts:
-        curve = pd.DataFrame(
-            {"Total": [fixed_total / x + variable_rate for x in pts],
-             "Fixed": [fixed_total / x for x in pts],
-             "Variable": [variable_rate for x in pts]},
-            index=pd.Index(pts, name="Installs in the month"))
-        st.line_chart(curve, height=220)
 
 
 def apply_vehicle_edits(edited: pd.DataFrame, used_regs: set):
@@ -9443,24 +9424,25 @@ class _NoTab:
 # instead of jumping back to Dashboard.
 _TAB_LABELS = (["Material Handover"] if is_handover_user()
                else ["Dashboard", "Analytics", "Map", "Store"] if SUPERVISOR_MODE
-               else ["Dashboard", "Analytics", "Map", "Expenses", "P/L", "Lead & Lag", "Store",
+               else ["Dashboard", "Analytics", "Map", "Money", "Lead & Lag", "Store",
                      "Material Handover", "Liaisoning", "Installs", "HR", "Admin"])
-if "main_tabs" not in st.session_state and st.query_params.get("tab") in _TAB_LABELS:
-    st.session_state["main_tabs"] = st.query_params.get("tab")
+_q_tab = {"Expenses": "Money", "P/L": "Money"}.get(st.query_params.get("tab"), st.query_params.get("tab"))
+if "main_tabs" not in st.session_state and _q_tab in _TAB_LABELS:   # old Expenses / P/L links open Money
+    st.session_state["main_tabs"] = _q_tab
 
 if is_handover_user():
     # Material Handover users see only their tab.
     (tab_mh,) = st.tabs(["Material Handover"], key="main_tabs", on_change="rerun")
     tab_dash = tab_analytics = tab_map = tab_inv = _NoTab()
-    tab_exp = tab_pl = tab_ll = tab_liaison = tab_inst = tab_hr = tab_admin = _NoTab()
+    tab_exp = tab_ll = tab_liaison = tab_inst = tab_hr = tab_admin = _NoTab()
 elif SUPERVISOR_MODE:
     tab_dash, tab_analytics, tab_map, tab_inv = st.tabs(
         ["Dashboard", "Analytics", "Map", "Store"], key="main_tabs", on_change="rerun")
-    tab_exp = tab_pl = tab_ll = tab_liaison = tab_inst = tab_hr = tab_admin = tab_mh = _NoTab()
+    tab_exp = tab_ll = tab_liaison = tab_inst = tab_hr = tab_admin = tab_mh = _NoTab()
 else:
-    (tab_dash, tab_analytics, tab_map, tab_exp, tab_pl, tab_ll, tab_inv, tab_mh, tab_liaison, tab_inst, tab_hr,
+    (tab_dash, tab_analytics, tab_map, tab_exp, tab_ll, tab_inv, tab_mh, tab_liaison, tab_inst, tab_hr,
      tab_admin) = st.tabs([
-        "Dashboard", "Analytics", "Map", "Expenses", "P/L", "Lead & Lag", "Store", "Material Handover",
+        "Dashboard", "Analytics", "Map", "Money", "Lead & Lag", "Store", "Material Handover",
         "Liaisoning", "Installs", "HR", "Admin"
     ], key="main_tabs", on_change="rerun")
 
@@ -9744,7 +9726,7 @@ with tab_dash:
                                            0, target_of=lambda _n: _sup_t.get(_n))
                     show_chart(chart_bullet(_bs), key="ch_bullet_sup")
                 site_df = pd.concat([site_df, pd.DataFrame([total_row])], ignore_index=True)
-                # Compact: the 1PH / 3PH / check-meter split is in Expenses → Site details.
+                # Compact: the 1PH / 3PH / check-meter split is in Money → Costs → By Site.
                 site_df = site_df.drop(columns=["1PH", "3PH", "Check Meters"], errors="ignore")
                 render_scroll_table(site_df)
                 download_image_button(site_df, "This_Month_By_Site.png", key="dl_img_loc_month",
@@ -10893,7 +10875,7 @@ with tab_map:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  EXPENSES  — fixed and variable costs per calendar month, and cost per install
 # ═══════════════════════════════════════════════════════════════════════════════
-with tab_exp:
+with tab_exp:   # "Money": Costs and P/L share one month
     if tab_exp.open:   # only the open tab runs (tabs are created with on_change="rerun")
         tab_action_bar("exp")
         df_exp_all = load_expenses()
@@ -10912,809 +10894,518 @@ with tab_exp:
         n1, n3 = month_installs(df_installations_master, sel_month)
         summ = expense_summary(df_exp_all, sel_month, n1, n3)
 
-        sec_hdr("wallet", f"Cost Per Install — {month_label(sel_month)}")
-        render_stat_tiles([
-            ("bolt", f"{summ['installs']:,}", "Installs", f"{n1:,} 1PH · {n3:,} 3PH", "normal"),
-            ("wallet", fmt_rs(summ["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
-            ("gauge", fmt_rs(summ["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
-            ("target", fmt_rs(summ["total_per_install"], 1), "Total", "Rs./install", "normal"),
-        ])
-        render_stat_tiles([
-            ("wallet", fmt_rs(summ["fixed_total"]), "Fixed", "Rs. month", "normal"),
-            ("gauge", fmt_rs(summ["variable_total"]), "Variable", "Rs. month", "normal"),
-            ("target", fmt_rs(summ["total_cost"]), "Total cost", "Rs. month", "normal"),
-        ])
-        if summ["installs"] == 0 and summ["has_entries"]:
-            st.info("No installs recorded for this month yet, so there is no per-install cost to show.")
+        sub_costs, sub_pl = st.tabs(["Costs", "P/L"], key="money_sub", on_change="rerun")
+        with sub_costs:
+            if sub_costs.open:
+                # -- Summary: one row ------------------------------------------------
+                site_cb = site_cost_breakdown(df_exp_all, sel_month)
+                render_stat_tiles([
+                    ("bolt", f"{summ['installs']:,}", "Installs", f"{n1:,} 1PH · {n3:,} 3PH", "normal"),
+                    ("wallet", fmt_rs(summ["total_cost"]), "Month cost", f"Fixed {fmt_rs(summ['fixed_total'])}", "normal"),
+                    ("target", fmt_rs(summ["total_per_install"], 1), "Cost", "Rs./install", "normal"),
+                    ("bolt", fmt_rs(site_cb["cpi1"], 1) if site_cb["sites"] else "—", "Per 1PH", "Rs./install", "normal"),
+                    ("bolt", fmt_rs(site_cb["cpi3"], 1) if site_cb["sites"] else "—", "Per 3PH", "Rs./install", "normal"),
+                ])
+                if summ["has_entries"]:
+                    render_cost_slider(summ["fixed_total"], summ["variable_rate"], summ["installs"], sel_month)
 
-        if summ["has_entries"]:
-            # -- If the monthly target is met --------------------------------
-            _month_target = target_for_month(sel_month)
-            at_target = cost_at_installs(summ["fixed_total"], summ["variable_rate"], _month_target)
-            sub_hdr("target", f"If The Monthly Target Of {_month_target:,} Is Met")
-            now_pi = summ["total_per_install"]
-            drop = (now_pi - at_target["total_per_install"]) if (now_pi and at_target["total_per_install"]) else None
-            render_stat_tiles([
-                ("wallet", fmt_rs(at_target["fixed_per_install"], 1), "Fixed", "Rs./install", "normal"),
-                ("gauge", fmt_rs(at_target["variable_per_install"], 1), "Variable", "Rs./install", "normal"),
-                ("target", fmt_rs(at_target["total_per_install"], 1), "Total", "Rs./install", "normal"),
-                ("chart", ("—" if drop is None else f"{'-' if drop >= 0 else '+'}{abs(drop):,.1f}"),
-                 "vs now", "Rs./install", "normal"),
-            ])
-            st.markdown(
-                f'<div class="info-box">Assumes this month\'s fixed costs of Rs. {summ["fixed_total"]:,.0f} '
-                f'are the full month, and each extra install adds Rs. {summ["variable_rate"]:,.0f} of variable cost. '
-                f'Month cost at target: Rs. {at_target["total_cost"]:,.0f}.</div>',
-                unsafe_allow_html=True)
+                # -- By site: one table -------------------------------------------------
+                if site_cb["sites"]:
+                    sub_hdr("pin", "By Site")
+                    _srows = []
+                    for x in site_cb["sites"]:
+                        _n = x["n1"] + x["n3"]
+                        _srows.append({
+                            "Site": x["site"] + ("" if _n else " (no installs)"), "1PH": x["n1"], "3PH": x["n3"],
+                            "Own": 0 if x["moved_to_shared"] else round(x["own_fixed"]),
+                            "Shared": round(x["shared_fixed"]), "Selected": round(x["group_fixed"]),
+                            "Site cost": round(x["cost"]), "Cost / install": fmt_rs(x["cpi"], 1),
+                        })
+                    _sdf = pd.DataFrame(_srows).sort_values("Site cost", ascending=False)
+                    _ti = int(_sdf["1PH"].sum() + _sdf["3PH"].sum())
+                    _tc = int(_sdf["Site cost"].sum())
+                    _sdf = pd.concat([_sdf, pd.DataFrame([{
+                        "Site": "TOTAL", "1PH": int(_sdf["1PH"].sum()), "3PH": int(_sdf["3PH"].sum()), "Own": int(_sdf["Own"].sum()), "Shared": int(_sdf["Shared"].sum()),
+                        "Selected": int(_sdf["Selected"].sum()), "Site cost": _tc,
+                        "Cost / install": fmt_rs(_tc / _ti, 1) if _ti else "—"}])], ignore_index=True)
+                    if not _sdf["Selected"].any():
+                        _sdf = _sdf.drop(columns=["Selected"])
+                    render_scroll_table(_sdf)
+                    if site_cb.get("general_fixed"):
+                        st.markdown(f'<div class="warn-box">Rs. {site_cb["general_fixed"]:,.0f} not assigned to a site — '
+                                    'edit it below and choose who it is for.</div>', unsafe_allow_html=True)
+                    if site_cb["unallocated_shared"]:
+                        st.markdown(f'<div class="warn-box">Shared costs of Rs. {site_cb["unallocated_shared"]:,.0f} '
+                                    'are waiting — no site has installs this month yet.</div>', unsafe_allow_html=True)
 
-            render_cost_slider(summ["fixed_total"], summ["variable_rate"], summ["installs"], sel_month)
+                _reg = expense_registry()
+                if "exp_form_version" not in st.session_state:
+                    st.session_state["exp_form_version"] = 0
+                ev = st.session_state["exp_form_version"]
+                _reg = expense_registry()
+                _sites_all = list(active_locs)
 
-        # -- By site, and per meter type -----------------------------------------
-        site_cb = site_cost_breakdown(df_exp_all, sel_month)
-        if site_cb["sites"]:
-            render_stat_tiles([
-                ("bolt", fmt_rs(site_cb["cpi1"], 1), "Per 1PH", "Rs./install", "normal"),
-                ("bolt", fmt_rs(site_cb["cpi3"], 1), "Per 3PH", "Rs./install", "normal"),
-                ("users", f"{len(site_cb['active_sites'])}", "Active", "sites", "normal"),
-                ("wallet", fmt_rs(site_cb["shared_fixed"]), "All sites", "Rs. month", "normal"),
-            ])
-            sub_hdr("pin", "By Site")
-            # One card per site: what it costs, its own vs its shares of shared
-            # costs, and the cost per install.
-            _cards = []
-            for x in site_cb["sites"]:
-                _n = x["n1"] + x["n3"]
-                _parts = ([f'Own {x["own_fixed"]:,.0f} — moved to '
-                           + ('its team' if x.get("moved_to_team") else 'shared') + ' (no installs)']
-                          if x["moved_to_shared"] else [f'Own {x["own_fixed"]:,.0f}'])
-                _parts.append(f'Shared {x["shared_fixed"]:,.0f}')
-                if x["group_fixed"]:
-                    _parts.append(f'Selected {x["group_fixed"]:,.0f}')
-                _cards.append(_cost_card(
-                    x["site"], x["cost"], " · ".join(_parts),
-                    (f'{_n:,} installs' + (f' ({x["cm"]:,} check meter{"s" if x["cm"] != 1 else ""})' if x.get("cm") else '')
-                     + f' · Rs. {fmt_rs(x["cpi"], 1)} / install' if _n else 'No installs this month')))
-            if site_cb["shared_pool"]:
-                _idle_amt = sum(site_cb["idle_moved"].values()) + sum(site_cb["idle_groups"].values())
-                _cards.append(_cost_card(
-                    "Shared", site_cb["shared_pool"],
-                    f'All sites {site_cb["shared_fixed"]:,.0f}'
-                    + (f' + no-install sites {_idle_amt:,.0f}' if _idle_amt else ''),
-                    (f'Rs. {site_cb["shared_each"]:,.0f} each to {len(site_cb["sharers"])} part(s): '
-                     + ", ".join(site_cb["sharers"]) if site_cb["sharers"] else 'Waiting for installs'),
-                    title_color="--brand-700"))
-            for _g in site_cb["groups"]:
-                _cards.append(_cost_card(
-                    _g["label"], _g["amount"], "Shared by selected sites",
-                    ("No installs at these sites — in the shared pool" if _g["moved"]
-                     else "By installs: " + ", ".join(f'{_m} {_v:,.0f}' for _m, _v in _g["split"].items())),
-                    title_color="--brand-700"))
-            if site_cb.get("general_fixed"):
-                _cards.append(_cost_card("Not assigned", site_cb["general_fixed"], "No site chosen yet",
-                                         "Edit it below and choose who it is for", title_color="--danger-700"))
-            st.markdown('<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;'
-                        'margin-bottom:var(--space-5);">' + "".join(_cards) + '</div>', unsafe_allow_html=True)
-            with st.expander("Site details — 1PH / 3PH split"):
-                site_tbl = pd.DataFrame([{
-                    "Site": x["site"], "1PH": x["n1"], "3PH": x["n3"], "Check Meters": x.get("cm", 0),
-                    "Own Fixed": 0 if x["moved_to_shared"] else round(x["own_fixed"]),
-                    "Shared": round(x["shared_fixed"]), "Selected": round(x["group_fixed"]),
-                    "Fixed / Install": fmt_rs(x["fixed_per_install"], 2),
-                    "Rate 1PH": fmt_rs(x["rate1"], 0), "Rate 3PH": fmt_rs(x["rate3"], 0),
-                    "Cost / 1PH": fmt_rs(x["cpi1"], 2), "Cost / 3PH": fmt_rs(x["cpi3"], 2),
-                    "Cost / Install": fmt_rs(x["cpi"], 2), "Site Cost": round(x["cost"]),
-                } for x in site_cb["sites"]])
-                render_scroll_table(site_tbl)
-            _rule = (f"split in equal parts among the {len(site_cb['sharers'])} site(s) / team(s) with more than "
-                     f"{SHARED_MIN_INSTALLS} installs this month" if site_cb["sharers_rule"] == "over_min"
-                     else f"split in equal parts among all sites / teams with installs (none has more than "
-                          f"{SHARED_MIN_INSTALLS} yet)")
-            _bits = [f"All sites costs are {_rule}. Sites that share selected-sites costs count as one team and "
-                     f"take ONE part, split among them by installs. Selected-sites costs are split among those "
-                     f"sites by installs. Each site's fixed cost is spread equally over all its installs (1PH and 3PH). "
-                     f"Per-install rates: a site's own rate, else a selected-sites rate, else the All sites rate."]
-            if site_cb.get("idle_to_team"):
-                _bits.append("No installs at " + ", ".join(
-                    f"{k} (Rs. {v:,.0f})" for k, v in site_cb["idle_to_team"].items())
-                    + " — their own costs go to their team's other sites, by installs.")
-            if site_cb["idle_moved"]:
-                _bits.append("No installs yet at " + ", ".join(
-                    f"{k} (Rs. {v:,.0f})" for k, v in site_cb["idle_moved"].items())
-                    + " — their costs are in the shared pool until they have installs.")
-            st.markdown('<div class="info-box">' + " ".join(_bits) + '</div>', unsafe_allow_html=True)
-            if site_cb["unallocated_shared"]:
-                st.markdown(f'<div class="warn-box">Shared costs of Rs. {site_cb["unallocated_shared"]:,.0f} '
-                            f'are waiting — no site has installs this month yet.</div>', unsafe_allow_html=True)
+                def _scope_inputs(prefix: str, cur_kind: str = ALL_SITES, cur_sites=()):
+                    """'Applies to' picker -> (kind, sites) or (None, msg) when incomplete."""
+                    _kinds = [SCOPE_SITE, SCOPE_SELECTED, ALL_SITES]
+                    kind = st.radio("Applies to", _kinds, index=_kinds.index(cur_kind) if cur_kind in _kinds else 2,
+                                    horizontal=True, key=f"{prefix}_scope")
+                    if kind == SCOPE_SITE:
+                        _opts = list(dict.fromkeys(_sites_all + list(cur_sites)))
+                        if not _opts:
+                            st.caption("Add your sites in Admin → Locations first.")
+                            return None, "No sites set up yet."
+                        site = st.selectbox("Site", _opts, index=_opts.index(cur_sites[0]) if cur_sites and cur_sites[0] in _opts else 0,
+                                            key=f"{prefix}_site")
+                        return kind, [site]
+                    if kind == SCOPE_SELECTED:
+                        _opts = list(dict.fromkeys(_sites_all + list(cur_sites)))
+                        picked = st.multiselect("Sites sharing it", _opts, default=[x for x in cur_sites if x in _opts],
+                                                key=f"{prefix}_sites",
+                                                help=f"Split equally among these sites with more than {SHARED_MIN_INSTALLS} "
+                                                     "installs that month (else among those with any installs).")
+                        if len(picked) < 2:
+                            return None, "Pick at least two sites (or choose One site)."
+                        return kind, picked
+                    return ALL_SITES, []
 
-        if summ["by_category"]:
-            with st.expander("By category"):
-                cat_df = pd.DataFrame(summ["by_category"], columns=["Kind", "Category", "Type", "Month (Rs.)"])
-                cat_df["Per install (Rs.)"] = cat_df["Month (Rs.)"].apply(
-                    lambda v: round(v / summ["installs"], 2) if summ["installs"] else None)
-                cat_df["Month (Rs.)"] = cat_df["Month (Rs.)"].round(0).astype(int)
-                cat_df["Share"] = cat_df["Month (Rs.)"].apply(
-                    lambda v: f"{v / summ['total_cost'] * 100:.0f}%" if summ["total_cost"] else "—")
-                cat_df = cat_df.sort_values(["Kind", "Category", "Month (Rs.)"], ascending=[True, True, False])
-                render_scroll_table(cat_df)
 
-            _vt_types = vehicle_types()
-            _mrows = expenses_for_month(df_exp_all, sel_month)
-            veh_rows = _mrows[(_mrows["category"].isin(_vt_types))
-                              & (_mrows["vehicle_reg"].astype(str).str.strip() != "")]
-            if not veh_rows.empty:
-                with st.expander("By vehicle"):
-                    vt = veh_rows.pivot_table(index="vehicle_reg", columns="category", values="amount",
-                                              aggfunc="sum", fill_value=0)
-                    vt = vt.loc[:, (vt != 0).any(axis=0)] if not vt.empty else vt
-                    vt["Total"] = vt.sum(axis=1)
-                    vt = vt.round(0).astype(int).sort_values("Total", ascending=False).reset_index()
-                    vt = vt.rename(columns={"vehicle_reg": "Vehicle"})
-                    render_scroll_table(vt)
-
-        # ══ Add an expense ═══════════════════════════════════════════════════
-        st.divider()
-        _mig = _RUN_MEMO.get("expenses_migrated")
-        if _mig and _mig[0]:
-            st.markdown(f'<div class="info-box">Repeating costs now carry forward by themselves: the '
-                        f'{_mig[0]:,} monthly copies saved so far are read as {_mig[1]:,} recurring expense(s), '
-                        'each counting from its first month until stopped. This is saved with your next change '
-                        'here.</div>', unsafe_allow_html=True)
-        sec_hdr("plus", "Add Expense")
-        if "exp_form_version" not in st.session_state:
-            st.session_state["exp_form_version"] = 0
-        ev = st.session_state["exp_form_version"]
-        _reg = expense_registry()
-        _sites_all = list(active_locs)
-
-        def _scope_inputs(prefix: str, cur_kind: str = ALL_SITES, cur_sites=()):
-            """'Applies to' picker -> (kind, sites) or (None, msg) when incomplete."""
-            _kinds = [SCOPE_SITE, SCOPE_SELECTED, ALL_SITES]
-            kind = st.radio("Applies to", _kinds, index=_kinds.index(cur_kind) if cur_kind in _kinds else 2,
-                            horizontal=True, key=f"{prefix}_scope")
-            if kind == SCOPE_SITE:
-                _opts = list(dict.fromkeys(_sites_all + list(cur_sites)))
-                if not _opts:
-                    st.caption("Add your sites in Admin → Locations first.")
-                    return None, "No sites set up yet."
-                site = st.selectbox("Site", _opts, index=_opts.index(cur_sites[0]) if cur_sites and cur_sites[0] in _opts else 0,
-                                    key=f"{prefix}_site")
-                return kind, [site]
-            if kind == SCOPE_SELECTED:
-                _opts = list(dict.fromkeys(_sites_all + list(cur_sites)))
-                picked = st.multiselect("Sites sharing it", _opts, default=[x for x in cur_sites if x in _opts],
-                                        key=f"{prefix}_sites",
-                                        help=f"Split equally among these sites with more than {SHARED_MIN_INSTALLS} "
-                                             "installs that month (else among those with any installs).")
-                if len(picked) < 2:
-                    return None, "Pick at least two sites (or choose One site)."
-                return kind, picked
-            return ALL_SITES, []
-
-        ak = st.radio("Kind", ["Fixed — Rs. per month", "Variable — Rs. per install"], horizontal=True,
-                      key=f"exp_kind_{ev}")
-        a_kind = "Fixed" if ak.startswith("Fixed") else "Variable"
-        _cats = list(_reg[a_kind].keys())
-        ac1, ac2 = st.columns(2)
-        with ac1:
-            a_cat = st.selectbox("Category", _cats, key=f"exp_cat_{a_kind}_{ev}",
-                                 help="Add your own under Manage categories below.")
-        _types = _reg[a_kind][a_cat]["types"]
-        with ac2:
-            a_type = (st.selectbox("Type", _types, key=f"exp_type_{a_kind}_{a_cat}_{ev}") if len(_types) > 1
-                      else _types[0])
-            if len(_types) == 1:
-                st.text_input("Type", value=a_type, disabled=True, key=f"exp_type_ro_{a_kind}_{a_cat}_{ev}")
-        a_scope, a_sites = _scope_inputs(f"exp_add_{ev}")
-        a_veh_needed = a_kind == "Fixed" and a_type in vehicle_types()
-        if a_kind == "Fixed":
-            fc1, fc2 = st.columns(2)
-            with fc1:
-                a_amt = st.number_input("Amount (Rs. for the month)", min_value=0.0, step=100.0, value=0.0,
-                                        key=f"exp_amt_{ev}")
-            with fc2:
-                a_reg = (st.selectbox("Vehicle", ["-- Select --"] + active_regs, key=f"exp_reg_{ev}")
-                         if a_veh_needed else "")
-            a_r1 = a_r3 = 0.0
-        else:
-            _std = VARIABLE_RATE_DEFAULTS.get(a_type, {})
-            vc1, vc2 = st.columns(2)
-            with vc1:
-                a_r1 = st.number_input("Rate per 1PH install (Rs.)", min_value=0.0, step=5.0,
-                                       value=float(_std.get("1PH", 0.0)), key=f"exp_r1_{a_type}_{ev}")
-            with vc2:
-                a_r3 = st.number_input("Rate per 3PH install (Rs.)", min_value=0.0, step=5.0,
-                                       value=float(_std.get("3PH", 0.0)), key=f"exp_r3_{a_type}_{ev}")
-            a_amt, a_reg = 0.0, ""
-        a_item = st.text_input("Description (optional)", key=f"exp_item_{ev}",
-                               placeholder=EXPENSE_ITEM_HINT.get(a_type, ""))
-        _rep_opts = [f"Every month from {month_label(sel_month)} (recurring)", f"{month_label(sel_month)} only"]
-        _rep_default = 0 if (a_kind == "Variable" or recurring_by_default(a_type)) else 1
-        a_rep = st.radio("Repeats", _rep_opts, index=_rep_default, horizontal=True,
-                         key=f"exp_rep_{a_kind}_{a_type}_{ev}")
-        a_recurring = a_rep == _rep_opts[0]
-        if st.button("➕ Add Expense", type="primary", width="stretch", key="exp_add"):
-            if a_scope is None:
-                st.error(f"❌ {a_sites}")
-            elif a_kind == "Fixed" and a_amt <= 0:
-                st.error("❌ Enter an amount.")
-            elif a_kind == "Variable" and a_r1 <= 0 and a_r3 <= 0:
-                st.error("❌ Enter at least one rate.")
-            elif a_veh_needed and a_reg in ("", "-- Select --"):
-                st.error("❌ Pick the vehicle this cost belongs to"
-                         + ("" if active_regs else " — add it under Vehicles below first") + ".")
-            else:
-                cur_df = load_expenses(fresh=True)
-                site_val = encode_scope(a_scope, a_sites)
-                note = ""
-                if a_kind == "Variable":
-                    # One rate per type for the same sites: a new one REPLACES the
-                    # old from this month (two would silently add together).
-                    _same = expenses_for_month(cur_df, sel_month)
-                    _same = _same[(_same["cost_type"] == "Variable") & (_same["category"] == a_type)
-                                  & (_same["site"].map(lambda v: sorted(map(_loc_key, expense_scope(v)[1])) + [expense_scope(v)[0]])
-                                     .map(tuple) == tuple(sorted(map(_loc_key, a_sites)) + [a_scope]))]
-                    for _eid in _same["expense_id"]:
-                        cur_df = (stop_from_month(cur_df, _eid, sel_month) if a_recurring
-                                  else carve_month(cur_df, _eid, sel_month))
-                    if not _same.empty:
-                        note = f" Replaces the earlier {a_type} rate for {scope_label(site_val)} from {month_label(sel_month)}."
-                new_row = {"expense_id": new_expense_id(), "month": sel_month, "cost_type": a_kind,
-                           "category": a_type, "item": a_item.strip(),
-                           "vehicle_reg": a_reg if a_veh_needed else "",
-                           "amount": a_amt, "rate_1ph": a_r1, "rate_3ph": a_r3,
-                           "recurring": "1" if a_recurring else "0", "site": site_val, "end_month": ""}
-                if save_expenses(pd.concat([cur_df, pd.DataFrame([new_row])], ignore_index=True)):
-                    st.session_state["exp_form_version"] += 1
-                    _what = (f"Rs. {a_amt:,.0f}" if a_kind == "Fixed"
-                             else f"Rs. {a_r1:,.0f} per 1PH / Rs. {a_r3:,.0f} per 3PH")
-                    st.success(f"✅ Added {a_type}: {_what} — {scope_label(site_val)}, "
-                               + ("every month from " if a_recurring else "") + f"{month_label(sel_month)}." + note)
-                    st.rerun()
-
-        # ══ This month's expenses: view, edit, delete ═══════════════════════
-        sec_hdr("list", f"Expenses — {month_label(sel_month)}")
-        mrows = expenses_for_month(df_exp_all, sel_month)
-        if mrows.empty:
-            st.info("No expenses count in this month yet.")
-        else:
-            def _repeat_text(r):
-                if not _truthy(r["recurring"]):
-                    return f"{month_label(str(r['month']))} only"
-                txt = f"Every month from {month_label(str(r['month']))}"
-                return txt + (f" to {month_label(str(r['end_month']))}" if str(r["end_month"]).strip() else "")
-
-            def _value_text(r):
-                if r["cost_type"] == "Variable":
-                    return f"{float(r['rate_1ph']):,.0f} / {float(r['rate_3ph']):,.0f} per install"
-                return f"{float(r['amount']):,.0f}"
-
-            mrows = mrows.assign(_cat=[category_of(t, k) for t, k in zip(mrows["category"], mrows["cost_type"])])
-            mrows = mrows.sort_values(["cost_type", "_cat", "category"], key=lambda c: c.astype(str).str.upper())
-            _gen = mrows[mrows["site"].map(lambda v: expense_scope(v)[0]) == GENERAL_SITE]
-            if not _gen.empty:
-                st.markdown(f'<div class="warn-box">{len(_gen)} expense(s) (Rs. {_gen["amount"].sum():,.0f}) '
-                            'have no site yet — counted in the month total but in no site. Edit each one below '
-                            'and choose who it is for.</div>', unsafe_allow_html=True)
-            st.caption(f"Fixed total Rs. {mrows.loc[mrows['cost_type'] == 'Fixed', 'amount'].sum():,.0f} for "
-                       f"{month_label(sel_month)}, by who it is for. Tap a location to see its expenses; "
-                       "Edit or Delete any one of them. Per-install rates with no saved rate use the standard rate.")
-
-            def _edit_panel(e_pick):
-                """Edit / delete form for one expense, shown under its row."""
-                er = mrows[mrows["expense_id"] == e_pick].iloc[0]
-                e_kind = str(er["cost_type"])
-                e_rec = _truthy(er["recurring"])
-                ek = f"exp_ed_{e_pick}"
-                ec1, ec2 = st.columns(2)
-                _etypes = list(dict.fromkeys(
-                    [t for e in _reg.get(e_kind, {}).values() for t in e["types"]] + [str(er["category"])]))
-                with ec1:
-                    e_type = st.selectbox("Type", _etypes, index=_etypes.index(str(er["category"])), key=f"{ek}_type")
-                _sk, _ss = expense_scope(er["site"])
-                if _sk == GENERAL_SITE:
-                    _sk = ALL_SITES
-                e_scope, e_sites = _scope_inputs(ek, _sk, _ss)
-                if e_kind == "Fixed":
-                    fe1, fe2 = st.columns(2)
-                    with fe1:
-                        e_amt = st.number_input("Amount (Rs. for the month)", min_value=0.0, step=100.0,
-                                                value=float(er["amount"]), key=f"{ek}_amt")
-                    with fe2:
-                        _veh = e_type in vehicle_types()
-                        _ropts = ["-- Select --"] + list(dict.fromkeys(active_regs + [str(er["vehicle_reg"])] if str(er["vehicle_reg"]).strip() else active_regs))
-                        e_reg = (st.selectbox("Vehicle", _ropts, index=_ropts.index(str(er["vehicle_reg"]))
-                                              if str(er["vehicle_reg"]) in _ropts else 0, key=f"{ek}_reg")
-                                 if _veh else "")
-                    e_r1 = e_r3 = 0.0
+                # ══ This month's expenses: view, edit, delete ═══════════════════════
+                sec_hdr("list", f"Expenses — {month_label(sel_month)}")
+                mrows = expenses_for_month(df_exp_all, sel_month)
+                if mrows.empty:
+                    st.info("No expenses count in this month yet.")
                 else:
-                    ve1, ve2 = st.columns(2)
-                    with ve1:
-                        e_r1 = st.number_input("Rate per 1PH install (Rs.)", min_value=0.0, step=5.0,
-                                               value=float(er["rate_1ph"]), key=f"{ek}_r1")
-                    with ve2:
-                        e_r3 = st.number_input("Rate per 3PH install (Rs.)", min_value=0.0, step=5.0,
-                                               value=float(er["rate_3ph"]), key=f"{ek}_r3")
-                    e_amt, e_reg, _veh = 0.0, "", False
-                e_item = st.text_input("Description", value=str(er["item"]), key=f"{ek}_item")
-                _ml = month_label(sel_month)
-                if e_rec:
-                    _when_opts = [f"From {_ml} on", f"{_ml} only", f"All months (from {month_label(str(er['month']))})"]
-                    e_when = st.radio("Change applies to", _when_opts, horizontal=True, key=f"{ek}_when")
-                else:
-                    e_when = None
-                    e_make_rec = st.checkbox(f"Make it recurring (every month from {month_label(str(er['month']))})",
-                                             key=f"{ek}_mkrec")
-                eb1, eb2 = st.columns(2)
-                with eb1:
-                    e_save = st.button("💾 Save changes", type="primary", width="stretch", key=f"{ek}_save")
-                with eb2:
-                    e_del = st.button("🗑️ Delete…", width="stretch", key=f"{ek}_del")
-                if e_save:
-                    if e_scope is None:
-                        st.error(f"❌ {e_sites}")
-                    elif e_kind == "Fixed" and e_amt <= 0:
-                        st.error("❌ Enter an amount.")
-                    elif _veh and e_reg in ("", "-- Select --"):
-                        st.error("❌ Pick the vehicle.")
-                    else:
-                        cur_df = load_expenses(fresh=True)
-                        if e_pick not in set(cur_df["expense_id"]):
-                            st.error("❌ This expense was changed on another device — press Refresh and try again.")
+                    def _repeat_text(r):
+                        if not _truthy(r["recurring"]):
+                            return f"{month_label(str(r['month']))} only"
+                        txt = f"Every month from {month_label(str(r['month']))}"
+                        return txt + (f" to {month_label(str(r['end_month']))}" if str(r["end_month"]).strip() else "")
+
+                    def _value_text(r):
+                        if r["cost_type"] == "Variable":
+                            return f"{float(r['rate_1ph']):,.0f} / {float(r['rate_3ph']):,.0f} per install"
+                        return f"{float(r['amount']):,.0f}"
+
+                    mrows = mrows.assign(_cat=[category_of(t, k) for t, k in zip(mrows["category"], mrows["cost_type"])])
+                    mrows = mrows.sort_values(["cost_type", "_cat", "category"], key=lambda c: c.astype(str).str.upper())
+                    _gen = mrows[mrows["site"].map(lambda v: expense_scope(v)[0]) == GENERAL_SITE]
+                    if not _gen.empty:
+                        st.markdown(f'<div class="warn-box">{len(_gen)} expense(s) (Rs. {_gen["amount"].sum():,.0f}) '
+                                    'have no site yet — edit them and choose who they are for.</div>', unsafe_allow_html=True)
+                    st.caption(f"Fixed total Rs. {mrows.loc[mrows['cost_type'] == 'Fixed', 'amount'].sum():,.0f} · "
+                               "tap a group to edit")
+
+                    def _edit_panel(e_pick):
+                        """Edit / delete form for one expense, shown under its row."""
+                        er = mrows[mrows["expense_id"] == e_pick].iloc[0]
+                        e_kind = str(er["cost_type"])
+                        e_rec = _truthy(er["recurring"])
+                        ek = f"exp_ed_{e_pick}"
+                        ec1, ec2 = st.columns(2)
+                        _etypes = list(dict.fromkeys(
+                            [t for e in _reg.get(e_kind, {}).values() for t in e["types"]] + [str(er["category"])]))
+                        with ec1:
+                            e_type = st.selectbox("Type", _etypes, index=_etypes.index(str(er["category"])), key=f"{ek}_type")
+                        _sk, _ss = expense_scope(er["site"])
+                        if _sk == GENERAL_SITE:
+                            _sk = ALL_SITES
+                        e_scope, e_sites = _scope_inputs(ek, _sk, _ss)
+                        if e_kind == "Fixed":
+                            fe1, fe2 = st.columns(2)
+                            with fe1:
+                                e_amt = st.number_input("Amount (Rs. for the month)", min_value=0.0, step=100.0,
+                                                        value=float(er["amount"]), key=f"{ek}_amt")
+                            with fe2:
+                                _veh = e_type in vehicle_types()
+                                _ropts = ["-- Select --"] + list(dict.fromkeys(active_regs + [str(er["vehicle_reg"])] if str(er["vehicle_reg"]).strip() else active_regs))
+                                e_reg = (st.selectbox("Vehicle", _ropts, index=_ropts.index(str(er["vehicle_reg"]))
+                                                      if str(er["vehicle_reg"]) in _ropts else 0, key=f"{ek}_reg")
+                                         if _veh else "")
+                            e_r1 = e_r3 = 0.0
                         else:
-                            vals = {"category": e_type, "item": e_item.strip(), "vehicle_reg": e_reg if _veh else "",
-                                    "amount": e_amt, "rate_1ph": e_r1, "rate_3ph": e_r3,
-                                    "site": encode_scope(e_scope, e_sites)}
-                            base = cur_df[cur_df["expense_id"] == e_pick].iloc[0].to_dict()
-                            if not e_rec:
-                                i = cur_df.index[cur_df["expense_id"] == e_pick][0]
-                                for k_, v_ in vals.items():
-                                    cur_df.at[i, k_] = v_
-                                if e_make_rec:
-                                    cur_df.at[i, "recurring"] = "1"
-                                    cur_df.at[i, "end_month"] = ""
-                            elif e_when.startswith("All months"):
-                                i = cur_df.index[cur_df["expense_id"] == e_pick][0]
-                                for k_, v_ in vals.items():
-                                    cur_df.at[i, k_] = v_
-                            elif e_when.endswith("only"):
-                                cur_df = carve_month(cur_df, e_pick, sel_month)
-                                one = {**base, **vals, "expense_id": new_expense_id(), "month": sel_month,
-                                       "recurring": "0", "end_month": ""}
-                                cur_df = pd.concat([cur_df, pd.DataFrame([one])], ignore_index=True)
-                            else:   # from this month on
-                                cur_df = stop_from_month(cur_df, e_pick, sel_month)
-                                new = {**base, **vals, "expense_id": new_expense_id(), "month": sel_month,
-                                       "recurring": "1", "end_month": base.get("end_month", "")}
-                                cur_df = pd.concat([cur_df, pd.DataFrame([new])], ignore_index=True)
-                            if save_expenses(cur_df):
-                                st.session_state.pop("exp_edit_id", None)
-                                st.success("✅ Expense updated.")
-                                st.rerun()
-                if e_del:
-                    st.session_state["exp_pending_del"] = e_pick
-                if st.session_state.get("exp_pending_del") == e_pick:
-                    if e_rec:
-                        _dopts = [f"Stop it from {_ml} (keep earlier months)", f"Remove {_ml} only",
-                                  "Delete from every month"]
-                        d_how = st.radio("Delete how?", _dopts, key=f"{ek}_dhow")
-                    else:
-                        d_how = "Delete"
-                        st.markdown('<div class="warn-box">Delete this expense?</div>', unsafe_allow_html=True)
-                    dy, dn = st.columns(2)
-                    with dy:
-                        if st.button("✅ Yes, delete", type="primary", width="stretch", key=f"{ek}_dyes"):
-                            cur_df = load_expenses(fresh=True)
-                            if d_how.startswith("Stop"):
-                                cur_df = stop_from_month(cur_df, e_pick, sel_month)
-                            elif d_how.startswith("Remove"):
-                                cur_df = carve_month(cur_df, e_pick, sel_month)
+                            ve1, ve2 = st.columns(2)
+                            with ve1:
+                                e_r1 = st.number_input("Rate per 1PH install (Rs.)", min_value=0.0, step=5.0,
+                                                       value=float(er["rate_1ph"]), key=f"{ek}_r1")
+                            with ve2:
+                                e_r3 = st.number_input("Rate per 3PH install (Rs.)", min_value=0.0, step=5.0,
+                                                       value=float(er["rate_3ph"]), key=f"{ek}_r3")
+                            e_amt, e_reg, _veh = 0.0, "", False
+                        e_item = st.text_input("Description", value=str(er["item"]), key=f"{ek}_item")
+                        _ml = month_label(sel_month)
+                        if e_rec:
+                            _when_opts = [f"From {_ml} on", f"{_ml} only", f"All months (from {month_label(str(er['month']))})"]
+                            e_when = st.radio("Change applies to", _when_opts, horizontal=True, key=f"{ek}_when")
+                        else:
+                            e_when = None
+                            e_make_rec = st.checkbox(f"Make it recurring (every month from {month_label(str(er['month']))})",
+                                                     key=f"{ek}_mkrec")
+                        eb1, eb2 = st.columns(2)
+                        with eb1:
+                            e_save = st.button("💾 Save changes", type="primary", width="stretch", key=f"{ek}_save")
+                        with eb2:
+                            e_del = st.button("🗑️ Delete…", width="stretch", key=f"{ek}_del")
+                        if e_save:
+                            if e_scope is None:
+                                st.error(f"❌ {e_sites}")
+                            elif e_kind == "Fixed" and e_amt <= 0:
+                                st.error("❌ Enter an amount.")
+                            elif _veh and e_reg in ("", "-- Select --"):
+                                st.error("❌ Pick the vehicle.")
                             else:
-                                cur_df = cur_df[cur_df["expense_id"] != e_pick]
-                            if save_expenses(cur_df):
-                                st.session_state.pop("exp_pending_del", None)
-                                st.session_state.pop("exp_edit_id", None)
-                                st.success("✅ Expense deleted.")
-                                st.rerun()
-                    with dn:
-                        if st.button("❌ Cancel", width="stretch", key=f"{ek}_dno"):
-                            st.session_state.pop("exp_pending_del", None)
-                            st.session_state.pop("exp_edit_id", None)
-                            st.rerun()
-
-
-            # -- By location: each expense with its own Edit / Delete --------
-            _canon_e = _canonical_locations([x for v in mrows["site"] for x in expense_scope(v)[1]])
-
-            _VAR_GROUP = "Per-install costs (Variable)"
-
-            def _group_of(v, kind="Fixed"):
-                k, ss = expense_scope(v)
-                if k == GENERAL_SITE:
-                    return (0, "Not assigned")
-                # Per-install rates (installer payment, liaisoning, ...) in a
-                # group of their own, whichever sites they are for.
-                if kind == "Variable":
-                    return (4, _VAR_GROUP)
-                if k == SCOPE_SITE:
-                    return (1, _canon_e.get(_loc_key(ss[0]), ss[0]))
-                if k == SCOPE_SELECTED:
-                    # The same sites picked in any order are one group.
-                    return (2, " + ".join(sorted(dict.fromkeys(_canon_e.get(_loc_key(x), x) for x in ss),
-                                                 key=str.upper)))
-                return (3, ALL_SITES)
-
-            mrows["_grp"] = [_group_of(v, k) for v, k in zip(mrows["site"], mrows["cost_type"])]
-            _open_id = st.session_state.get("exp_edit_id")
-            if _open_id not in set(mrows["expense_id"]):
-                _open_id = None
-            for (_order, _label), g in sorted(mrows.groupby("_grp"), key=lambda x: (x[0][0], x[0][1].upper())):
-                _fx = g.loc[g["cost_type"] == "Fixed", "amount"].sum()
-                _nv = int((g["cost_type"] == "Variable").sum())
-                if _order == 4:
-                    _title = f"{_label} — {len(g)} rate(s)"
-                else:
-                    _title = (f"{'⚠️ ' if _order == 0 else ''}{_label} — Rs. {_fx:,.0f} a month · {len(g)} expense(s)"
-                              + (f" incl. {_nv} per-install rate(s)" if _nv else ""))
-                with st.expander(_title, expanded=(_open_id in set(g["expense_id"])) or _order == 0):
-                    _cats_in = list(dict.fromkeys(g["_cat"]))
-                    _last_cat = None
-                    for _, r in g.iterrows():
-                        eid = r["expense_id"]
-                        # A heading per category when a group holds more than one.
-                        if len(_cats_in) > 1 and r["_cat"] != _last_cat:
-                            _last_cat = r["_cat"]
-                            _cg = g[g["_cat"] == _last_cat]
-                            _csum = ("" if _order == 4 else
-                                     f" — Rs. {_cg.loc[_cg['cost_type'] == 'Fixed', 'amount'].sum():,.0f}")
-                            st.markdown(f'<div style="font-size:12px;font-weight:800;text-transform:uppercase;'
-                                        f'letter-spacing:.4px;color:var(--ink-600);margin-top:4px;">'
-                                        f'{_html_mod.escape(str(_last_cat))}{_csum}</div>', unsafe_allow_html=True)
-                        _bits = [r["_cat"] if r["_cat"] != r["category"] else "", _repeat_text(r),
-                                 str(r["vehicle_reg"]).strip(), str(r["item"]).strip()]
-                        if _order == 4:
-                            _bits.insert(0, scope_label(r["site"]))
-                        with st.container(border=True):
-                            st.markdown(
-                                f'<div style="display:flex;justify-content:space-between;gap:8px;">'
-                                f'<span style="font-weight:700;">{_html_mod.escape(str(r["category"]))}</span>'
-                                f'<span style="font-weight:800;">Rs. {_html_mod.escape(_value_text(r))}</span></div>'
-                                f'<div style="font-size:12px;color:var(--ink-600);font-weight:600;">'
-                                f'{_html_mod.escape(" · ".join(b_ for b_ in _bits if b_))}</div>',
-                                unsafe_allow_html=True)
-                            _editing = _open_id == eid
-                            with st.container(horizontal=True):
-                                if st.button("Close" if _editing else "✏️ Edit", key=f"exp_row_edit_{eid}",
-                                             width="content"):
-                                    st.session_state["exp_edit_id"] = None if _editing else eid
+                                cur_df = load_expenses(fresh=True)
+                                if e_pick not in set(cur_df["expense_id"]):
+                                    st.error("❌ This expense was changed on another device — press Refresh and try again.")
+                                else:
+                                    vals = {"category": e_type, "item": e_item.strip(), "vehicle_reg": e_reg if _veh else "",
+                                            "amount": e_amt, "rate_1ph": e_r1, "rate_3ph": e_r3,
+                                            "site": encode_scope(e_scope, e_sites)}
+                                    base = cur_df[cur_df["expense_id"] == e_pick].iloc[0].to_dict()
+                                    if not e_rec:
+                                        i = cur_df.index[cur_df["expense_id"] == e_pick][0]
+                                        for k_, v_ in vals.items():
+                                            cur_df.at[i, k_] = v_
+                                        if e_make_rec:
+                                            cur_df.at[i, "recurring"] = "1"
+                                            cur_df.at[i, "end_month"] = ""
+                                    elif e_when.startswith("All months"):
+                                        i = cur_df.index[cur_df["expense_id"] == e_pick][0]
+                                        for k_, v_ in vals.items():
+                                            cur_df.at[i, k_] = v_
+                                    elif e_when.endswith("only"):
+                                        cur_df = carve_month(cur_df, e_pick, sel_month)
+                                        one = {**base, **vals, "expense_id": new_expense_id(), "month": sel_month,
+                                               "recurring": "0", "end_month": ""}
+                                        cur_df = pd.concat([cur_df, pd.DataFrame([one])], ignore_index=True)
+                                    else:   # from this month on
+                                        cur_df = stop_from_month(cur_df, e_pick, sel_month)
+                                        new = {**base, **vals, "expense_id": new_expense_id(), "month": sel_month,
+                                               "recurring": "1", "end_month": base.get("end_month", "")}
+                                        cur_df = pd.concat([cur_df, pd.DataFrame([new])], ignore_index=True)
+                                    if save_expenses(cur_df):
+                                        st.session_state.pop("exp_edit_id", None)
+                                        st.success("✅ Expense updated.")
+                                        st.rerun()
+                        if e_del:
+                            st.session_state["exp_pending_del"] = e_pick
+                        if st.session_state.get("exp_pending_del") == e_pick:
+                            if e_rec:
+                                _dopts = [f"Stop it from {_ml} (keep earlier months)", f"Remove {_ml} only",
+                                          "Delete from every month"]
+                                d_how = st.radio("Delete how?", _dopts, key=f"{ek}_dhow")
+                            else:
+                                d_how = "Delete"
+                                st.markdown('<div class="warn-box">Delete this expense?</div>', unsafe_allow_html=True)
+                            dy, dn = st.columns(2)
+                            with dy:
+                                if st.button("✅ Yes, delete", type="primary", width="stretch", key=f"{ek}_dyes"):
+                                    cur_df = load_expenses(fresh=True)
+                                    if d_how.startswith("Stop"):
+                                        cur_df = stop_from_month(cur_df, e_pick, sel_month)
+                                    elif d_how.startswith("Remove"):
+                                        cur_df = carve_month(cur_df, e_pick, sel_month)
+                                    else:
+                                        cur_df = cur_df[cur_df["expense_id"] != e_pick]
+                                    if save_expenses(cur_df):
+                                        st.session_state.pop("exp_pending_del", None)
+                                        st.session_state.pop("exp_edit_id", None)
+                                        st.success("✅ Expense deleted.")
+                                        st.rerun()
+                            with dn:
+                                if st.button("❌ Cancel", width="stretch", key=f"{ek}_dno"):
                                     st.session_state.pop("exp_pending_del", None)
+                                    st.session_state.pop("exp_edit_id", None)
                                     st.rerun()
-                                if not _editing and st.button("🗑️ Delete", key=f"exp_row_del_{eid}", width="content"):
-                                    st.session_state["exp_edit_id"] = eid
-                                    st.session_state["exp_pending_del"] = eid
-                                    st.rerun()
-                            if _editing:
-                                _edit_panel(eid)
 
-        # -- Manage categories -------------------------------------------------
-        with st.expander("Manage categories"):
-            _rows = []
-            for _k in ("Fixed", "Variable"):
-                for _c, _e in _reg[_k].items():
-                    _rows.append({"Kind": _k, "Category": _c, "Types": ", ".join(_e["types"]),
-                                  "Vehicle": "Yes" if _e["vehicle"] else "", "Custom": "Yes" if _e["custom"] else ""})
-            render_scroll_table(pd.DataFrame(_rows), max_height=420)
-            st.caption("Variable categories are per-install rates (like installer payment); Fixed are monthly "
-                       "amounts. A category's types are what you pick when adding an expense.")
-            mc1, mc2 = st.columns(2)
-            with mc1:
-                n_kind = st.radio("Kind", ["Fixed", "Variable"], horizontal=True, key=f"cat_kind_{ev}")
-            with mc2:
-                n_mode = st.radio("Add", ["New category", "New type in a category"], horizontal=True,
-                                  key=f"cat_mode_{ev}")
-            if n_mode == "New category":
-                n_cat = st.text_input("Category name", key=f"cat_name_{ev}", placeholder="e.g. Insurance")
-                n_types = st.text_input("Types (optional, comma separated)", key=f"cat_types_{ev}",
-                                        placeholder="e.g. Vehicle insurance, Staff insurance")
-                nc1, nc2 = st.columns(2)
-                with nc1:
-                    n_veh = st.checkbox("Needs a vehicle", key=f"cat_veh_{ev}", disabled=n_kind == "Variable")
-                with nc2:
-                    n_rec = st.checkbox("Usually repeats monthly", key=f"cat_rec_{ev}")
-            else:
-                n_cat = st.selectbox("Category", list(_reg[n_kind]), key=f"cat_pick_{n_kind}_{ev}")
-                n_types = st.text_input("New type name(s), comma separated", key=f"cat_types2_{ev}")
-                n_veh = n_rec = False
-            if st.button("➕ Add", width="stretch", key="cat_add"):
-                _tlist = [t.strip() for t in str(n_types).split(",") if t.strip()]
-                _all_types = {t.lower() for k_ in _reg for e in _reg[k_].values() for t in e["types"]}
-                _all_cats = {c.lower() for k_ in _reg for c in _reg[k_]}
-                if not str(n_cat).strip():
-                    st.error("❌ Enter a category name.")
-                elif n_mode == "New category" and str(n_cat).strip().lower() in _all_cats:
-                    st.error("❌ That category already exists — add types to it instead.")
-                elif n_mode != "New category" and not _tlist:
-                    st.error("❌ Enter at least one type.")
-                elif any(t.lower() in _all_types for t in _tlist):
-                    st.error("❌ One of those types already exists.")
+
+                    # -- By location: each expense with its own Edit / Delete --------
+                    _canon_e = _canonical_locations([x for v in mrows["site"] for x in expense_scope(v)[1]])
+
+                    _VAR_GROUP = "Per-install costs (Variable)"
+
+                    def _group_of(v, kind="Fixed"):
+                        k, ss = expense_scope(v)
+                        if k == GENERAL_SITE:
+                            return (0, "Not assigned")
+                        # Per-install rates (installer payment, liaisoning, ...) in a
+                        # group of their own, whichever sites they are for.
+                        if kind == "Variable":
+                            return (4, _VAR_GROUP)
+                        if k == SCOPE_SITE:
+                            return (1, _canon_e.get(_loc_key(ss[0]), ss[0]))
+                        if k == SCOPE_SELECTED:
+                            # The same sites picked in any order are one group.
+                            return (2, " + ".join(sorted(dict.fromkeys(_canon_e.get(_loc_key(x), x) for x in ss),
+                                                         key=str.upper)))
+                        return (3, ALL_SITES)
+
+                    mrows["_grp"] = [_group_of(v, k) for v, k in zip(mrows["site"], mrows["cost_type"])]
+                    _open_id = st.session_state.get("exp_edit_id")
+                    if _open_id not in set(mrows["expense_id"]):
+                        _open_id = None
+                    for (_order, _label), g in sorted(mrows.groupby("_grp"), key=lambda x: (x[0][0], x[0][1].upper())):
+                        _fx = g.loc[g["cost_type"] == "Fixed", "amount"].sum()
+                        _nv = int((g["cost_type"] == "Variable").sum())
+                        if _order == 4:
+                            _title = f"{_label} — {len(g)} rate(s)"
+                        else:
+                            _title = (f"{'⚠️ ' if _order == 0 else ''}{_label} — Rs. {_fx:,.0f} a month · {len(g)} expense(s)"
+                                      + (f" incl. {_nv} per-install rate(s)" if _nv else ""))
+                        with st.expander(_title, expanded=(_open_id in set(g["expense_id"])) or _order == 0):
+                            _cats_in = list(dict.fromkeys(g["_cat"]))
+                            _last_cat = None
+                            for _, r in g.iterrows():
+                                eid = r["expense_id"]
+                                # A heading per category when a group holds more than one.
+                                if len(_cats_in) > 1 and r["_cat"] != _last_cat:
+                                    _last_cat = r["_cat"]
+                                    _cg = g[g["_cat"] == _last_cat]
+                                    _csum = ("" if _order == 4 else
+                                             f" — Rs. {_cg.loc[_cg['cost_type'] == 'Fixed', 'amount'].sum():,.0f}")
+                                    st.markdown(f'<div style="font-size:12px;font-weight:800;text-transform:uppercase;'
+                                                f'letter-spacing:.4px;color:var(--ink-600);margin-top:4px;">'
+                                                f'{_html_mod.escape(str(_last_cat))}{_csum}</div>', unsafe_allow_html=True)
+                                _bits = [r["_cat"] if r["_cat"] != r["category"] else "", _repeat_text(r),
+                                         str(r["vehicle_reg"]).strip(), str(r["item"]).strip()]
+                                if _order == 4:
+                                    _bits.insert(0, scope_label(r["site"]))
+                                with st.container(border=True):
+                                    st.markdown(
+                                        f'<div style="display:flex;justify-content:space-between;gap:8px;">'
+                                        f'<span style="font-weight:700;">{_html_mod.escape(str(r["category"]))}</span>'
+                                        f'<span style="font-weight:800;">Rs. {_html_mod.escape(_value_text(r))}</span></div>'
+                                        f'<div style="font-size:12px;color:var(--ink-600);font-weight:600;">'
+                                        f'{_html_mod.escape(" · ".join(b_ for b_ in _bits if b_))}</div>',
+                                        unsafe_allow_html=True)
+                                    _editing = _open_id == eid
+                                    with st.container(horizontal=True):
+                                        if st.button("Close" if _editing else "✏️ Edit", key=f"exp_row_edit_{eid}",
+                                                     width="content"):
+                                            st.session_state["exp_edit_id"] = None if _editing else eid
+                                            st.session_state.pop("exp_pending_del", None)
+                                            st.rerun()
+                                        if not _editing and st.button("🗑️ Delete", key=f"exp_row_del_{eid}", width="content"):
+                                            st.session_state["exp_edit_id"] = eid
+                                            st.session_state["exp_pending_del"] = eid
+                                            st.rerun()
+                                    if _editing:
+                                        _edit_panel(eid)
+
+                # -- Manage categories -------------------------------------------------
+
+                # -- Add an expense (collapsed: reading is the usual job) ------------
+                with st.expander("➕ Add expense"):
+                    ak = st.radio("Kind", ["Fixed — Rs. per month", "Variable — Rs. per install"], horizontal=True,
+                                  key=f"exp_kind_{ev}")
+                    a_kind = "Fixed" if ak.startswith("Fixed") else "Variable"
+                    _cats = list(_reg[a_kind].keys())
+                    ac1, ac2 = st.columns(2)
+                    with ac1:
+                        a_cat = st.selectbox("Category", _cats, key=f"exp_cat_{a_kind}_{ev}",
+                                             help="Add your own in Admin → Expense setup.")
+                    _types = _reg[a_kind][a_cat]["types"]
+                    with ac2:
+                        a_type = (st.selectbox("Type", _types, key=f"exp_type_{a_kind}_{a_cat}_{ev}") if len(_types) > 1
+                                  else _types[0])
+                        if len(_types) == 1:
+                            st.text_input("Type", value=a_type, disabled=True, key=f"exp_type_ro_{a_kind}_{a_cat}_{ev}")
+                    a_scope, a_sites = _scope_inputs(f"exp_add_{ev}")
+                    a_veh_needed = a_kind == "Fixed" and a_type in vehicle_types()
+                    if a_kind == "Fixed":
+                        fc1, fc2 = st.columns(2)
+                        with fc1:
+                            a_amt = st.number_input("Amount (Rs. for the month)", min_value=0.0, step=100.0, value=0.0,
+                                                    key=f"exp_amt_{ev}")
+                        with fc2:
+                            a_reg = (st.selectbox("Vehicle", ["-- Select --"] + active_regs, key=f"exp_reg_{ev}")
+                                     if a_veh_needed else "")
+                        a_r1 = a_r3 = 0.0
+                    else:
+                        _std = VARIABLE_RATE_DEFAULTS.get(a_type, {})
+                        vc1, vc2 = st.columns(2)
+                        with vc1:
+                            a_r1 = st.number_input("Rate per 1PH install (Rs.)", min_value=0.0, step=5.0,
+                                                   value=float(_std.get("1PH", 0.0)), key=f"exp_r1_{a_type}_{ev}")
+                        with vc2:
+                            a_r3 = st.number_input("Rate per 3PH install (Rs.)", min_value=0.0, step=5.0,
+                                                   value=float(_std.get("3PH", 0.0)), key=f"exp_r3_{a_type}_{ev}")
+                        a_amt, a_reg = 0.0, ""
+                    a_item = st.text_input("Description (optional)", key=f"exp_item_{ev}",
+                                           placeholder=EXPENSE_ITEM_HINT.get(a_type, ""))
+                    _rep_opts = [f"Every month from {month_label(sel_month)} (recurring)", f"{month_label(sel_month)} only"]
+                    _rep_default = 0 if (a_kind == "Variable" or recurring_by_default(a_type)) else 1
+                    a_rep = st.radio("Repeats", _rep_opts, index=_rep_default, horizontal=True,
+                                     key=f"exp_rep_{a_kind}_{a_type}_{ev}")
+                    a_recurring = a_rep == _rep_opts[0]
+                    if st.button("➕ Add Expense", type="primary", width="stretch", key="exp_add"):
+                        if a_scope is None:
+                            st.error(f"❌ {a_sites}")
+                        elif a_kind == "Fixed" and a_amt <= 0:
+                            st.error("❌ Enter an amount.")
+                        elif a_kind == "Variable" and a_r1 <= 0 and a_r3 <= 0:
+                            st.error("❌ Enter at least one rate.")
+                        elif a_veh_needed and a_reg in ("", "-- Select --"):
+                            st.error("❌ Pick the vehicle this cost belongs to"
+                                     + ("" if active_regs else " — add it in Admin → Expense setup first") + ".")
+                        else:
+                            cur_df = load_expenses(fresh=True)
+                            site_val = encode_scope(a_scope, a_sites)
+                            note = ""
+                            if a_kind == "Variable":
+                                # One rate per type for the same sites: a new one REPLACES the
+                                # old from this month (two would silently add together).
+                                _same = expenses_for_month(cur_df, sel_month)
+                                _same = _same[(_same["cost_type"] == "Variable") & (_same["category"] == a_type)
+                                              & (_same["site"].map(lambda v: sorted(map(_loc_key, expense_scope(v)[1])) + [expense_scope(v)[0]])
+                                                 .map(tuple) == tuple(sorted(map(_loc_key, a_sites)) + [a_scope]))]
+                                for _eid in _same["expense_id"]:
+                                    cur_df = (stop_from_month(cur_df, _eid, sel_month) if a_recurring
+                                              else carve_month(cur_df, _eid, sel_month))
+                                if not _same.empty:
+                                    note = f" Replaces the earlier {a_type} rate for {scope_label(site_val)} from {month_label(sel_month)}."
+                            new_row = {"expense_id": new_expense_id(), "month": sel_month, "cost_type": a_kind,
+                                       "category": a_type, "item": a_item.strip(),
+                                       "vehicle_reg": a_reg if a_veh_needed else "",
+                                       "amount": a_amt, "rate_1ph": a_r1, "rate_3ph": a_r3,
+                                       "recurring": "1" if a_recurring else "0", "site": site_val, "end_month": ""}
+                            if save_expenses(pd.concat([cur_df, pd.DataFrame([new_row])], ignore_index=True)):
+                                st.session_state["exp_form_version"] += 1
+                                _what = (f"Rs. {a_amt:,.0f}" if a_kind == "Fixed"
+                                         else f"Rs. {a_r1:,.0f} per 1PH / Rs. {a_r3:,.0f} per 3PH")
+                                st.success(f"✅ Added {a_type}: {_what} — {scope_label(site_val)}, "
+                                           + ("every month from " if a_recurring else "") + f"{month_label(sel_month)}." + note)
+                                st.rerun()
+
+
+                # -- Breakdown: by category or by vehicle --------------------------------
+                if summ["by_category"]:
+                    with st.expander("Breakdown"):
+                        _vt_types = vehicle_types()
+                        _mrows = expenses_for_month(df_exp_all, sel_month)
+                        veh_rows = _mrows[(_mrows["category"].isin(_vt_types))
+                                          & (_mrows["vehicle_reg"].astype(str).str.strip() != "")]
+                        _bk = (st.radio("Show", ["By category", "By vehicle"], horizontal=True, key="exp_breakdown",
+                                        label_visibility="collapsed") if not veh_rows.empty else "By category")
+                        if _bk == "By category":
+                            cat_df = pd.DataFrame(summ["by_category"], columns=["Kind", "Category", "Type", "Month (Rs.)"])
+                            cat_df["Per install (Rs.)"] = cat_df["Month (Rs.)"].apply(
+                                lambda v: round(v / summ["installs"], 2) if summ["installs"] else None)
+                            cat_df["Month (Rs.)"] = cat_df["Month (Rs.)"].round(0).astype(int)
+                            cat_df["Share"] = cat_df["Month (Rs.)"].apply(
+                                lambda v: f"{v / summ['total_cost'] * 100:.0f}%" if summ["total_cost"] else "—")
+                            cat_df = cat_df.sort_values(["Kind", "Category", "Month (Rs.)"], ascending=[True, True, False])
+                            render_scroll_table(cat_df)
+                        else:
+                            vt = veh_rows.pivot_table(index="vehicle_reg", columns="category", values="amount",
+                                                      aggfunc="sum", fill_value=0)
+                            vt = vt.loc[:, (vt != 0).any(axis=0)] if not vt.empty else vt
+                            vt["Total"] = vt.sum(axis=1)
+                            vt = vt.round(0).astype(int).sort_values("Total", ascending=False).reset_index()
+                            render_scroll_table(vt.rename(columns={"vehicle_reg": "Vehicle"}))
+
+        with sub_pl:
+            if sub_pl.open:
+                _n1ph, _n3ph = n1, n3
+                _all = _n1ph + _n3ph
+                _p1_new, _p1_old = INCENTIVE_UNIT_RATE_1PH, INCENTIVE_OLD_UNIT_RATE_1PH
+                _p3_new, _p3_old = RATE_3PH_NEW, RATE_3PH_OLD
+                _cm_rate, _ret, _gst, _split = CHECK_METER_RATE, RETENTION_PCT, GST_PCT, PRIMARY_SPLIT
+                st.caption(f"1PH Rs. {_p1_new:,.0f} new / {_p1_old:,.0f} old · 3PH Rs. {_p3_new:,.0f} / {_p3_old:,.0f} · "
+                           f"check meter Rs. {_cm_rate:,.0f} · GST {_gst * 100:.0f}% · retention {_ret * 100:.0f}% · "
+                           f"{PARTNERS[0]} {_split * 100:.0f}% — change in Admin → Pricing")
+                if _all == 0:
+                    st.info(f"No installs recorded for {month_label(sel_month)} yet.")
                 else:
-                    if save_custom_category(n_kind, str(n_cat).strip(), _tlist or [str(n_cat).strip()],
-                                            vehicle=n_veh, recurring=n_rec):
-                        st.session_state["exp_form_version"] += 1
-                        st.success("✅ Added.")
-                        st.rerun()
-            # Remove a custom type no expense uses.
-            _used = set(df_exp_all["category"].astype(str))
-            _removable = [(k_, c_, t_) for k_ in _reg for c_, e in _reg[k_].items() for t_ in e["custom_types"]
-                          if t_ not in _used]
-            if _removable:
-                _rm = st.selectbox("Remove an unused custom type", ["-- Select --"] + [f"{c_} → {t_} ({k_})" for k_, c_, t_ in _removable],
-                                   key=f"cat_rm_{ev}")
-                if _rm != "-- Select --" and st.button("🗑️ Remove", width="stretch", key="cat_rm_btn"):
-                    k_, c_, t_ = _removable[[f"{c} → {t} ({k})" for k, c, t in _removable].index(_rm)]
-                    if remove_custom_type(k_, c_, t_):
-                        st.success(f"✅ Removed {t_}.")
-                        st.rerun()
+                    if not summ["has_entries"]:
+                        st.markdown('<div class="warn-box">No expenses entered for this month — profit is overstated.</div>',
+                                    unsafe_allow_html=True)
+                    _cpi = (summ["total_cost"] / _all) if summ["has_entries"] else None
+                    bill = calculate_billing(_n1ph, _p1_new, INCENTIVE_FLAT_ADDON_1PH, slab_total=_all)
+                    bill3 = calculate_billing(_n3ph, _p3_new, SURVEY_3PH, slab_total=_all)
+                    _ncm = int(sum(month_check_meters(sel_month).values()))
+                    ps = profit_sharing_summary(_n1ph, _cpi or 0.0, _p1_old, _p1_new,
+                                                INCENTIVE_FLAT_ADDON_1PH, _ret, _gst, _split, installs_3ph=_n3ph,
+                                                old_rate_3ph=_p3_old, new_rate_3ph=_p3_new,
+                                                check_meters=_ncm, check_meter_rate=_cm_rate)
+                    _invoice = bill["total_cost"] + bill3["total_cost"] + ps["check_meter_amount"]
+                    render_stat_tiles([
+                        ("rupee", fmt_rs(_invoice), "Billing", "Rs. before GST", "normal"),
+                        ("wallet", fmt_rs(_cpi, 1), "Cost", "Rs./install", "normal"),
+                        ("target", fmt_rs(ps["base_profit"] + ps["additional"]), "Profit", "Rs. pool", "normal"),
+                        ("download", fmt_rs(_invoice * (1 - _ret - TDS_PCT)), "Net", "received", "normal"),
+                    ])
 
-        # -- Vehicles -----------------------------------------------------------
-        st.divider()
-        sec_hdr("truck", "Vehicles")
-        vc1, vc2, vc3 = st.columns([1.2, 2, 1], vertical_alignment="bottom")
-        with vc1:
-            new_reg = st.text_input("Registration No.", key=f"veh_reg_{ev}", placeholder="AP16AB1234")
-        with vc2:
-            new_desc = st.text_input("Description", key=f"veh_desc_{ev}", placeholder="e.g. Bolero – Chittinagar team")
-        with vc3:
-            if st.button("➕ Add Vehicle", width="stretch", key="veh_add"):
-                reg = normalize_reg_no(new_reg)
-                if len(reg) < 6:
-                    st.error("❌ Enter a valid registration number.")
-                elif reg in set(df_veh["reg_no"].astype(str).map(normalize_reg_no)):
-                    st.error(f"❌ {reg} is already in the list.")
-                else:
-                    if safe_update("Vehicles", pd.concat([df_veh[VEHICLE_COLS], pd.DataFrame([{
-                            "reg_no": reg, "description": new_desc.strip(), "is_active": "1"}])], ignore_index=True)):
-                        st.session_state["exp_form_version"] += 1
-                        st.success(f"✅ Added {reg}.")
-                        st.rerun()
+                    sub_hdr("chart", "Pool")
+                    _prow = lambda g, c, v: {"Group": g, "Component": c, "Amount (Rs.)": int(round(v))}
+                    pool = pd.DataFrame([
+                        _prow("Old base", "Old pricing base revenue", ps["old_base_revenue"]),
+                        _prow("", f"Expense ({fmt_rs(_cpi, 2)} × {_all:,})", ps["expense_total"]),
+                        _prow("", "Base profit", ps["base_profit"]),
+                        _prow("Additional", "Price hike", ps["price_hike"]),
+                        _prow("", "Tiered slab incentive", ps["tier_incentive"]),
+                        _prow("", f"Check meters ({_ncm:,} × Rs. {_cm_rate:,.0f})", ps["check_meter_amount"]),
+                        _prow("", "Additional total", ps["additional"]),
+                        _prow("Held back", f"GST on old base ({_gst * 100:.0f}%)", ps["gst_old"]),
+                        _prow("", "GST on additional", ps["gst_additional"]),
+                        _prow("", f"Retention on old base ({_ret * 100:.0f}%, 90 days)", ps["retention"]),
+                        _prow("", "Retention on additional", ps["retention_additional"]),
+                    ])
+                    render_scroll_table(pool)
 
-        if df_veh.empty or df_veh["reg_no"].astype(str).str.strip().eq("").all():
-            st.info("No vehicles added yet.")
-        else:
-            used_regs = set(df_exp_all["vehicle_reg"].astype(str))
-            vview = df_veh[VEHICLE_COLS].copy()
-            vview["Active"] = vview["is_active"].apply(_truthy)
-            vview.insert(0, "Delete", False)
-            vview = vview[["Delete", "reg_no", "description", "Active"]].rename(
-                columns={"reg_no": "Registration No.", "description": "Description"})
-            vedit = st.data_editor(vview, width="stretch", hide_index=True, key=f"veh_editor_{_sheet_version('Vehicles')}",
-                                   disabled=["Registration No."], height=dataframe_height(len(vview)))
-            if st.button("💾 Save Vehicle Changes", width="stretch", key="veh_save"):
-                new_veh, blocked = apply_vehicle_edits(vedit, used_regs)
-                if safe_update("Vehicles", new_veh):
-                    if blocked:
-                        st.warning(f"⚠️ {', '.join(blocked)} has costs on record, so it was marked inactive instead of deleted.")
-                    st.success("✅ Vehicles updated.")
-                    st.rerun()
+                    sub_hdr("calendar", "Payment Schedule")
+                    _y, _m = int(sel_month[:4]), int(sel_month[5:])
+                    _inv_default = date(_y + (_m == 12), 1 if _m == 12 else _m + 1, 1)   # 1st of the next month
+                    _inv_date = st.date_input("Invoice date", value=_inv_default, key=f"inc_inv_date_{sel_month}",
+                                              format="DD/MM/YYYY")
+                    _net_on = _inv_date + timedelta(days=NET_PAY_DAYS)
+                    _gst_on = _inv_date + timedelta(days=GST_PAY_DAYS)
+                    _ret_on = _inv_date + timedelta(days=RETENTION_DAYS)
+                    _fmt_d = lambda d: d.strftime("%d.%m.%Y")
+                    _gst_total = _invoice * GST_INVOICE_PCT
+                    _gst_kept = _invoice * _gst
+                    sched = pd.DataFrame([
+                        {"Paid on": _fmt_d(_net_on), "What": f"Net — invoice less {_ret * 100:.0f}% retention and "
+                                                             f"{TDS_PCT * 100:.0f}% TDS",
+                         "Amount (Rs.)": round(_invoice * (1 - _ret - TDS_PCT))},
+                        {"Paid on": _fmt_d(_gst_on), "What": f"GST {GST_INVOICE_PCT * 100:.0f}% in full",
+                         "Amount (Rs.)": round(_gst_total)},
+                        {"Paid on": "", "What": f"  of which to government ({(GST_INVOICE_PCT - _gst) * 100:.0f}%)",
+                         "Amount (Rs.)": round(_gst_total - _gst_kept)},
+                        {"Paid on": "", "What": f"  of which kept — ITC ({_gst * 100:.0f}%)",
+                         "Amount (Rs.)": round(_gst_kept)},
+                        {"Paid on": _fmt_d(_ret_on), "What": f"Retention released ({_ret * 100:.0f}%)",
+                         "Amount (Rs.)": round(_invoice * _ret)},
+                        {"Paid on": "—", "What": f"TDS {TDS_PCT * 100:.0f}% — claimed against income tax, not cash",
+                         "Amount (Rs.)": round(_invoice * TDS_PCT)},
+                    ])
+                    render_scroll_table(sched)
 
+                    sub_hdr("users", "Partners")
+                    pw = ps["partners"].copy()
+                    pw = pd.DataFrame({
+                        "Partner": pw["Partner"],
+                        f"Net {_fmt_d(_net_on)}": pw["Base Profit Share"] + pw["Additional (New Pricing)"],
+                        f"GST {_fmt_d(_gst_on)}": pw["GST On Old Base"] + pw["GST On Additional"],
+                        f"Retention {_fmt_d(_ret_on)}": pw["Retention (after 90 days)"],
+                        "Total": pw["Grand Total"],
+                    })
+                    for c in pw.columns[1:]:
+                        pw[c] = pw[c].round(0).astype(int)
+                    pw = pd.concat([pw, pd.DataFrame([{"Partner": "TOTAL", **{c: int(pw[c].sum()) for c in pw.columns[1:]}}])],
+                                   ignore_index=True)
+                    render_scroll_table(pw)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  P/L — incentive and profit sharing, on the Expenses tab's costs
-# ═══════════════════════════════════════════════════════════════════════════════
-with tab_pl:
-    if tab_pl.open:   # only the open tab runs (tabs are created with on_change="rerun")
-        tab_action_bar("pl")
-        df_exp_all = load_expenses()
-        _today = today_ist()
-        _months = set(recent_month_keys(_today)) | {next_month_key(month_key(_today))}
-        _months |= {str(x) for x in df_exp_all["month"].unique() if str(x).strip()}
-        month_opts = sorted(_months, reverse=True)
-        # Opens on the month chosen on the Expenses tab, if any.
-        _m0 = st.session_state.get("exp_month", month_key(_today))
-        sel_month = st.selectbox("Month", month_opts,
-                                 index=month_opts.index(_m0) if _m0 in month_opts else 0,
-                                 format_func=month_label, key="pl_month")
-        n1, n3 = month_installs(df_installations_master, sel_month)
-        summ = expense_summary(df_exp_all, sel_month, n1, n3)
-        # -- 1PH incentive & profit sharing -------------------------------------
-        sec_hdr("receipt", "Incentive & Profit Sharing")
-        # The same install counts as the rest of this tab and the Dashboard
-        # billing (the Installations sheet), so the expense per install, the
-        # billing and the profit split all rest on one set of figures.
-        _n1ph, _n3ph = n1, n3
-        _cpi = summ["total_per_install"]
-        if (_n1ph + _n3ph) == 0:
-            st.info(f"No installs recorded for {month_label(sel_month)} yet.")
-        else:
-            if _cpi is None:
-                st.markdown('<div class="warn-box">No expenses entered for this month, so the '
-                            'expense per install is 0 and the profit figures will be overstated. '
-                            'Add this month\'s costs on the Expenses tab first.</div>', unsafe_allow_html=True)
-            # -- Pricing: old and new unit rates for both meter types ----------
-            sub_hdr("rupee", "Pricing (Rs. per install, before survey)")
-            _pv = _sheet_version("Settings")
-            pr1, pr2, pr3, pr4 = st.columns(4)
-            with pr1:
-                _p1_new = st.number_input("1PH new", min_value=0.0, step=5.0,
-                                          value=float(INCENTIVE_UNIT_RATE_1PH), key=f"price_1ph_new_{_pv}")
-            with pr2:
-                _p1_old = st.number_input("1PH old", min_value=0.0, step=5.0,
-                                          value=float(INCENTIVE_OLD_UNIT_RATE_1PH), key=f"price_1ph_old_{_pv}")
-            with pr3:
-                _p3_new = st.number_input("3PH new", min_value=0.0, step=5.0,
-                                          value=float(RATE_3PH_NEW), key=f"price_3ph_new_{_pv}")
-            with pr4:
-                _p3_old = st.number_input("3PH old", min_value=0.0, step=5.0,
-                                          value=float(RATE_3PH_OLD), key=f"price_3ph_old_{_pv}")
-            pr5, _ = st.columns([1, 3])
-            with pr5:
-                _cm_rate = st.number_input("Check meter extra", min_value=0.0, step=5.0,
-                                           value=float(CHECK_METER_RATE), key=f"price_cm_{_pv}",
-                                           help="Paid on top of the normal 1PH / 3PH rate for each check meter.")
-            _old_rate = _p1_old
-            _prices = {"price_1ph_new": _p1_new, "price_1ph_old": _p1_old,
-                       "price_3ph_new": _p3_new, "price_3ph_old": _p3_old, "check_meter_rate": _cm_rate}
-            _saved = {"price_1ph_new": INCENTIVE_UNIT_RATE_1PH, "price_1ph_old": INCENTIVE_OLD_UNIT_RATE_1PH,
-                      "price_3ph_new": RATE_3PH_NEW, "price_3ph_old": RATE_3PH_OLD,
-                      "check_meter_rate": CHECK_METER_RATE}
-            _changed = {k: v for k, v in _prices.items() if float(v) != float(_saved[k])}
-            st.caption(f"Survey on top: Rs. {INCENTIVE_FLAT_ADDON_1PH:,.0f} per 1PH, Rs. {SURVEY_3PH:,.0f} per 3PH. "
-                       "Changes show below at once; Save to use them everywhere — Dashboard billing, "
-                       "cost per site and the Excel download.")
-            if _changed and st.button(f"💾 Save pricing ({len(_changed)} changed)", type="primary",
-                                      width="stretch", key="price_save"):
-                if save_settings({k: float(v) for k, v in _prices.items()}):
-                    st.success("✅ Pricing saved — billing everywhere now uses it.")
-                    st.rerun()
-            ic2, ic3, ic4 = st.columns(3)
-            with ic2:
-                _ret = st.number_input("Retention %", min_value=0.0, max_value=100.0, step=1.0,
-                                       value=RETENTION_PCT * 100, key="inc_retention") / 100
-            with ic3:
-                _gst = st.number_input("GST %", min_value=0.0, max_value=100.0, step=1.0,
-                                       value=GST_PCT * 100, key="inc_gst") / 100
-            with ic4:
-                _split = st.number_input(f"{PARTNERS[0]}'s share %", min_value=0.0, max_value=100.0, step=5.0,
-                                         value=PRIMARY_SPLIT * 100, key="inc_split",
-                                         help=f"Of the {PARTNERS[0]} + {PARTNERS[1]} pool; {PARTNERS[1]} gets the rest.") / 100
+                    lazy_download_button(
+                        "📥 Download Excel (Incentive + Profit Sharing)",
+                        lambda: build_incentive_workbook(sel_month, _n1ph, _cpi or 0.0, _p1_old, _ret, _gst, _split,
+                                                         installs_3ph=_n3ph, new_rate=_p1_new,
+                                                         old_rate_3ph=_p3_old, new_rate_3ph=_p3_new,
+                                                         check_meters=_ncm, check_meter_rate=_cm_rate),
+                        f"1Ph_Incentive_Profit_{sel_month}.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "inc_xlsx")
 
-            # 3PH is now part of the workbook's revenue, so the month's full cost is
-            # spread over ALL installs: expense/install x (1PH + 3PH) = the month's
-            # total cost. (The earlier "charge it all to 1PH" choice existed only
-            # because 3PH wasn't in the workbook.)
-            _all = _n1ph + _n3ph
-            _cpi = (summ["total_cost"] / _all) if (summ["has_entries"] and _all) else None
-            st.markdown(
-                f'<div class="info-box">Expense per install: <b>Rs. {fmt_rs(_cpi, 2)}</b> '
-                f'x {_all:,} installs ({_n1ph:,} 1PH + {_n3ph:,} 3PH) = <b>Rs. {fmt_rs((_cpi or 0) * _all)}</b>'
-                f' (month total cost Rs. {fmt_rs(summ["total_cost"])}).</div>', unsafe_allow_html=True)
-
-            # At the prices above (saved or not yet saved); slabs on 1PH + 3PH together.
-            bill = calculate_billing(_n1ph, _p1_new, INCENTIVE_FLAT_ADDON_1PH, slab_total=_n1ph + _n3ph)
-            bill3 = calculate_billing(_n3ph, _p3_new, SURVEY_3PH, slab_total=_n1ph + _n3ph)
-            _ncm = int(sum(month_check_meters(sel_month).values()))
-            ps = profit_sharing_summary(_n1ph, _cpi or 0.0, _p1_old, _p1_new,
-                                        INCENTIVE_FLAT_ADDON_1PH, _ret, _gst, _split, installs_3ph=_n3ph,
-                                        old_rate_3ph=_p3_old, new_rate_3ph=_p3_new,
-                                        check_meters=_ncm, check_meter_rate=_cm_rate)
-            _bill_cm = ps["check_meter_amount"]
-            render_stat_tiles([
-                ("bolt", f"{_n1ph:,} / {_n3ph:,}", "1PH / 3PH", "installs", "normal"),
-                ("check", f"{_ncm:,}", "Check", "meters", "normal"),
-                ("wallet", fmt_rs(_cpi, 1), "Expense", "Rs./install", "normal"),
-                ("rupee", fmt_rs(bill["total_cost"] + bill3["total_cost"] + _bill_cm), "Billing", "Rs.", "normal"),
-                ("target", fmt_rs(ps["base_profit"] + ps["additional"]), "Profit", "Rs. pool", "normal"),
-            ])
-
-            sub_hdr("chart", "Pool")
-            pool = pd.DataFrame([
-                ("Old pricing base revenue", ps["old_base_revenue"]),
-                (f"Total expense ({fmt_rs(_cpi, 2)} x {_n1ph + _n3ph:,})", ps["expense_total"]),
-                ("Base profit (old pricing)", ps["base_profit"]),
-                (f"Retention held on old base ({_ret * 100:.0f}%, 90 days)", ps["retention"]),
-                (f"GST on old base ({_gst * 100:.0f}%)", ps["gst_old"]),
-                ("Price hike amount", ps["price_hike"]),
-                ("Tiered slab incentive", ps["tier_incentive"]),
-                (f"Check meters ({_ncm:,} x Rs. {_cm_rate:,.0f})", ps["check_meter_amount"]),
-                ("Additional amount (new pricing)", ps["additional"]),
-                ("GST on additional", ps["gst_additional"]),
-                (f"Retention held on additional ({_ret * 100:.0f}%, 90 days)", ps["retention_additional"]),
-            ], columns=["Component", "Amount (Rs.)"])
-            pool["Amount (Rs.)"] = pool["Amount (Rs.)"].round(0).astype(int)
-            render_scroll_table(pool)
-
-            # -- When the money arrives ------------------------------------------
-            sub_hdr("calendar", "Payment Schedule")
-            _y, _m = int(sel_month[:4]), int(sel_month[5:])
-            _inv_default = date(_y + (_m == 12), 1 if _m == 12 else _m + 1, 1)   # 1st of the next month
-            _inv_date = st.date_input("Invoice date", value=_inv_default, key=f"inc_inv_date_{sel_month}",
-                                      format="DD/MM/YYYY")
-            _net_on = _inv_date + timedelta(days=NET_PAY_DAYS)
-            _gst_on = _inv_date + timedelta(days=GST_PAY_DAYS)
-            _ret_on = _inv_date + timedelta(days=RETENTION_DAYS)
-            _fmt_d = lambda d: d.strftime("%d.%m.%Y")
-            _invoice = bill["total_cost"] + bill3["total_cost"] + _bill_cm
-            _gst_total = _invoice * GST_INVOICE_PCT
-            _gst_kept = _invoice * _gst
-            sched = pd.DataFrame([
-                {"Paid on": _fmt_d(_net_on), "What": f"Net — invoice value (before GST) less {_ret * 100:.0f}% retention "
-                                                     f"and {TDS_PCT * 100:.0f}% TDS",
-                 "Amount (Rs.)": round(_invoice * (1 - _ret - TDS_PCT))},
-                {"Paid on": _fmt_d(_gst_on), "What": f"GST {GST_INVOICE_PCT * 100:.0f}% in full — no retention on GST ({GST_PAY_DAYS} days after the invoice)",
-                 "Amount (Rs.)": round(_gst_total)},
-                {"Paid on": "", "What": f"  of which payable to government ({(GST_INVOICE_PCT - _gst) * 100:.0f}%)",
-                 "Amount (Rs.)": round(_gst_total - _gst_kept)},
-                {"Paid on": "", "What": f"  of which kept as profit — ITC available ({_gst * 100:.0f}%)",
-                 "Amount (Rs.)": round(_gst_kept)},
-                {"Paid on": _fmt_d(_ret_on), "What": f"Retention released ({_ret * 100:.0f}% of the invoice value before GST)",
-                 "Amount (Rs.)": round(_invoice * _ret)},
-            ])
-            render_scroll_table(sched)
-            st.markdown(
-                f'<div class="info-box">Invoice of Rs. {_invoice:,.0f} (before GST) dated {_fmt_d(_inv_date)}. '
-                f'<b>GST is received only {GST_PAY_DAYS} days after the invoice</b>, so the partners\' GST shares '
-                f'below are paid on {_fmt_d(_gst_on)}, not with the net on {_fmt_d(_net_on)}. TDS of '
-                f'Rs. {_invoice * TDS_PCT:,.0f} is not received in cash; it is claimed against income tax.</div>',
-                unsafe_allow_html=True)
-
-            sub_hdr("users", "Partner-Wise")
-            pw = ps["partners"].copy()
-            pw[f"Paid {_fmt_d(_net_on)}"] = pw["Base Profit Share"] + pw["Additional (New Pricing)"]
-            pw[f"GST Paid {_fmt_d(_gst_on)}"] = pw["GST On Old Base"] + pw["GST On Additional"]
-            pw[f"Retention Paid {_fmt_d(_ret_on)}"] = pw["Retention (after 90 days)"]
-            pw = pw[["Partner", "Base Profit Share", "Additional (New Pricing)", f"Paid {_fmt_d(_net_on)}",
-                     "GST On Old Base", "GST On Additional", f"GST Paid {_fmt_d(_gst_on)}",
-                     "Retention On Old Base", "Retention On Additional",
-                     f"Retention Paid {_fmt_d(_ret_on)}", "Grand Total"]]
-            for c in pw.columns[1:]:
-                pw[c] = pw[c].round(0).astype(int)
-            total_row = {"Partner": "TOTAL", **{c: int(pw[c].sum()) for c in pw.columns[1:]}}
-            pw_disp = pd.concat([pw, pd.DataFrame([total_row])], ignore_index=True)
-            render_scroll_table(pw_disp)
-
-            # -- The 9% GST kept, by partner pair --------------------------------
-            sub_hdr("receipt", f"GST {_gst * 100:.0f}% — Partner Breakup (paid {_fmt_d(_gst_on)})")
-            _pp = ps["partners"].set_index("Partner")
-            _pair_a, _pair_b = list(PARTNERS[2:]), list(PARTNERS[:2])
-            _lbl_a, _lbl_b = " & ".join(_pair_a), " & ".join(_pair_b)
-
-            def _pair_row(label, col):
-                a, b = float(_pp.loc[_pair_a, col].sum()), float(_pp.loc[_pair_b, col].sum())
-                return {"GST": label, _lbl_a: round(a), _lbl_b: round(b), "Total": round(a + b)}
-            gst_bk = pd.DataFrame([
-                _pair_row("On old base (shared equally by all four)", "GST On Old Base"),
-                _pair_row(f"On additional (new pricing — {_lbl_b} only)", "GST On Additional"),
-            ])
-            gst_bk = pd.concat([gst_bk, pd.DataFrame([{"GST": "TOTAL", **{c: int(gst_bk[c].sum())
-                                                                         for c in gst_bk.columns[1:]}}])],
-                               ignore_index=True)
-            render_scroll_table(gst_bk)
-            _each = {p: float(_pp.loc[p, "GST On Old Base"] + _pp.loc[p, "GST On Additional"]) for p in PARTNERS}
-            st.caption("Each: " + " · ".join(f"{p} Rs. {_each[p]:,.0f}" for p in _pair_a + _pair_b)
-                       + f". The Rs. {_gst_total - _gst_kept:,.0f} payable to the government is not shared.")
-
-            # -- The retention, by partner pair ----------------------------------
-            sub_hdr("clock", f"Retention {_ret * 100:.0f}% — Partner Breakup (paid {_fmt_d(_ret_on)})")
-            ret_bk = pd.DataFrame([
-                _pair_row("On old base (shared equally by all four)", "Retention On Old Base"),
-                _pair_row(f"On additional (new pricing + incentive — {_lbl_b} only)", "Retention On Additional"),
-            ])
-            ret_bk = pd.concat([ret_bk, pd.DataFrame([{"GST": "TOTAL", **{c: int(ret_bk[c].sum())
-                                                                         for c in ret_bk.columns[1:]}}])],
-                               ignore_index=True).rename(columns={"GST": "Retention"})
-            render_scroll_table(ret_bk)
-            _each_r = {p: float(_pp.loc[p, "Retention (after 90 days)"]) for p in PARTNERS}
-            st.caption("Each: " + " · ".join(f"{p} Rs. {_each_r[p]:,.0f}" for p in _pair_a + _pair_b)
-                       + f". Held back from the payment on {_fmt_d(_net_on)} and paid on {_fmt_d(_ret_on)}.")
-
-            lazy_download_button(
-                "📥 Download Excel (Incentive + Profit Sharing)",
-                lambda: build_incentive_workbook(sel_month, _n1ph, _cpi or 0.0, _p1_old, _ret, _gst, _split,
-                                                 installs_3ph=_n3ph, new_rate=_p1_new,
-                                                 old_rate_3ph=_p3_old, new_rate_3ph=_p3_new,
-                                                 check_meters=_ncm, check_meter_rate=_cm_rate),
-                f"1Ph_Incentive_Profit_{sel_month}.xlsx",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "inc_xlsx")
 
 
 
@@ -12007,7 +11698,7 @@ with tab_ll:
                         break
                     _try = prev_month_key(_try)
                 if not _es["has_entries"]:
-                    st.info("No costs entered on the Expenses tab for this month or the two before it, so cost and "
+                    st.info("No costs entered in Money → Costs for this month or the two before it, so cost and "
                             "profit can't be worked out yet. Revenue is shown below.")
                 _cb = site_cost_breakdown(_df_exp, _cm)
                 if _site == "All sites":
@@ -12038,9 +11729,9 @@ with tab_ll:
                                  f"{_ll_signed((M['ppi_with'] or 0) - (M['ppi_now'] or 0), 1, 'Rs. ')}"),
                     ]
                 _ll_grid(_cards)
-                st.caption(f"Revenue uses the Expenses-tab prices and the slab incentive on the project's whole "
+                st.caption(f"Revenue uses the Admin → Pricing prices and the slab incentive on the project's whole "
                            f"month ({_proj_s['month_now']:,.0f} installs now at this pace), before GST. Costs are "
-                           f"{month_label(_cm)}'s from the Expenses tab: fixed Rs. {_fixed_grp:,.0f} a month for "
+                           f"{month_label(_cm)}'s from Money → Costs: fixed Rs. {_fixed_grp:,.0f} a month for "
                            f"this selection stays the same; variable Rs. {_cb['rate1']:,.1f} (1PH) / "
                            f"Rs. {_cb['rate3']:,.1f} (3PH) per install grows with installs.")
 
@@ -12710,6 +12401,241 @@ def render_location_name_tools():
         st.caption("✅ Every location name in your data matches a saved location.")
 
 
+def render_expense_setup():
+    """Admin → Expense setup: expense categories and vehicles (moved from
+    the Expenses tab — set up once, rarely changed)."""
+    if "exp_form_version" not in st.session_state:
+        st.session_state["exp_form_version"] = 0
+    ev = st.session_state["exp_form_version"]
+    _reg = expense_registry()
+    df_exp_all = load_expenses()
+    df_veh = load_vehicles()
+    with st.expander("Categories"):
+        _rows = []
+        for _k in ("Fixed", "Variable"):
+            for _c, _e in _reg[_k].items():
+                _rows.append({"Kind": _k, "Category": _c, "Types": ", ".join(_e["types"]),
+                              "Vehicle": "Yes" if _e["vehicle"] else "", "Custom": "Yes" if _e["custom"] else ""})
+        render_scroll_table(pd.DataFrame(_rows), max_height=420)
+        st.caption("Variable categories are per-install rates (like installer payment); Fixed are monthly "
+                   "amounts. A category's types are what you pick when adding an expense.")
+        mc1, mc2 = st.columns(2)
+        with mc1:
+            n_kind = st.radio("Kind", ["Fixed", "Variable"], horizontal=True, key=f"cat_kind_{ev}")
+        with mc2:
+            n_mode = st.radio("Add", ["New category", "New type in a category"], horizontal=True,
+                              key=f"cat_mode_{ev}")
+        if n_mode == "New category":
+            n_cat = st.text_input("Category name", key=f"cat_name_{ev}", placeholder="e.g. Insurance")
+            n_types = st.text_input("Types (optional, comma separated)", key=f"cat_types_{ev}",
+                                    placeholder="e.g. Vehicle insurance, Staff insurance")
+            nc1, nc2 = st.columns(2)
+            with nc1:
+                n_veh = st.checkbox("Needs a vehicle", key=f"cat_veh_{ev}", disabled=n_kind == "Variable")
+            with nc2:
+                n_rec = st.checkbox("Usually repeats monthly", key=f"cat_rec_{ev}")
+        else:
+            n_cat = st.selectbox("Category", list(_reg[n_kind]), key=f"cat_pick_{n_kind}_{ev}")
+            n_types = st.text_input("New type name(s), comma separated", key=f"cat_types2_{ev}")
+            n_veh = n_rec = False
+        if st.button("➕ Add", width="stretch", key="cat_add"):
+            _tlist = [t.strip() for t in str(n_types).split(",") if t.strip()]
+            _all_types = {t.lower() for k_ in _reg for e in _reg[k_].values() for t in e["types"]}
+            _all_cats = {c.lower() for k_ in _reg for c in _reg[k_]}
+            if not str(n_cat).strip():
+                st.error("❌ Enter a category name.")
+            elif n_mode == "New category" and str(n_cat).strip().lower() in _all_cats:
+                st.error("❌ That category already exists — add types to it instead.")
+            elif n_mode != "New category" and not _tlist:
+                st.error("❌ Enter at least one type.")
+            elif any(t.lower() in _all_types for t in _tlist):
+                st.error("❌ One of those types already exists.")
+            else:
+                if save_custom_category(n_kind, str(n_cat).strip(), _tlist or [str(n_cat).strip()],
+                                        vehicle=n_veh, recurring=n_rec):
+                    st.session_state["exp_form_version"] += 1
+                    st.success("✅ Added.")
+                    st.rerun()
+        # Remove a custom type no expense uses.
+        _used = set(df_exp_all["category"].astype(str))
+        _removable = [(k_, c_, t_) for k_ in _reg for c_, e in _reg[k_].items() for t_ in e["custom_types"]
+                      if t_ not in _used]
+        if _removable:
+            _rm = st.selectbox("Remove an unused custom type", ["-- Select --"] + [f"{c_} → {t_} ({k_})" for k_, c_, t_ in _removable],
+                               key=f"cat_rm_{ev}")
+            if _rm != "-- Select --" and st.button("🗑️ Remove", width="stretch", key="cat_rm_btn"):
+                k_, c_, t_ = _removable[[f"{c} → {t} ({k})" for k, c, t in _removable].index(_rm)]
+                if remove_custom_type(k_, c_, t_):
+                    st.success(f"✅ Removed {t_}.")
+                    st.rerun()
+
+    # -- Vehicles -----------------------------------------------------------
+    with st.expander("Vehicles"):
+        vc1, vc2, vc3 = st.columns([1.2, 2, 1], vertical_alignment="bottom")
+        with vc1:
+            new_reg = st.text_input("Registration No.", key=f"veh_reg_{ev}", placeholder="AP16AB1234")
+        with vc2:
+            new_desc = st.text_input("Description", key=f"veh_desc_{ev}", placeholder="e.g. Bolero – Chittinagar team")
+        with vc3:
+            if st.button("➕ Add Vehicle", width="stretch", key="veh_add"):
+                reg = normalize_reg_no(new_reg)
+                if len(reg) < 6:
+                    st.error("❌ Enter a valid registration number.")
+                elif reg in set(df_veh["reg_no"].astype(str).map(normalize_reg_no)):
+                    st.error(f"❌ {reg} is already in the list.")
+                else:
+                    if safe_update("Vehicles", pd.concat([df_veh[VEHICLE_COLS], pd.DataFrame([{
+                            "reg_no": reg, "description": new_desc.strip(), "is_active": "1"}])], ignore_index=True)):
+                        st.session_state["exp_form_version"] += 1
+                        st.success(f"✅ Added {reg}.")
+                        st.rerun()
+
+        if df_veh.empty or df_veh["reg_no"].astype(str).str.strip().eq("").all():
+            st.info("No vehicles added yet.")
+        else:
+            used_regs = set(df_exp_all["vehicle_reg"].astype(str))
+            vview = df_veh[VEHICLE_COLS].copy()
+            vview["Active"] = vview["is_active"].apply(_truthy)
+            vview.insert(0, "Delete", False)
+            vview = vview[["Delete", "reg_no", "description", "Active"]].rename(
+                columns={"reg_no": "Registration No.", "description": "Description"})
+            vedit = st.data_editor(vview, width="stretch", hide_index=True, key=f"veh_editor_{_sheet_version('Vehicles')}",
+                                   disabled=["Registration No."], height=dataframe_height(len(vview)))
+            if st.button("💾 Save Vehicle Changes", width="stretch", key="veh_save"):
+                new_veh, blocked = apply_vehicle_edits(vedit, used_regs)
+                if safe_update("Vehicles", new_veh):
+                    if blocked:
+                        st.warning(f"⚠️ {', '.join(blocked)} has costs on record, so it was marked inactive instead of deleted.")
+                    st.success("✅ Vehicles updated.")
+                    st.rerun()
+
+
+def render_pricing_settings():
+    """Admin → Pricing: billing rates and the profit-sharing percentages, used
+    by Dashboard billing, site costs, P/L and the Excel download."""
+    _pv = _sheet_version("Settings")
+    pr = st.columns(4)
+    _vals = {}
+    for col, (k, lbl, v) in zip(pr, [("price_1ph_new", "1PH new", INCENTIVE_UNIT_RATE_1PH),
+                                     ("price_1ph_old", "1PH old", INCENTIVE_OLD_UNIT_RATE_1PH),
+                                     ("price_3ph_new", "3PH new", RATE_3PH_NEW),
+                                     ("price_3ph_old", "3PH old", RATE_3PH_OLD)]):
+        with col:
+            _vals[k] = st.number_input(lbl, min_value=0.0, step=5.0, value=float(v), key=f"adm_{k}_{_pv}")
+    pc = st.columns(4)
+    with pc[0]:
+        _vals["check_meter_rate"] = st.number_input("Check meter extra", min_value=0.0, step=5.0,
+                                                    value=float(CHECK_METER_RATE), key=f"adm_cm_{_pv}")
+    with pc[1]:
+        _vals["retention_pct"] = st.number_input("Retention %", min_value=0.0, max_value=100.0, step=1.0,
+                                                 value=RETENTION_PCT * 100, key=f"adm_ret_{_pv}") / 100
+    with pc[2]:
+        _vals["gst_pct"] = st.number_input("GST kept %", min_value=0.0, max_value=100.0, step=1.0,
+                                           value=GST_PCT * 100, key=f"adm_gst_{_pv}") / 100
+    with pc[3]:
+        _vals["primary_split"] = st.number_input(f"{PARTNERS[0]}'s share %", min_value=0.0, max_value=100.0,
+                                                 step=5.0, value=PRIMARY_SPLIT * 100, key=f"adm_split_{_pv}") / 100
+    _saved = {"price_1ph_new": INCENTIVE_UNIT_RATE_1PH, "price_1ph_old": INCENTIVE_OLD_UNIT_RATE_1PH,
+              "price_3ph_new": RATE_3PH_NEW, "price_3ph_old": RATE_3PH_OLD, "check_meter_rate": CHECK_METER_RATE,
+              "retention_pct": RETENTION_PCT, "gst_pct": GST_PCT, "primary_split": PRIMARY_SPLIT}
+    _changed = {k: v for k, v in _vals.items() if abs(float(v) - float(_saved[k])) > 1e-9}
+    st.caption(f"Survey on top: Rs. {INCENTIVE_FLAT_ADDON_1PH:,.0f} per 1PH, Rs. {SURVEY_3PH:,.0f} per 3PH.")
+    if st.button(f"💾 Save pricing ({len(_changed)} changed)" if _changed else "Pricing saved",
+                 type="primary", width="stretch", disabled=not _changed, key="price_save"):
+        if save_settings({k: float(v) for k, v in _vals.items()}):
+            st.success("✅ Pricing saved — billing everywhere now uses it.")
+            st.rerun()
+
+
+STORE_LOGS = {   # label -> (sheet, its columns, shown as)
+    "Inward": ("Inventory", INVENTORY_COLS, {"date": "Date", "type": "Type", "qty": "Qty", "mrn": "MRN No",
+                                            "make": "Make", "location": "Location"}),
+    "Returns": ("Returns", RETURN_COLS, {"date": "Date", "type": "Type", "qty": "Qty", "location": "Location",
+                                         "dc_no": "DC No.", "remarks": "Remarks"}),
+    "Borrow": ("Transfers", TRANSFER_COLS, {"date": "Date", "type": "Type", "qty": "Qty", "from_location": "From",
+                                            "to_location": "To", "dc_no": "DC No.", "remarks": "Remarks"}),
+}
+
+
+def render_store_log(label: str):
+    """One Store log as a table, newest first, with its CSV. The admin edits
+    cells and ticks Delete in place, then saves once; each changed row is
+    found again in the sheet as it is NOW by its contents (another phone may
+    have added rows since). Supervisors see the log read-only — they delete
+    their own same-day entries under "Your entries today"."""
+    sheet, cols, shown = STORE_LOGS[label]
+    raw = get_data(sheet)
+    if raw.empty:
+        st.caption(f"No {label.lower()} entries yet.")
+        return
+    raw = raw.copy()
+    for c in cols:
+        if c not in raw.columns:
+            raw[c] = ""
+    view = raw[list(shown)].astype(str).replace({"nan": ""}).iloc[::-1].rename(columns=shown)
+    view["Qty"] = pd.to_numeric(view["Qty"], errors="coerce").fillna(0).astype(int)
+    download_button(f"⬇ Export {label} CSV", view.to_csv(index=False).encode(), f"{sheet.lower()}.csv",
+                    "text/csv", width="stretch", on_click="ignore", key=f"store_log_csv_{label}")
+    if SUPERVISOR_MODE:
+        render_scroll_table(view.reset_index(drop=True), max_height=420)
+        return
+    _locs = list(dict.fromkeys(list(active_locs) + ["Unspecified"]
+                               + [v for c in ("Location", "From", "To") if c in view.columns for v in view[c] if v]))
+    cfg = {"Type": st.column_config.SelectboxColumn(options=list(dict.fromkeys(list(METER_TYPES) + list(view["Type"])))),
+           "Qty": st.column_config.NumberColumn(min_value=1, step=1)}
+    for c in ("Location", "From", "To"):
+        if c in view.columns:
+            cfg[c] = st.column_config.SelectboxColumn(options=_locs)
+    if "Make" in view.columns:
+        cfg["Make"] = st.column_config.SelectboxColumn(
+            options=list(dict.fromkeys(["Schneider", "Genus", "Other"] + [v for v in view["Make"] if v])))
+    view.insert(0, "Delete", False)
+    ed = st.data_editor(view, width="stretch", hide_index=True, column_config=cfg,
+                        key=f"store_log_{label}_{_sheet_version(sheet)}",
+                        height=dataframe_height(len(view), max_px=420))
+    _vals = [c for c in view.columns if c != "Delete"]
+    dels = list(ed.index[ed["Delete"]])
+    edits = [i for i in ed.index if i not in dels and
+             any(str(ed.at[i, c]) != str(view.at[i, c]) for c in _vals)]
+    if not dels and not edits:
+        return
+    if not st.button(f"💾 Save — {len(edits)} edited, {len(dels)} deleted", type="primary", width="stretch",
+                     key=f"store_log_save_{label}"):
+        return
+    back = {v: k for k, v in shown.items()}
+    for i in edits:
+        if pd.isna(pd.to_datetime(ed.at[i, "Date"], errors="coerce")):
+            st.error(f"❌ '{ed.at[i, 'Date']}' is not a date.")
+            return
+        if label == "Inward" and not str(ed.at[i, "MRN No"]).strip():
+            st.error("❌ MRN No. cannot be empty.")
+            return
+    with store_save():
+        fresh = get_data_unscoped(sheet).copy()
+        for c in cols:
+            if c not in fresh.columns:
+                fresh[c] = ""
+
+        def _find(i):
+            m = pd.Series(True, index=fresh.index)
+            for c in cols:
+                m &= fresh[c].astype(str).replace({"nan": ""}) == str(raw.at[i, c]).replace("nan", "")
+            return fresh.index[m][0] if m.any() else None
+        hits = {i: _find(i) for i in dels + edits}
+        if any(v is None for v in hits.values()):
+            st.error("❌ The log changed on another device — press Refresh and try again.")
+            return
+        for i in edits:
+            for c in _vals:
+                v = ed.at[i, c]
+                fresh.at[hits[i], back[c]] = str(int(v)) if c == "Qty" else str(v).strip()
+        fresh = fresh.drop(index=[hits[i] for i in dels]).reset_index(drop=True)
+        ok = safe_update(sheet, fresh)
+    if ok:
+        st.success(f"✅ {label} log saved.")
+        st.rerun()
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  INSTALLS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -12977,6 +12903,60 @@ with tab_inst:
 with tab_inv:
     if tab_inv.open:   # only the open tab runs (tabs are created with on_change="rerun")
         tab_action_bar("inv")
+        # ── Stock summary ─────────────────────────────────────────────────────
+        sec_hdr("chart", "Live Stock Summary")
+        _ss = stock_summary()
+        stock_tbl = pd.DataFrame([
+            {"Type": t_, "Received": v["received"], "Installed": v["installed"],
+             "Returned": v["returned"], "Pending": v["pending"]} for t_, v in _ss.items()])
+        stock_tbl = pd.concat([stock_tbl, pd.DataFrame([{"Type": "TOTAL", **{c: int(stock_tbl[c].sum())
+                                                                            for c in stock_tbl.columns[1:]}}])],
+                              ignore_index=True)
+        render_scroll_table(stock_tbl)
+        if not SUPERVISOR_MODE:   # Stock Check: admin-only
+            _sc = stock_check()
+            _n_untyped = len(_sc["untyped"])
+            _issues = sum(bool(x) for x in (_n_untyped, len(_sc["inv_bad"]), len(_sc["inv_dup"]), len(_sc["ret_dup"])))
+            if _issues:
+                with st.expander(f"Stock Check — {_issues} thing(s) to look at", expanded=True):
+                    if _n_untyped:
+                        sub_hdr("alert", "Installs with no meter type (not counted)")
+                        render_scroll_table(_sc["untyped"].rename(columns={
+                            "date": "Date", "time": "Time", "installer_id": "Installer", "location": "Location",
+                            "meter_type": "Meter type in file"}), max_height=300)
+                    if not _sc["inv_dup"].empty:
+                        sub_hdr("alert", "Same MRN entered more than once")
+                        render_scroll_table(_sc["inv_dup"][[c for c in INVENTORY_COLS if c in _sc["inv_dup"].columns]]
+                                            .rename(columns=str.title), max_height=300)
+                    if not _sc["inv_bad"].empty:
+                        sub_hdr("alert", "Inward entries the app can't read")
+                        render_scroll_table(_sc["inv_bad"], max_height=300)
+                    if not _sc["ret_dup"].empty:
+                        sub_hdr("alert", "Same return entered more than once")
+                        render_scroll_table(_sc["ret_dup"], max_height=300)
+            else:
+                st.caption("✅ Stock Check — all clear")
+
+        # ── Stock by location ─────────────────────────────────────────────────
+        sub_hdr("pin", "Stock By Location")
+        if not SUPERVISOR_MODE:
+            _unm_n = len(unmatched_location_names())
+            if _unm_n:
+                st.markdown(f'<div class="warn-box"><b>{_unm_n}</b> location name(s) don\'t match a saved '
+                            'location — map them in Admin → Locations.</div>', unsafe_allow_html=True)
+        by_loc = stock_by_location()
+        _neg = by_loc[by_loc["Pending"] < 0] if not by_loc.empty else by_loc
+        if by_loc.empty:
+            st.info("No stock recorded yet.")
+        else:
+            render_scroll_table(by_loc)
+            if not _neg.empty:
+                st.markdown('<div class="danger-box">More installed than received at '
+                            + ", ".join(f'<b>{r["Location"]} {r["Type"]}</b> ({int(r["Pending"]):,})'
+                                        for _, r in _neg.iterrows())
+                            + ' — add the missing inward or record a borrow.</div>', unsafe_allow_html=True)
+
+        st.divider()
         sec_hdr("download", "Inward Store Material")
         with st.form("inv_form", clear_on_submit=True):
             iv1, iv2 = st.columns(2)
@@ -13005,7 +12985,7 @@ with tab_inv:
                                       & (_same_mrn["type"] == itype)] if not _same_mrn.empty else _same_mrn
                 if not _same_mrn.empty:
                     st.warning(f"⚠️ MRN {imrn.strip()} ({itype}) was already entered "
-                               f"{len(_same_mrn)} time(s) — saved anyway; check the Stock Check below if this is a repeat.")
+                               f"{len(_same_mrn)} time(s) — saved anyway; check Stock Check if this is a repeat.")
                 with store_save():
                     _ok = append_rows("Inventory", [_new_row], INVENTORY_COLS)
                     if not _ok:
@@ -13019,9 +12999,6 @@ with tab_inv:
         # ── Return ageing material to store ───────────────────────────────────
         st.divider()
         sec_hdr("upload", "Return Material To Store")
-        st.markdown('<div class="info-box">Material lying in the field that is going back to the store. '
-                    'It comes off pending stock — it is neither installed nor still held.</div>',
-                    unsafe_allow_html=True)
         with st.form("return_form", clear_on_submit=True):
             rv1, rv2 = st.columns(2)
             with rv1:
@@ -13063,142 +13040,13 @@ with tab_inv:
                                + (f" — DC {rdc.strip()}." if rdc.strip() else "."))
                     st.rerun()
 
-        st.divider()
-        sec_hdr("chart", "Live Stock Summary")
-        df_inv_t = get_data("Inventory")   # used by the Inventory Log further down
-        _ss = stock_summary()
-        render_stat_tiles([
-            ("bolt", f"{_ss['1 PH']['received']:,}", "Recv", "1PH", "normal"),
-            ("bolt", f"{_ss['3 PH']['received']:,}", "Recv", "3PH", "normal"),
-            ("upload", f"{_ss['1 PH']['returned'] + _ss['3 PH']['returned']:,}", "Returned", "to store", "normal"),
-            ("box", f"{_ss['1 PH']['pending'] + _ss['3 PH']['pending']:,}", "Pending", "stock", "normal"),
-        ])
-        stock_tbl = pd.DataFrame([
-            {"Type": t, "Received": v["received"], "Installed": v["installed"],
-             "Returned": v["returned"], "Pending": v["pending"]} for t, v in _ss.items()])
-        render_scroll_table(stock_tbl)
-
-        if not SUPERVISOR_MODE:   # Stock Check and its repair button: admin-only
-            # -- Stock Check: why the app can differ from the shelf ---------------
-            _sc = stock_check()
-            _sum1 = lambda df, a, b: int(df[a].sum() + df[b].sum()) if not df.empty else 0
-            _n_short, _n_extra = _sum1(_sc["short"], "s1", "s3"), _sum1(_sc["extra"], "e1", "e3")
-            _n_manual = _sum1(_sc["manual"], "i1", "i3")
-            _n_untyped, _n_unpushed = len(_sc["untyped"]), len(_sc["unpushed"])
-            # Meters in the repeated entries beyond the first of each MRN.
-            _inv_dup_extra = (int(_sc["inv_dup"].assign(_m=_sc["inv_dup"]["mrn"].astype(str).str.strip().str.upper())
-                                  .pipe(lambda d: d[d.duplicated(["_m", "type"])])["qty"].sum())
-                              if not _sc["inv_dup"].empty else 0)
-            _issues = sum(bool(x) for x in (_n_short, _n_extra, _n_untyped, _n_unpushed, len(_sc["inv_bad"]),
-                                            len(_sc["inv_dup"]), len(_sc["ret_dup"])))
-            with st.expander(f"Stock Check — {_issues} thing(s) to look at" if _issues else "Stock Check — all clear",
-                             expanded=bool(_issues)):
-                st.markdown(
-                    '<div class="info-box">Pending = Received − Installed − Returned. Installed is the '
-                    '<b>Installations</b> sheet (1PH + 3PH). Each line below is a way the app can differ from '
-                    'the meters actually in stock, worked out from your data.</div>', unsafe_allow_html=True)
-                render_scroll_table(pd.DataFrame([
-                    {"Check": "Logged installs missing from Installations", "Meters": _n_short,
-                     "Effect on app stock": "Too high" if _n_short else "—"},
-                    {"Check": "Logged installs with no meter type (not counted)", "Meters": _n_untyped,
-                     "Effect on app stock": "Too high" if _n_untyped else "—"},
-                    {"Check": "Analytics installs not recorded yet (held for review)", "Meters": _n_unpushed,
-                     "Effect on app stock": "Too high until pushed" if _n_unpushed else "—"},
-                    {"Check": "Same MRN entered more than once", "Meters": _inv_dup_extra,
-                     "Effect on app stock": "Too high, if a repeat" if _inv_dup_extra else "—"},
-                    {"Check": "Inward entries with unreadable qty / type", "Meters": len(_sc["inv_bad"]),
-                     "Effect on app stock": "Not counted" if len(_sc["inv_bad"]) else "—"},
-                    {"Check": "Installations above the install log", "Meters": _n_extra,
-                     "Effect on app stock": "Too low, if double counted" if _n_extra else "—"},
-                    {"Check": "Same return entered more than once", "Meters": len(_sc["ret_dup"]),
-                     "Effect on app stock": "Too low, if a repeat" if len(_sc["ret_dup"]) else "—"},
-                    {"Check": "Manual entries (no uploads behind them)", "Meters": _n_manual,
-                     "Effect on app stock": "Counted — check they are real" if _n_manual else "—"},
-                ]))
-                if _n_short:
-                    sub_hdr("alert", "Logged installs missing from Installations")
-                    render_scroll_table(_sc["short"].rename(columns={
-                        "date": "Date", "tech_name": "Technician", "location": "Location",
-                        "l1": "Log 1PH", "l3": "Log 3PH", "i1": "Inst 1PH", "i3": "Inst 3PH",
-                        "s1": "Missing 1PH", "s3": "Missing 3PH"})[
-                        ["Date", "Technician", "Location", "Log 1PH", "Inst 1PH", "Missing 1PH",
-                         "Log 3PH", "Inst 3PH", "Missing 3PH"]], max_height=360)
-                    st.caption("Each install is in the install log (one row per meter, with its time) but was never "
-                               "added to the Installations count — usually a save that stopped half-way.")
-                    if st.button(f"Add the {_n_short:,} missing install(s) to Installations", type="primary",
-                                 width="stretch", key="stock_add_missing"):
-                        _added = add_missing_installs(_sc["short"])
-                        if _added > 0:
-                            st.success(f"✅ Added {_added:,} install(s) to Installations — stock updated.")
-                            st.rerun()
-                        elif _added < 0:
-                            st.error("❌ Couldn't save Installations — try again.")
-                if _n_untyped:
-                    sub_hdr("alert", "Logged installs with no meter type")
-                    render_scroll_table(_sc["untyped"].rename(columns={
-                        "date": "Date", "time": "Time", "installer_id": "Installer", "location": "Location",
-                        "meter_type": "Meter type in file"}), max_height=300)
-                    st.caption("Not counted as 1PH or 3PH, so stock still holds them. Re-upload the MI file that "
-                               "has their meter type, or tell me what these meter-type values mean.")
-                if _n_unpushed:
-                    st.caption(f"{_n_unpushed:,} install(s) in Analytics aren't in the install log yet — open "
-                               "Analytics → Install Log to review the held ones (new installs are recorded automatically).")
-                if not _sc["inv_dup"].empty:
-                    sub_hdr("alert", "Same MRN entered more than once")
-                    render_scroll_table(_sc["inv_dup"][[c for c in INVENTORY_COLS if c in _sc["inv_dup"].columns]]
-                                        .rename(columns=str.title), max_height=300)
-                    st.caption("If one MRN was really received in two lots this is fine; if it is a repeat, delete "
-                               "the extra entry in the Inventory Log below.")
-                if not _sc["inv_bad"].empty:
-                    sub_hdr("alert", "Inward entries the app can't read")
-                    render_scroll_table(_sc["inv_bad"], max_height=300)
-                    st.caption("Quantity must be a number above 0 and Type 1 PH or 3 PH — fix these in the sheet "
-                               "or the Inventory Log below.")
-                if _n_extra:
-                    st.caption(f"Installations is {_n_extra:,} above the install log on "
-                               f"{len(_sc['extra'])} technician-day(s) — review and fix with Admin → Data "
-                               "Maintenance → Duplicate check (section 4).")
-                if not _sc["ret_dup"].empty:
-                    sub_hdr("alert", "Same return entered more than once")
-                    render_scroll_table(_sc["ret_dup"], max_height=300)
-
-        sub_hdr("pin", "Stock By Location")
-
-        # -- Location names that match no saved location ---------------------
-        # Installs come from the MDM export with its own spelling
-        # ("YENAMALAKUDURU", "MANGALAGIRI-D2"). Capitals, spaces and dashes are
-        # already ignored; anything still unmatched is a spelling difference
-        # or a location not set up yet, and is asked about here.
-        if not SUPERVISOR_MODE:
-            _unm_n = len(unmatched_location_names())
-            if _unm_n:
-                st.markdown(f'<div class="warn-box"><b>{_unm_n}</b> location name(s) in your data don\'t match a '
-                            'saved location — map them in Admin → Locations → Location names.</div>',
-                            unsafe_allow_html=True)
-
-        by_loc = stock_by_location()
-        if by_loc.empty:
-            st.info("No stock recorded yet.")
-        else:
-            render_scroll_table(by_loc)
-            if (by_loc["Location"] == "Unspecified").any():
-                st.markdown('<div class="warn-box">Stock received before locations were recorded shows as '
-                            '<b>Unspecified</b>. New inward entries carry their location.</div>',
-                            unsafe_allow_html=True)
-            _neg = by_loc[by_loc["Pending"] < 0]
-            if not _neg.empty:
-                st.markdown(
-                    '<div class="danger-box">More installed than received at '
-                    + ", ".join(f'<b>{r["Location"]} {r["Type"]}</b> ({int(r["Pending"]):,})' for _, r in _neg.iterrows())
-                    + '. Check that every inward entry for these locations has been entered, with its location '
-                    '— or, if the material was borrowed from another site, record it below.</div>',
-                    unsafe_allow_html=True)
-
+        if not by_loc.empty:
+            st.divider()
             # -- Borrow stock from another site ------------------------------
             # When a customer's store at a site has no material, it is borrowed
             # from another site (often Payakapuram). Recording it moves the
             # pending stock between the two sites.
-            sub_hdr("truck", "Borrow Stock From Another Site")
+            sec_hdr("truck", "Borrow Stock From Another Site")
             if "borrow_version" not in st.session_state:
                 st.session_state["borrow_version"] = 0
             _bv = st.session_state["borrow_version"]
@@ -13315,37 +13163,6 @@ with tab_inv:
                                            + (f" — DC {b_dc.strip()}." if b_dc.strip() else "."))
                                 st.rerun()
 
-        _tr_log = load_transfers()
-        if not _tr_log.empty:
-            with st.expander(f"Borrow log ({len(_tr_log)})"):
-                _tl = _tr_log.iloc[::-1].copy()
-                _tl.insert(0, "Delete", False)
-                _tl = _tl.rename(columns={"date": "Date", "type": "Type", "qty": "Qty",
-                                          "from_location": "From", "to_location": "To",
-                                          "dc_no": "DC No.", "remarks": "Remarks"})
-                if SUPERVISOR_MODE:
-                    _tl = _tl.drop(columns=["Delete"])
-                    render_scroll_table(_tl, max_height=360)
-                    _tld = _tl.assign(Delete=False)
-                else:
-                    _tld = st.data_editor(_tl, width="stretch", hide_index=True,
-                                          disabled=[c for c in _tl.columns if c != "Delete"],
-                                          key=f"borrow_log_{_sheet_version('Transfers')}",
-                                          height=dataframe_height(len(_tl), max_px=360))
-                _nd = int(_tld["Delete"].sum())
-                if _nd and st.button(f"🗑️ Delete {_nd} entr{'y' if _nd == 1 else 'ies'}",
-                                     width="stretch", key="borrow_log_delete"):
-                    _keep_idx = _tld.index[~_tld["Delete"]]
-                    if safe_update("Transfers", _tr_log.loc[sorted(_keep_idx), TRANSFER_COLS]):
-                        st.success("✅ Borrow log updated.")
-                        st.rerun()
-
-        _ret_log = load_returns()
-        if not _ret_log.empty:
-            with st.expander(f"Returns log ({len(_ret_log)})"):
-                render_scroll_table(_ret_log.rename(columns={
-                    "date": "Date", "type": "Type", "qty": "Qty", "location": "Location",
-                    "dc_no": "DC No.", "remarks": "Remarks"}).iloc[::-1])
 
         # -- Own entries: a supervisor can delete what they saved today -------
         if SUPERVISOR_MODE:
@@ -13380,126 +13197,12 @@ with tab_inv:
                     elif not _m.any():
                         st.error("❌ That entry has already changed — press Refresh.")
 
-        sec_hdr("list", "Inventory Log")
-        if df_inv_t.empty:
-            st.info("No inventory entries yet.")
-        else:
-            inv_sorted = df_inv_t.iloc[::-1].reset_index(drop=True)
-            inv_exp = inv_sorted.rename(columns={"date": "Date", "type": "Type", "qty": "Qty", "mrn": "MRN No", "make": "Make"})
-            download_button("⬇ Export Inventory CSV", inv_exp.to_csv(index=False).encode(), "inventory.csv", "text/csv", width="stretch", on_click="ignore")
-
-            ITEMS_INV = 10
-            total_inv_p = max(1, math.ceil(len(inv_sorted) / ITEMS_INV))
-            inv_page = st.number_input(f"Page (1–{total_inv_p})", min_value=1, max_value=total_inv_p, step=1, value=1, key="inv_page")
-            si, ei = (inv_page - 1) * ITEMS_INV, inv_page * ITEMS_INV
-            render_scroll_table(inv_sorted.iloc[si:ei])
-
-            inv_options_map = {}
-            for idx, row in inv_sorted.iterrows():
-                # Supervisors delete their own same-day entries above instead.
-                if SUPERVISOR_MODE:
-                    break
-                label = f"#{idx+1}  {row.get('date','')} | {row.get('type','')} | MRN:{row.get('mrn','')}"
-                inv_options_map[label] = idx
-
-            inv_target = (st.selectbox("Select Inventory Record", ["-- Select --"] + list(inv_options_map.keys()), key="inv_sel")
-                          if not SUPERVISOR_MODE else "-- Select --")
-
-            if inv_target != "-- Select --":
-                inv_idx = inv_options_map[inv_target]
-                inv_row = inv_sorted.iloc[inv_idx]
-
-                st.markdown(f'<div class="warn-box">⚠️ Modifying: MRN <b>{inv_row.get("mrn","")}</b> — {inv_row.get("type","")} ({inv_row.get("make","")})</div>', unsafe_allow_html=True)
-                with st.form("edit_inv_form"):
-                    ei1, ei2, ei3 = st.columns(3)
-                    with ei1:
-                        _d0 = pd.to_datetime(inv_row.get("date", ""), errors="coerce")
-                        e_date = st.date_input("Received Date", value=_d0.date() if not pd.isna(_d0) else today_ist())
-                        e_qty = st.number_input("Quantity", min_value=1, step=1,
-                                                value=max(1, int(to_number(pd.Series([inv_row.get("qty", 1)])).iloc[0])))
-                    with ei2:
-                        _t0 = stock_type(inv_row.get("type", ""))
-                        e_type = st.selectbox("Type", METER_TYPES,
-                                              index=list(METER_TYPES).index(_t0) if _t0 in METER_TYPES else 0)
-                        e_mrn = st.text_input("MRN No.", value=str(inv_row.get("mrn", "")))
-                    with ei3:
-                        make_opts = ["Schneider", "Genus", "Other"]
-                        curr_make = inv_row.get("make", "Schneider")
-                        mk_idx = make_opts.index(curr_make) if curr_make in make_opts else 0
-                        e_make = st.selectbox("Make", make_opts, index=mk_idx)
-                        _loc_opts = list(dict.fromkeys(list(active_locs) + ["Unspecified"]))
-                        _l0 = str(inv_row.get("location", "")).strip() or "Unspecified"
-                        _l0 = next((l for l in _loc_opts if _loc_key(l) == _loc_key(_l0)), _l0)
-                        if _l0 not in _loc_opts:
-                            _loc_opts.append(_l0)
-                        e_loc = st.selectbox("Location", _loc_opts, index=_loc_opts.index(_l0),
-                                             help="Set the real location on stock received before locations were recorded.")
-                    ib1, ib2 = st.columns(2)
-                    with ib1:
-                        inv_do_update = st.form_submit_button("✏️ Update", type="primary")
-                    with ib2:
-                        inv_do_delete = st.form_submit_button("🗑️ Delete")
-
-                # The row is found again in the sheet as it is NOW, by its
-                # contents — not by its position in this phone's copy, which
-                # pointed at the wrong row once another phone had added one.
-                _sig = {c: str(inv_row.get(c, "")) for c in INVENTORY_COLS if c in inv_sorted.columns}
-
-                def _find_inv_row(df):
-                    if df.empty:
-                        return None
-                    m_ = pd.Series(True, index=df.index)
-                    for c_, v_ in _sig.items():
-                        if c_ in df.columns:
-                            m_ &= df[c_].astype(str) == v_
-                    return df.index[m_][0] if m_.any() else None
-
-                if inv_do_update:
-                    if not e_mrn.strip():
-                        st.error("❌ MRN No. cannot be empty.")
-                    else:
-                        orig_df = get_data_unscoped("Inventory").copy()
-                        ri = _find_inv_row(orig_df)
-                        if ri is None:
-                            st.error("❌ This entry was changed on another device — press Refresh and try again.")
-                        else:
-                            for c_ in INVENTORY_COLS:
-                                if c_ not in orig_df.columns:
-                                    orig_df[c_] = ""
-                            orig_df.loc[ri, ["date", "type", "qty", "mrn", "make", "location"]] = [
-                                str(e_date), e_type, str(int(e_qty)), e_mrn.strip(), e_make, e_loc]
-                            if safe_update("Inventory", orig_df):
-                                st.success("✅ Inventory entry updated.")
-                                st.rerun()
-
-                if inv_do_delete:
-                    st.session_state["pending_inv_del"] = _sig
-
-            if "pending_inv_del" in st.session_state:
-                _del_sig = st.session_state["pending_inv_del"]
-                st.markdown('<div class="warn-box">⚠️ Confirm delete? This will affect stock totals.</div>', unsafe_allow_html=True)
-                iy, inv_n = st.columns(2)
-                with iy:
-                    if st.button("✅ Yes, Delete", key="conf_del_inv"):
-                        orig_df = get_data_unscoped("Inventory").copy()
-                        _m = pd.Series(isinstance(_del_sig, dict), index=orig_df.index)
-                        if isinstance(_del_sig, dict):
-                            for c_, v_ in _del_sig.items():
-                                if c_ in orig_df.columns:
-                                    _m &= orig_df[c_].astype(str) == v_
-                        if not _m.any():
-                            del st.session_state["pending_inv_del"]
-                            st.error("❌ This entry was changed on another device — press Refresh and try again.")
-                        else:
-                            orig_df = orig_df.drop(index=orig_df.index[_m][0]).reset_index(drop=True)
-                            if safe_update("Inventory", orig_df):
-                                del st.session_state["pending_inv_del"]
-                                st.success("Deleted.")
-                                st.rerun()
-                with inv_n:
-                    if st.button("❌ Cancel", key="cancel_del_inv"):
-                        del st.session_state["pending_inv_del"]
-                        st.rerun()
+        # ── Logs: inward, returns, borrow — one place, one style ───────────────
+        st.divider()
+        sec_hdr("list", "Logs")
+        _lg_pick = st.radio("Log", list(STORE_LOGS), horizontal=True, key="store_log_pick",
+                            label_visibility="collapsed")
+        render_store_log(_lg_pick)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  MATERIAL HANDOVER (old meters)
@@ -14635,6 +14338,13 @@ with tab_admin:
                 st.rerun()
 
         st.divider()
+        sec_hdr("rupee", "Pricing")
+        render_pricing_settings()
+        st.divider()
+        sec_hdr("wallet", "Expense setup")
+        render_expense_setup()
+
+        st.divider()
 
         subtab_tech, subtab_sup, subtab_loc = st.tabs(["👷 Technicians", "🧑‍💼 Supervisors", "📍 Locations"])
 
@@ -15461,6 +15171,27 @@ with tab_admin:
                         st.success(f"✅ Removed {removed} duplicate record(s) from the Map.")
                         st.rerun()
 
+
+            st.markdown("**6. Install log rows missing from Installations**")
+            _sc = stock_check()
+            _n_short = int(_sc["short"]["s1"].sum() + _sc["short"]["s3"].sum()) if not _sc["short"].empty else 0
+            if not _n_short:
+                st.caption("✅ Every install in the log is counted in Installations.")
+            if _n_short:
+                render_scroll_table(_sc["short"].rename(columns={
+                    "date": "Date", "tech_name": "Technician", "location": "Location",
+                    "l1": "Log 1PH", "l3": "Log 3PH", "i1": "Inst 1PH", "i3": "Inst 3PH",
+                    "s1": "Missing 1PH", "s3": "Missing 3PH"})[
+                    ["Date", "Technician", "Location", "Log 1PH", "Inst 1PH", "Missing 1PH",
+                     "Log 3PH", "Inst 3PH", "Missing 3PH"]], max_height=360)
+                if st.button(f"Add the {_n_short:,} missing install(s) to Installations", type="primary",
+                             width="stretch", key="stock_add_missing"):
+                    _added = add_missing_installs(_sc["short"])
+                    if _added > 0:
+                        st.success(f"✅ Added {_added:,} install(s) to Installations — stock updated.")
+                        st.rerun()
+                    elif _added < 0:
+                        st.error("❌ Couldn't save Installations — try again.")
 
         # ── Analytics reset (PIN) ────────────────────────────────────────────
         with st.expander("🔒 Reset Analytics Data (start a new day)"):
